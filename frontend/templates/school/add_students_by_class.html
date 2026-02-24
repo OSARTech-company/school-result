@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Add Students by Class - Student Score Management System</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f5f7fa; }
+        .container { max-width: 900px; margin: 0 auto; padding: 20px; }
+        .header { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); color: white; padding: 20px; border-radius: 10px; margin-bottom: 30px; }
+        .header h1 { margin: 0; font-size: 1.8rem; }
+        .header .back { float: right; color: white; text-decoration: none; }
+        .card { background: white; border-radius: 10px; padding: 25px; margin-bottom: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .card h2 { margin-top: 0; color: #2c3e50; font-size: 1.4rem; border-bottom: 2px solid #3498db; padding-bottom: 10px; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; color: #555; font-weight: 500; }
+        .form-group input, .form-group select, .form-group textarea { 
+            width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 5px; font-size: 1rem; 
+        }
+        .form-group textarea { height: 200px; resize: vertical; font-family: monospace; }
+        .btn { padding: 12px 24px; border: none; border-radius: 5px; cursor: pointer; font-size: 1rem; font-weight: 500; display: inline-block; text-decoration: none; }
+        .btn-primary { background: #3498db; color: white; }
+        .btn-primary:hover { background: #2980b9; }
+        .btn-success { background: #27ae60; color: white; }
+        .btn-success:hover { background: #219a52; }
+        .flash { padding: 15px; margin-bottom: 20px; border-radius: 5px; }
+        .flash.success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .flash.error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .help-text { font-size: 0.9em; color: #7f8c8d; margin-top: 5px; display: block; }
+        .preview-section { background: #f8f9fa; padding: 20px; border-radius: 8px; margin-top: 20px; }
+        .preview-section h3 { margin-top: 0; color: #2c3e50; }
+        .student-list { list-style: none; padding: 0; }
+        .student-list li { 
+            padding: 10px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; 
+        }
+        .student-list li:last-child { border-bottom: none; }
+        .student-id { font-weight: bold; color: #3498db; }
+        .entry-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+        .entry-table th, .entry-table td { border: 1px solid #e1e1e1; padding: 10px; text-align: left; }
+        .entry-table th { background: #f8f9fa; font-weight: 600; }
+        .entry-table input { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; }
+        .small-btn { padding: 8px 12px; border: none; border-radius: 4px; cursor: pointer; }
+        .add-row-btn { background: #3498db; color: white; }
+        .remove-row-btn { background: #e74c3c; color: white; }
+        .row-controls { display: flex; gap: 10px; align-items: center; margin: 10px 0; flex-wrap: wrap; }
+        .row-controls input { width: 120px; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
+        .list-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        .list-table th, .list-table td { border: 1px solid #e6e6e6; padding: 10px; text-align: left; }
+        .list-table th { background: #f8f9fa; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1><i class="fas fa-users"></i> Add Students by Class</h1>
+            <a href="{{ url_for('school_admin_dashboard') }}" class="back"><i class="fas fa-arrow-left"></i> Back to Dashboard</a>
+        </div>
+        
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="flash {{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        
+        <div class="card">
+            <h2><i class="fas fa-list"></i> View Class List</h2>
+            <form method="GET">
+                <div class="form-group">
+                    <label for="class_view">Select Class:</label>
+                    <select id="class_view" name="class">
+                        <option value="">Select Class...</option>
+                        {% for cls in class_options %}
+                        <option value="{{ cls }}" {% if selected_class == cls %}selected{% endif %}>{{ cls }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <button type="submit" class="btn btn-primary"><i class="fas fa-eye"></i> View List</button>
+            </form>
+            {% if selected_class %}
+                <div style="margin-top: 15px;">
+                    <h3>{{ selected_class }} Student List</h3>
+                    <table class="list-table">
+                        <thead>
+                            <tr>
+                                <th>Student ID</th>
+                                <th>Name</th>
+                                <th>Term</th>
+                                <th>Stream</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for s in class_students %}
+                            <tr>
+                                <td>{{ s.student_id }}</td>
+                                <td>{{ s.firstname }}</td>
+                                <td>{{ s.term }}</td>
+                                <td>{{ s.stream }}</td>
+                            </tr>
+                            {% else %}
+                            <tr><td colspan="4">No students in this class yet.</td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% endif %}
+        </div>
+
+        <div class="card">
+            <h2><i class="fas fa-plus-circle"></i> Add Multiple Students</h2>
+            <p class="help-text">Only Class, Term, and Student Names are needed here. Subjects are loaded automatically from Class Subjects configuration. For SS classes, school admin can add names first, then teacher allocates stream and optional subjects. If class list already exists, only newly enrolled students can be added.</p>
+            <form method="POST">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                
+                <div class="form-group">
+                    <label for="classname">Class Name:</label>
+                    <input type="text" id="classname" name="classname" placeholder="e.g., JSS1, SS1, JSS2" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="term">Term:</label>
+                    <select id="term" name="term" required>
+                        <option value="First Term">First Term</option>
+                        <option value="Second Term">Second Term</option>
+                        <option value="Third Term">Third Term</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label>Students Table (Name + Optional Reg No.):</label>
+                    <div class="row-controls">
+                        <label for="rowsToAdd" style="margin:0;">How many rows to add:</label>
+                        <input type="number" id="rowsToAdd" min="1" max="200" value="5">
+                        <button type="button" class="small-btn add-row-btn" onclick="setExactRows()">Set Rows</button>
+                    </div>
+                    <table class="entry-table" id="studentsTable">
+                        <thead>
+                            <tr>
+                                <th style="width: 55%;">Student Name</th>
+                                <th style="width: 35%;">Reg No. (Optional)</th>
+                                <th style="width: 10%;">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="studentsBody">
+                            <tr>
+                                <td><input type="text" name="student_name[]" placeholder="e.g. John Doe" required></td>
+                                <td><input type="text" name="reg_no[]" placeholder="Leave blank to auto-generate"></td>
+                                <td><button type="button" class="small-btn remove-row-btn" onclick="removeRow(this)">X</button></td>
+                            </tr>
+                            <tr>
+                                <td><input type="text" name="student_name[]" placeholder="e.g. Jane Smith"></td>
+                                <td><input type="text" name="reg_no[]" placeholder="Leave blank to auto-generate"></td>
+                                <td><button type="button" class="small-btn remove-row-btn" onclick="removeRow(this)">X</button></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    <div style="margin-top:10px;">
+                        <button type="button" class="small-btn add-row-btn" onclick="addRow()">+ Add Row</button>
+                    </div>
+                    <span class="help-text">If Reg No. is empty, ID will be auto-generated in the existing format.</span>
+                </div>
+                
+                <button type="submit" class="btn btn-success"><i class="fas fa-plus"></i> Add All Students</button>
+            </form>
+        </div>
+        
+        {% if added_students %}
+        <div class="card">
+            <h2><i class="fas fa-check-circle"></i> Successfully Added Students</h2>
+            <ul class="student-list">
+                {% for student in added_students %}
+                <li>
+                    <span class="student-id">{{ student.student_id }}</span>
+                    <span>{{ student.firstname }}</span>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+    </div>
+    <script>
+        function buildRowHtml() {
+            return `
+                <td><input type="text" name="student_name[]" placeholder="e.g. Student Name"></td>
+                <td><input type="text" name="reg_no[]" placeholder="Leave blank to auto-generate"></td>
+                <td><button type="button" class="small-btn remove-row-btn" onclick="removeRow(this)">X</button></td>
+            `;
+        }
+
+        function addRow() {
+            const tbody = document.getElementById('studentsBody');
+            const tr = document.createElement('tr');
+            tr.innerHTML = buildRowHtml();
+            tbody.appendChild(tr);
+        }
+
+        function setExactRows() {
+            const input = document.getElementById('rowsToAdd');
+            const count = Math.max(1, Math.min(200, parseInt(input.value || '1', 10)));
+            const tbody = document.getElementById('studentsBody');
+            const current = tbody.rows.length;
+
+            if (current < count) {
+                for (let i = current; i < count; i++) {
+                    addRow();
+                }
+                return;
+            }
+
+            while (tbody.rows.length > count) {
+                tbody.deleteRow(tbody.rows.length - 1);
+            }
+        }
+
+        document.getElementById('rowsToAdd').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                setExactRows();
+            }
+        });
+
+        // Keep existing helper for manual single-row add.
+        function addRows(count) {
+            for (let i = 0; i < count; i++) {
+                addRow();
+            }
+        }
+
+        function removeRow(btn) {
+            const tbody = document.getElementById('studentsBody');
+            if (tbody.rows.length <= 1) {
+                return;
+            }
+            btn.closest('tr').remove();
+        }
+    </script>
+</body>
+</html>

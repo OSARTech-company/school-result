@@ -1,0 +1,245 @@
+2026-02-24 21:23:24 WAT LOG:  database system was interrupted; last known up at 2026-02-24 21:15:00 WAT
+2026-02-24 21:23:25 WAT LOG:  database system was not properly shut down; automatic recovery in progress
+2026-02-24 21:23:25 WAT LOG:  redo starts at 0/5121820
+2026-02-24 21:23:25 WAT LOG:  invalid record length at 0/5121960: expected at least 24, got 0
+2026-02-24 21:23:25 WAT LOG:  redo done at 0/5121928 system usage: CPU: user: 0.00 s, system: 0.00 s, elapsed: 0.00 s
+2026-02-24 21:23:25 WAT LOG:  checkpoint starting: end-of-recovery immediate wait
+2026-02-24 21:23:25 WAT LOG:  checkpoint complete: wrote 0 buffers (0.0%), wrote 3 SLRU buffers; 0 WAL file(s) added, 0 removed, 0 recycled; write=0.005 s, sync=0.022 s, total=0.039 s; sync files=2, longest=0.021 s, average=0.011 s; distance=0 kB, estimate=0 kB; lsn=0/5121960, redo lsn=0/5121960
+2026-02-24 23:44:13 WAT ERROR:  column "terms_accepted" of relation "users" already exists
+2026-02-24 23:44:13 WAT STATEMENT:  ALTER TABLE users ADD COLUMN terms_accepted INTEGER DEFAULT 0
+2026-02-24 23:44:13 WAT ERROR:  column "current_login_at" of relation "users" already exists
+2026-02-24 23:44:13 WAT STATEMENT:  ALTER TABLE users ADD COLUMN current_login_at TIMESTAMP
+2026-02-24 23:44:13 WAT ERROR:  column "last_login_at" of relation "users" already exists
+2026-02-24 23:44:13 WAT STATEMENT:  ALTER TABLE users ADD COLUMN last_login_at TIMESTAMP
+2026-02-24 23:44:13 WAT ERROR:  column "operations_enabled" of relation "schools" already exists
+2026-02-24 23:44:13 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN operations_enabled INTEGER DEFAULT 1
+2026-02-24 23:44:13 WAT ERROR:  column "teacher_operations_enabled" of relation "schools" already exists
+2026-02-24 23:44:13 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN teacher_operations_enabled INTEGER DEFAULT 1
+2026-02-24 23:44:13 WAT ERROR:  column "grade_a_min" of relation "schools" already exists
+2026-02-24 23:44:13 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN grade_a_min INTEGER DEFAULT 70
+2026-02-24 23:44:13 WAT ERROR:  column "grade_b_min" of relation "schools" already exists
+2026-02-24 23:44:13 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN grade_b_min INTEGER DEFAULT 60
+2026-02-24 23:44:13 WAT ERROR:  column "grade_c_min" of relation "schools" already exists
+2026-02-24 23:44:13 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN grade_c_min INTEGER DEFAULT 50
+2026-02-24 23:44:13 WAT ERROR:  column "grade_d_min" of relation "schools" already exists
+2026-02-24 23:44:13 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN grade_d_min INTEGER DEFAULT 40
+2026-02-24 23:44:13 WAT ERROR:  column "pass_mark" of relation "schools" already exists
+2026-02-24 23:44:13 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN pass_mark INTEGER DEFAULT 50
+2026-02-24 23:44:13 WAT ERROR:  column "ss_ranking_mode" of relation "schools" already exists
+2026-02-24 23:44:13 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN ss_ranking_mode TEXT DEFAULT 'together'
+2026-02-24 23:44:13 WAT ERROR:  column "ss1_stream_mode" of relation "schools" already exists
+2026-02-24 23:44:13 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN ss1_stream_mode TEXT DEFAULT 'separate'
+2026-02-24 23:44:13 WAT ERROR:  column "location" of relation "schools" already exists
+2026-02-24 23:44:13 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN location TEXT
+2026-02-24 23:44:13 WAT ERROR:  column "phone" of relation "schools" already exists
+2026-02-24 23:44:13 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN phone TEXT
+2026-02-24 23:44:13 WAT ERROR:  column "email" of relation "schools" already exists
+2026-02-24 23:44:13 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN email TEXT
+2026-02-24 23:44:13 WAT ERROR:  column "principal_name" of relation "schools" already exists
+2026-02-24 23:44:13 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN principal_name TEXT
+2026-02-24 23:44:13 WAT ERROR:  column "motto" of relation "schools" already exists
+2026-02-24 23:44:13 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN motto TEXT
+2026-02-24 23:44:13 WAT ERROR:  column "updated_at" of relation "schools" already exists
+2026-02-24 23:44:13 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+2026-02-24 23:44:13 WAT ERROR:  column "principal_signature_image" of relation "schools" already exists
+2026-02-24 23:44:13 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN principal_signature_image TEXT
+2026-02-24 23:44:13 WAT ERROR:  column "school_id" of relation "schools" already exists
+2026-02-24 23:44:13 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN school_id TEXT
+2026-02-24 23:44:13 WAT ERROR:  column "signature_image" of relation "teachers" already exists
+2026-02-24 23:44:13 WAT STATEMENT:  ALTER TABLE teachers ADD COLUMN signature_image TEXT
+2026-02-24 23:44:13 WAT ERROR:  column "academic_year" of relation "result_publications" already exists
+2026-02-24 23:44:13 WAT STATEMENT:  ALTER TABLE result_publications ADD COLUMN academic_year TEXT DEFAULT ''
+2026-02-24 23:44:13 WAT ERROR:  column "teacher_name" of relation "result_publications" already exists
+2026-02-24 23:44:13 WAT STATEMENT:  ALTER TABLE result_publications ADD COLUMN teacher_name TEXT DEFAULT ''
+2026-02-24 23:44:13 WAT ERROR:  column "principal_name" of relation "result_publications" already exists
+2026-02-24 23:44:13 WAT STATEMENT:  ALTER TABLE result_publications ADD COLUMN principal_name TEXT DEFAULT ''
+2026-02-24 23:44:13 WAT ERROR:  column "teacher_comment" of relation "published_student_results" already exists
+2026-02-24 23:44:13 WAT STATEMENT:  ALTER TABLE published_student_results ADD COLUMN teacher_comment TEXT
+2026-02-24 23:44:13 WAT ERROR:  column "academic_year" of relation "published_student_results" already exists
+2026-02-24 23:44:13 WAT STATEMENT:  ALTER TABLE published_student_results ADD COLUMN academic_year TEXT
+2026-02-24 23:44:13 WAT ERROR:  there is no unique constraint matching given keys for referenced table "schools"
+2026-02-24 23:44:13 WAT STATEMENT:  ALTER TABLE students ADD CONSTRAINT fk_students_school FOREIGN KEY (school_id) REFERENCES schools(school_id) ON DELETE CASCADE
+2026-02-24 23:44:13 WAT ERROR:  there is no unique constraint matching given keys for referenced table "schools"
+2026-02-24 23:44:13 WAT STATEMENT:  ALTER TABLE teachers ADD CONSTRAINT fk_teachers_school FOREIGN KEY (school_id) REFERENCES schools(school_id) ON DELETE CASCADE
+2026-02-24 23:44:13 WAT ERROR:  there is no unique constraint matching given keys for referenced table "schools"
+2026-02-24 23:44:13 WAT STATEMENT:  ALTER TABLE class_assignments ADD CONSTRAINT fk_class_assignments_school FOREIGN KEY (school_id) REFERENCES schools(school_id) ON DELETE CASCADE
+2026-02-24 23:44:15 WAT ERROR:  column "terms_accepted" of relation "users" already exists
+2026-02-24 23:44:15 WAT STATEMENT:  ALTER TABLE users ADD COLUMN terms_accepted INTEGER DEFAULT 0
+2026-02-24 23:44:15 WAT ERROR:  column "current_login_at" of relation "users" already exists
+2026-02-24 23:44:15 WAT STATEMENT:  ALTER TABLE users ADD COLUMN current_login_at TIMESTAMP
+2026-02-24 23:44:15 WAT ERROR:  column "last_login_at" of relation "users" already exists
+2026-02-24 23:44:15 WAT STATEMENT:  ALTER TABLE users ADD COLUMN last_login_at TIMESTAMP
+2026-02-24 23:44:15 WAT ERROR:  column "operations_enabled" of relation "schools" already exists
+2026-02-24 23:44:15 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN operations_enabled INTEGER DEFAULT 1
+2026-02-24 23:44:15 WAT ERROR:  column "teacher_operations_enabled" of relation "schools" already exists
+2026-02-24 23:44:15 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN teacher_operations_enabled INTEGER DEFAULT 1
+2026-02-24 23:44:15 WAT ERROR:  column "grade_a_min" of relation "schools" already exists
+2026-02-24 23:44:15 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN grade_a_min INTEGER DEFAULT 70
+2026-02-24 23:44:15 WAT ERROR:  column "grade_b_min" of relation "schools" already exists
+2026-02-24 23:44:15 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN grade_b_min INTEGER DEFAULT 60
+2026-02-24 23:44:15 WAT ERROR:  column "grade_c_min" of relation "schools" already exists
+2026-02-24 23:44:15 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN grade_c_min INTEGER DEFAULT 50
+2026-02-24 23:44:15 WAT ERROR:  column "grade_d_min" of relation "schools" already exists
+2026-02-24 23:44:15 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN grade_d_min INTEGER DEFAULT 40
+2026-02-24 23:44:15 WAT ERROR:  column "pass_mark" of relation "schools" already exists
+2026-02-24 23:44:15 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN pass_mark INTEGER DEFAULT 50
+2026-02-24 23:44:15 WAT ERROR:  column "ss_ranking_mode" of relation "schools" already exists
+2026-02-24 23:44:15 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN ss_ranking_mode TEXT DEFAULT 'together'
+2026-02-24 23:44:15 WAT ERROR:  column "ss1_stream_mode" of relation "schools" already exists
+2026-02-24 23:44:15 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN ss1_stream_mode TEXT DEFAULT 'separate'
+2026-02-24 23:44:15 WAT ERROR:  column "location" of relation "schools" already exists
+2026-02-24 23:44:15 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN location TEXT
+2026-02-24 23:44:15 WAT ERROR:  column "phone" of relation "schools" already exists
+2026-02-24 23:44:15 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN phone TEXT
+2026-02-24 23:44:15 WAT ERROR:  column "email" of relation "schools" already exists
+2026-02-24 23:44:15 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN email TEXT
+2026-02-24 23:44:15 WAT ERROR:  column "principal_name" of relation "schools" already exists
+2026-02-24 23:44:15 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN principal_name TEXT
+2026-02-24 23:44:15 WAT ERROR:  column "motto" of relation "schools" already exists
+2026-02-24 23:44:15 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN motto TEXT
+2026-02-24 23:44:15 WAT ERROR:  column "updated_at" of relation "schools" already exists
+2026-02-24 23:44:15 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+2026-02-24 23:44:15 WAT ERROR:  column "principal_signature_image" of relation "schools" already exists
+2026-02-24 23:44:15 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN principal_signature_image TEXT
+2026-02-24 23:44:15 WAT ERROR:  column "school_id" of relation "schools" already exists
+2026-02-24 23:44:15 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN school_id TEXT
+2026-02-24 23:44:15 WAT ERROR:  column "signature_image" of relation "teachers" already exists
+2026-02-24 23:44:15 WAT STATEMENT:  ALTER TABLE teachers ADD COLUMN signature_image TEXT
+2026-02-24 23:44:15 WAT ERROR:  column "academic_year" of relation "result_publications" already exists
+2026-02-24 23:44:15 WAT STATEMENT:  ALTER TABLE result_publications ADD COLUMN academic_year TEXT DEFAULT ''
+2026-02-24 23:44:15 WAT ERROR:  column "teacher_name" of relation "result_publications" already exists
+2026-02-24 23:44:15 WAT STATEMENT:  ALTER TABLE result_publications ADD COLUMN teacher_name TEXT DEFAULT ''
+2026-02-24 23:44:15 WAT ERROR:  column "principal_name" of relation "result_publications" already exists
+2026-02-24 23:44:15 WAT STATEMENT:  ALTER TABLE result_publications ADD COLUMN principal_name TEXT DEFAULT ''
+2026-02-24 23:44:15 WAT ERROR:  column "teacher_comment" of relation "published_student_results" already exists
+2026-02-24 23:44:15 WAT STATEMENT:  ALTER TABLE published_student_results ADD COLUMN teacher_comment TEXT
+2026-02-24 23:44:15 WAT ERROR:  column "academic_year" of relation "published_student_results" already exists
+2026-02-24 23:44:15 WAT STATEMENT:  ALTER TABLE published_student_results ADD COLUMN academic_year TEXT
+2026-02-24 23:44:15 WAT ERROR:  there is no unique constraint matching given keys for referenced table "schools"
+2026-02-24 23:44:15 WAT STATEMENT:  ALTER TABLE students ADD CONSTRAINT fk_students_school FOREIGN KEY (school_id) REFERENCES schools(school_id) ON DELETE CASCADE
+2026-02-24 23:44:15 WAT ERROR:  there is no unique constraint matching given keys for referenced table "schools"
+2026-02-24 23:44:15 WAT STATEMENT:  ALTER TABLE teachers ADD CONSTRAINT fk_teachers_school FOREIGN KEY (school_id) REFERENCES schools(school_id) ON DELETE CASCADE
+2026-02-24 23:44:15 WAT ERROR:  there is no unique constraint matching given keys for referenced table "schools"
+2026-02-24 23:44:15 WAT STATEMENT:  ALTER TABLE class_assignments ADD CONSTRAINT fk_class_assignments_school FOREIGN KEY (school_id) REFERENCES schools(school_id) ON DELETE CASCADE
+2026-02-24 23:44:29 WAT ERROR:  column "terms_accepted" of relation "users" already exists
+2026-02-24 23:44:29 WAT STATEMENT:  ALTER TABLE users ADD COLUMN terms_accepted INTEGER DEFAULT 0
+2026-02-24 23:44:29 WAT ERROR:  column "current_login_at" of relation "users" already exists
+2026-02-24 23:44:29 WAT STATEMENT:  ALTER TABLE users ADD COLUMN current_login_at TIMESTAMP
+2026-02-24 23:44:29 WAT ERROR:  column "last_login_at" of relation "users" already exists
+2026-02-24 23:44:29 WAT STATEMENT:  ALTER TABLE users ADD COLUMN last_login_at TIMESTAMP
+2026-02-24 23:44:29 WAT ERROR:  column "operations_enabled" of relation "schools" already exists
+2026-02-24 23:44:29 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN operations_enabled INTEGER DEFAULT 1
+2026-02-24 23:44:29 WAT ERROR:  column "teacher_operations_enabled" of relation "schools" already exists
+2026-02-24 23:44:29 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN teacher_operations_enabled INTEGER DEFAULT 1
+2026-02-24 23:44:29 WAT ERROR:  column "grade_a_min" of relation "schools" already exists
+2026-02-24 23:44:29 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN grade_a_min INTEGER DEFAULT 70
+2026-02-24 23:44:29 WAT ERROR:  column "grade_b_min" of relation "schools" already exists
+2026-02-24 23:44:29 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN grade_b_min INTEGER DEFAULT 60
+2026-02-24 23:44:29 WAT ERROR:  column "grade_c_min" of relation "schools" already exists
+2026-02-24 23:44:29 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN grade_c_min INTEGER DEFAULT 50
+2026-02-24 23:44:29 WAT ERROR:  column "grade_d_min" of relation "schools" already exists
+2026-02-24 23:44:29 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN grade_d_min INTEGER DEFAULT 40
+2026-02-24 23:44:29 WAT ERROR:  column "pass_mark" of relation "schools" already exists
+2026-02-24 23:44:29 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN pass_mark INTEGER DEFAULT 50
+2026-02-24 23:44:29 WAT ERROR:  column "ss_ranking_mode" of relation "schools" already exists
+2026-02-24 23:44:29 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN ss_ranking_mode TEXT DEFAULT 'together'
+2026-02-24 23:44:29 WAT ERROR:  column "ss1_stream_mode" of relation "schools" already exists
+2026-02-24 23:44:29 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN ss1_stream_mode TEXT DEFAULT 'separate'
+2026-02-24 23:44:29 WAT ERROR:  column "location" of relation "schools" already exists
+2026-02-24 23:44:29 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN location TEXT
+2026-02-24 23:44:29 WAT ERROR:  column "phone" of relation "schools" already exists
+2026-02-24 23:44:29 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN phone TEXT
+2026-02-24 23:44:29 WAT ERROR:  column "email" of relation "schools" already exists
+2026-02-24 23:44:29 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN email TEXT
+2026-02-24 23:44:29 WAT ERROR:  column "principal_name" of relation "schools" already exists
+2026-02-24 23:44:29 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN principal_name TEXT
+2026-02-24 23:44:29 WAT ERROR:  column "motto" of relation "schools" already exists
+2026-02-24 23:44:29 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN motto TEXT
+2026-02-24 23:44:29 WAT ERROR:  column "updated_at" of relation "schools" already exists
+2026-02-24 23:44:29 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+2026-02-24 23:44:29 WAT ERROR:  column "principal_signature_image" of relation "schools" already exists
+2026-02-24 23:44:29 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN principal_signature_image TEXT
+2026-02-24 23:44:29 WAT ERROR:  column "school_id" of relation "schools" already exists
+2026-02-24 23:44:29 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN school_id TEXT
+2026-02-24 23:44:29 WAT ERROR:  column "signature_image" of relation "teachers" already exists
+2026-02-24 23:44:29 WAT STATEMENT:  ALTER TABLE teachers ADD COLUMN signature_image TEXT
+2026-02-24 23:44:29 WAT ERROR:  column "academic_year" of relation "result_publications" already exists
+2026-02-24 23:44:29 WAT STATEMENT:  ALTER TABLE result_publications ADD COLUMN academic_year TEXT DEFAULT ''
+2026-02-24 23:44:29 WAT ERROR:  column "teacher_name" of relation "result_publications" already exists
+2026-02-24 23:44:29 WAT STATEMENT:  ALTER TABLE result_publications ADD COLUMN teacher_name TEXT DEFAULT ''
+2026-02-24 23:44:29 WAT ERROR:  column "principal_name" of relation "result_publications" already exists
+2026-02-24 23:44:29 WAT STATEMENT:  ALTER TABLE result_publications ADD COLUMN principal_name TEXT DEFAULT ''
+2026-02-24 23:44:29 WAT ERROR:  column "teacher_comment" of relation "published_student_results" already exists
+2026-02-24 23:44:29 WAT STATEMENT:  ALTER TABLE published_student_results ADD COLUMN teacher_comment TEXT
+2026-02-24 23:44:29 WAT ERROR:  column "academic_year" of relation "published_student_results" already exists
+2026-02-24 23:44:29 WAT STATEMENT:  ALTER TABLE published_student_results ADD COLUMN academic_year TEXT
+2026-02-24 23:44:29 WAT ERROR:  there is no unique constraint matching given keys for referenced table "schools"
+2026-02-24 23:44:29 WAT STATEMENT:  ALTER TABLE students ADD CONSTRAINT fk_students_school FOREIGN KEY (school_id) REFERENCES schools(school_id) ON DELETE CASCADE
+2026-02-24 23:44:29 WAT ERROR:  there is no unique constraint matching given keys for referenced table "schools"
+2026-02-24 23:44:29 WAT STATEMENT:  ALTER TABLE teachers ADD CONSTRAINT fk_teachers_school FOREIGN KEY (school_id) REFERENCES schools(school_id) ON DELETE CASCADE
+2026-02-24 23:44:29 WAT ERROR:  there is no unique constraint matching given keys for referenced table "schools"
+2026-02-24 23:44:29 WAT STATEMENT:  ALTER TABLE class_assignments ADD CONSTRAINT fk_class_assignments_school FOREIGN KEY (school_id) REFERENCES schools(school_id) ON DELETE CASCADE
+2026-02-24 23:44:31 WAT ERROR:  column "terms_accepted" of relation "users" already exists
+2026-02-24 23:44:31 WAT STATEMENT:  ALTER TABLE users ADD COLUMN terms_accepted INTEGER DEFAULT 0
+2026-02-24 23:44:31 WAT ERROR:  column "current_login_at" of relation "users" already exists
+2026-02-24 23:44:31 WAT STATEMENT:  ALTER TABLE users ADD COLUMN current_login_at TIMESTAMP
+2026-02-24 23:44:31 WAT ERROR:  column "last_login_at" of relation "users" already exists
+2026-02-24 23:44:31 WAT STATEMENT:  ALTER TABLE users ADD COLUMN last_login_at TIMESTAMP
+2026-02-24 23:44:31 WAT ERROR:  column "operations_enabled" of relation "schools" already exists
+2026-02-24 23:44:31 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN operations_enabled INTEGER DEFAULT 1
+2026-02-24 23:44:31 WAT ERROR:  column "teacher_operations_enabled" of relation "schools" already exists
+2026-02-24 23:44:31 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN teacher_operations_enabled INTEGER DEFAULT 1
+2026-02-24 23:44:31 WAT ERROR:  column "grade_a_min" of relation "schools" already exists
+2026-02-24 23:44:31 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN grade_a_min INTEGER DEFAULT 70
+2026-02-24 23:44:31 WAT ERROR:  column "grade_b_min" of relation "schools" already exists
+2026-02-24 23:44:31 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN grade_b_min INTEGER DEFAULT 60
+2026-02-24 23:44:31 WAT ERROR:  column "grade_c_min" of relation "schools" already exists
+2026-02-24 23:44:31 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN grade_c_min INTEGER DEFAULT 50
+2026-02-24 23:44:31 WAT ERROR:  column "grade_d_min" of relation "schools" already exists
+2026-02-24 23:44:31 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN grade_d_min INTEGER DEFAULT 40
+2026-02-24 23:44:31 WAT ERROR:  column "pass_mark" of relation "schools" already exists
+2026-02-24 23:44:31 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN pass_mark INTEGER DEFAULT 50
+2026-02-24 23:44:31 WAT ERROR:  column "ss_ranking_mode" of relation "schools" already exists
+2026-02-24 23:44:31 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN ss_ranking_mode TEXT DEFAULT 'together'
+2026-02-24 23:44:31 WAT ERROR:  column "ss1_stream_mode" of relation "schools" already exists
+2026-02-24 23:44:31 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN ss1_stream_mode TEXT DEFAULT 'separate'
+2026-02-24 23:44:31 WAT ERROR:  column "location" of relation "schools" already exists
+2026-02-24 23:44:31 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN location TEXT
+2026-02-24 23:44:31 WAT ERROR:  column "phone" of relation "schools" already exists
+2026-02-24 23:44:31 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN phone TEXT
+2026-02-24 23:44:31 WAT ERROR:  column "email" of relation "schools" already exists
+2026-02-24 23:44:31 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN email TEXT
+2026-02-24 23:44:31 WAT ERROR:  column "principal_name" of relation "schools" already exists
+2026-02-24 23:44:31 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN principal_name TEXT
+2026-02-24 23:44:31 WAT ERROR:  column "motto" of relation "schools" already exists
+2026-02-24 23:44:31 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN motto TEXT
+2026-02-24 23:44:31 WAT ERROR:  column "updated_at" of relation "schools" already exists
+2026-02-24 23:44:31 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+2026-02-24 23:44:31 WAT ERROR:  column "principal_signature_image" of relation "schools" already exists
+2026-02-24 23:44:31 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN principal_signature_image TEXT
+2026-02-24 23:44:31 WAT ERROR:  column "school_id" of relation "schools" already exists
+2026-02-24 23:44:31 WAT STATEMENT:  ALTER TABLE schools ADD COLUMN school_id TEXT
+2026-02-24 23:44:31 WAT ERROR:  column "signature_image" of relation "teachers" already exists
+2026-02-24 23:44:31 WAT STATEMENT:  ALTER TABLE teachers ADD COLUMN signature_image TEXT
+2026-02-24 23:44:31 WAT ERROR:  column "academic_year" of relation "result_publications" already exists
+2026-02-24 23:44:31 WAT STATEMENT:  ALTER TABLE result_publications ADD COLUMN academic_year TEXT DEFAULT ''
+2026-02-24 23:44:31 WAT ERROR:  column "teacher_name" of relation "result_publications" already exists
+2026-02-24 23:44:31 WAT STATEMENT:  ALTER TABLE result_publications ADD COLUMN teacher_name TEXT DEFAULT ''
+2026-02-24 23:44:31 WAT ERROR:  column "principal_name" of relation "result_publications" already exists
+2026-02-24 23:44:31 WAT STATEMENT:  ALTER TABLE result_publications ADD COLUMN principal_name TEXT DEFAULT ''
+2026-02-24 23:44:31 WAT ERROR:  column "teacher_comment" of relation "published_student_results" already exists
+2026-02-24 23:44:31 WAT STATEMENT:  ALTER TABLE published_student_results ADD COLUMN teacher_comment TEXT
+2026-02-24 23:44:31 WAT ERROR:  column "academic_year" of relation "published_student_results" already exists
+2026-02-24 23:44:31 WAT STATEMENT:  ALTER TABLE published_student_results ADD COLUMN academic_year TEXT
+2026-02-24 23:44:31 WAT ERROR:  there is no unique constraint matching given keys for referenced table "schools"
+2026-02-24 23:44:31 WAT STATEMENT:  ALTER TABLE students ADD CONSTRAINT fk_students_school FOREIGN KEY (school_id) REFERENCES schools(school_id) ON DELETE CASCADE
+2026-02-24 23:44:31 WAT ERROR:  there is no unique constraint matching given keys for referenced table "schools"
+2026-02-24 23:44:31 WAT STATEMENT:  ALTER TABLE teachers ADD CONSTRAINT fk_teachers_school FOREIGN KEY (school_id) REFERENCES schools(school_id) ON DELETE CASCADE
+2026-02-24 23:44:31 WAT ERROR:  there is no unique constraint matching given keys for referenced table "schools"
+2026-02-24 23:44:31 WAT STATEMENT:  ALTER TABLE class_assignments ADD CONSTRAINT fk_class_assignments_school FOREIGN KEY (school_id) REFERENCES schools(school_id) ON DELETE CASCADE
+2026-02-24 23:48:25 WAT LOG:  checkpoint starting: time
+2026-02-24 23:48:38 WAT LOG:  checkpoint complete: wrote 113 buffers (0.7%), wrote 2 SLRU buffers; 0 WAL file(s) added, 0 removed, 0 recycled; write=12.382 s, sync=0.039 s, total=12.474 s; sync files=52, longest=0.006 s, average=0.001 s; distance=1056 kB, estimate=1056 kB; lsn=0/5229B20, redo lsn=0/5229A90
+2026-02-24 23:52:38 WAT LOG:  shutting down
+2026-02-24 23:52:38 WAT LOG:  checkpoint starting: shutdown immediate
+2026-02-24 23:52:38 WAT ERROR:  canceling statement due to user request
+2026-02-24 23:52:38 WAT LOG:  checkpoint complete: wrote 0 buffers (0.0%), wrote 0 SLRU buffers; 0 WAL file(s) added, 0 removed, 0 recycled; write=0.003 s, sync=0.001 s, total=0.035 s; sync files=0, longest=0.000 s, average=0.000 s; distance=0 kB, estimate=950 kB; lsn=0/5229BD0, redo lsn=0/5229BD0

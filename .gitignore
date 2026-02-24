@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+env/
+*.db
+*.sqlite
+*.sqlite3
+users.json
+students.json
+reports.json
+
+# VS Code
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+*.db
+*.zip
+__pycache__/
+.pytest_cache/

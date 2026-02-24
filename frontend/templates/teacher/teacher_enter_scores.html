@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enter Scores - Teacher Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f5f7fa; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .header { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); color: white; padding: 20px; border-radius: 10px; margin-bottom: 30px; }
+        .header h1 { margin: 0; font-size: 1.8rem; }
+        .header .back { float: right; color: white; text-decoration: none; }
+        .card { background: white; border-radius: 10px; padding: 25px; margin-bottom: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .btn { padding: 12px 24px; border: none; border-radius: 5px; cursor: pointer; font-size: 1rem; font-weight: 500; }
+        .btn-primary { background: #3498db; color: white; }
+        .btn-primary:hover { background: #2980b9; }
+        .btn-secondary { background: #6c757d; color: white; }
+        .flash { padding: 15px; margin-bottom: 20px; border-radius: 5px; }
+        .flash.success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .flash.error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .table-wrap { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; min-width: 880px; }
+        th, td { padding: 10px; text-align: center; border: 1px solid #d7dde4; }
+        thead th { background: #1e3c72; color: #fff; font-weight: 600; }
+        tbody th { background: #f8f9fa; color: #2c3e50; text-align: left; white-space: nowrap; }
+        input[type="number"] { width: 90px; padding: 8px; border: 1px solid #ccd3db; border-radius: 6px; text-align: center; }
+        input[readonly] { background: #eef2f7; font-weight: 600; }
+        .readonly-cell { background: #f7fafc; }
+        .grade-chip { font-weight: 700; color: #1e3c72; }
+        .student-info { background: #e7f3ff; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
+        .hint { margin-top: 10px; color: #4e5d6c; font-size: 0.95rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1><i class="fas fa-calculator"></i> Enter Scores</h1>
+            <a href="{{ url_for('teacher_dashboard') }}" class="back"><i class="fas fa-arrow-left"></i> Back</a>
+        </div>
+        
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="flash {{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        
+        <div class="card">
+            <div class="student-info">
+                <h3><i class="fas fa-user"></i> {{ student.firstname }}</h3>
+                <p><strong>Student ID:</strong> {{ student.student_id }}</p>
+                <p><strong>Class:</strong> {{ student.classname }} | <strong>Term:</strong> {{ student.term }} | <strong>Stream:</strong> {{ student.stream }}</p>
+                {% if is_locked %}
+                <p style="margin-top:8px; color:#b03a2e; font-weight:700;">
+                    This term has been published. Scores are locked for editing.
+                </p>
+                {% endif %}
+            </div>
+            
+            <form method="POST">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <div class="table-wrap">
+                    <table id="score-entry-table"
+                           data-grade-a="{{ grade_cfg.a }}"
+                           data-grade-b="{{ grade_cfg.b }}"
+                           data-grade-c="{{ grade_cfg.c }}"
+                           data-grade-d="{{ grade_cfg.d }}">
+                        <thead>
+                            <tr>
+                                <th>Subject</th>
+                                {% if school.test_enabled %}
+                                    {% for i in range(1, school.max_tests + 1) %}
+                                        <th>Test {{ i }}</th>
+                                    {% endfor %}
+                                    <th>Total Test Score (Auto, Max {{ school.test_score_max }})</th>
+                                {% endif %}
+                                {% if school.exam_enabled %}
+                                    {% if exam_config.exam_mode == 'combined' %}
+                                        <th>Exam Score (Max {{ exam_config.exam_score_max }})</th>
+                                    {% else %}
+                                        <th>Objective (Max {{ exam_config.objective_max }})</th>
+                                        <th>Theory (Max {{ exam_config.theory_max }})</th>
+                                        <th>Total Exam Score (Auto)</th>
+                                    {% endif %}
+                                {% endif %}
+                                <th>Total Score (Auto)</th>
+                                <th>Grade (Auto by Admin Config)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for subject in subjects %}
+                                {% set subj_key = subject_key_map.get(subject, subject) %}
+                                {% set s = student.scores.get(subject, {}) if student.scores else {} %}
+                                <tr class="subject-row" data-subj-key="{{ subj_key }}">
+                                    <th>{{ subject }}</th>
+                                    {% if school.test_enabled %}
+                                        {% for i in range(1, school.max_tests + 1) %}
+                                        <td>
+                                            <input type="number"
+                                                   step="0.01"
+                                                   class="score-input calc-input"
+                                                   data-subj-key="{{ subj_key }}"
+                                                   data-kind="test"
+                                                   name="test_{{ i }}_{{ subj_key }}"
+                                                   min="0"
+                                                   max="{{ school.test_score_max }}"
+                                                   value="{{ s.get('test_' ~ i, 0) }}"
+                                                   {% if is_locked %}disabled{% endif %}>
+                                        </td>
+                                        {% endfor %}
+                                        <td class="readonly-cell">
+                                            <input type="number" step="0.01" readonly class="total-test"
+                                                   data-subj-key="{{ subj_key }}"
+                                                   value="{{ s.get('total_test', 0) }}">
+                                        </td>
+                                    {% endif %}
+                                    {% if school.exam_enabled %}
+                                        {% if exam_config.exam_mode == 'combined' %}
+                                        <td>
+                                            <input type="number"
+                                                   step="0.01"
+                                                   class="score-input calc-input"
+                                                   data-subj-key="{{ subj_key }}"
+                                                   data-kind="exam_combined"
+                                                   name="exam_score_{{ subj_key }}"
+                                                   min="0"
+                                                   max="{{ exam_config.exam_score_max }}"
+                                                   value="{{ s.get('exam_score', s.get('total_exam', 0)) }}"
+                                                   {% if is_locked %}disabled{% endif %}>
+                                        </td>
+                                        {% else %}
+                                        <td>
+                                            <input type="number"
+                                                   step="0.01"
+                                                   class="score-input calc-input"
+                                                   data-subj-key="{{ subj_key }}"
+                                                   data-kind="objective"
+                                                   name="objective_{{ subj_key }}"
+                                                   min="0"
+                                                   max="{{ exam_config.objective_max }}"
+                                                   value="{{ s.get('objective', 0) }}"
+                                                   {% if is_locked %}disabled{% endif %}>
+                                        </td>
+                                        <td>
+                                            <input type="number"
+                                                   step="0.01"
+                                                   class="score-input calc-input"
+                                                   data-subj-key="{{ subj_key }}"
+                                                   data-kind="theory"
+                                                   name="theory_{{ subj_key }}"
+                                                   min="0"
+                                                   max="{{ exam_config.theory_max }}"
+                                                   value="{{ s.get('theory', 0) }}"
+                                                   {% if is_locked %}disabled{% endif %}>
+                                        </td>
+                                        <td class="readonly-cell">
+                                            <input type="number" step="0.01" readonly class="total-exam"
+                                                   data-subj-key="{{ subj_key }}"
+                                                   value="{{ s.get('total_exam', 0) }}">
+                                        </td>
+                                        {% endif %}
+                                    {% endif %}
+                                    <td class="readonly-cell">
+                                        <input type="number" step="0.01" readonly class="overall-mark"
+                                               data-subj-key="{{ subj_key }}"
+                                               value="{{ s.get('overall_mark', 0) }}">
+                                    </td>
+                                    <td class="readonly-cell">
+                                        <span class="grade-chip auto-grade" data-subj-key="{{ subj_key }}">{{ s.get('grade', '-') }}</span>
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <p class="hint">Totals and grade are generated automatically per subject using the configured grading rules.</p>
+                <div style="margin-top:14px;">
+                    <label for="teacher_comment" style="display:block; margin-bottom:6px; font-weight:600; color:#2c3e50;">Teacher Comment</label>
+                    <textarea id="teacher_comment" name="teacher_comment" rows="4" style="width:100%; border:1px solid #ccd3db; border-radius:6px; padding:10px;" placeholder="Enter comment for this student's report" {% if is_locked %}disabled{% endif %}>{{ student.teacher_comment or '' }}</textarea>
+                </div>
+                
+                <button type="submit" class="btn btn-primary" {% if is_locked %}disabled{% endif %}><i class="fas fa-save"></i> Save Scores</button>
+                <a href="{{ url_for('teacher_dashboard') }}" class="btn btn-secondary" style="margin-left: 10px;">Cancel</a>
+            </form>
+        </div>
+    </div>
+    <script>
+        (function () {
+            const table = document.getElementById('score-entry-table');
+            if (!table) return;
+
+            const thresholds = {
+                a: Number(table.dataset.gradeA || 70),
+                b: Number(table.dataset.gradeB || 60),
+                c: Number(table.dataset.gradeC || 50),
+                d: Number(table.dataset.gradeD || 40)
+            };
+
+            function gradeFromScore(score) {
+                if (score >= thresholds.a) return 'A';
+                if (score >= thresholds.b) return 'B';
+                if (score >= thresholds.c) return 'C';
+                if (score >= thresholds.d) return 'D';
+                return 'F';
+            }
+
+            function numVal(input) {
+                if (!input) return 0;
+                const v = parseFloat(input.value);
+                return Number.isFinite(v) ? v : 0;
+            }
+
+            function setInput(selector, value) {
+                const el = document.querySelector(selector);
+                if (el) el.value = value.toFixed(2);
+            }
+
+            function setText(selector, value) {
+                const el = document.querySelector(selector);
+                if (el) el.textContent = value;
+            }
+
+            function recalcForSubject(subjKey) {
+                const testInputs = document.querySelectorAll(`input[data-subj-key="${subjKey}"][data-kind="test"]`);
+                let totalTest = 0;
+                testInputs.forEach((i) => { totalTest += numVal(i); });
+
+                const combinedExam = document.querySelector(`input[data-subj-key="${subjKey}"][data-kind="exam_combined"]`);
+                const objective = document.querySelector(`input[data-subj-key="${subjKey}"][data-kind="objective"]`);
+                const theory = document.querySelector(`input[data-subj-key="${subjKey}"][data-kind="theory"]`);
+
+                let totalExam = 0;
+                if (combinedExam) {
+                    totalExam = numVal(combinedExam);
+                } else {
+                    totalExam = numVal(objective) + numVal(theory);
+                }
+
+                const totalScore = totalTest + totalExam;
+                const grade = gradeFromScore(totalScore);
+
+                setInput(`.total-test[data-subj-key="${subjKey}"]`, totalTest);
+                setInput(`.total-exam[data-subj-key="${subjKey}"]`, totalExam);
+                setInput(`.overall-mark[data-subj-key="${subjKey}"]`, totalScore);
+                setText(`.auto-grade[data-subj-key="${subjKey}"]`, grade);
+            }
+
+            function recalcAll() {
+                const rows = document.querySelectorAll('.subject-row[data-subj-key]');
+                rows.forEach((row) => recalcForSubject(row.dataset.subjKey));
+            }
+
+            document.querySelectorAll('.calc-input').forEach((input) => {
+                input.addEventListener('input', () => recalcForSubject(input.dataset.subjKey));
+            });
+
+            recalcAll();
+        })();
+    </script>
+</body>
+</html>

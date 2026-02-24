@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Terms and Privacy</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f7fb;
+            color: #1f2937;
+            line-height: 1.6;
+        }
+        .wrap {
+            max-width: 900px;
+            margin: 28px auto;
+            padding: 0 16px;
+        }
+        .card {
+            background: #fff;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 22px;
+        }
+        h1, h2 {
+            margin-top: 0;
+            color: #111827;
+        }
+        h2 {
+            margin-top: 18px;
+            font-size: 1.1rem;
+        }
+        ul {
+            padding-left: 18px;
+        }
+        .muted {
+            color: #6b7280;
+            font-size: 0.95rem;
+        }
+        .actions {
+            margin-top: 20px;
+        }
+        .btn {
+            display: inline-block;
+            padding: 10px 16px;
+            border-radius: 8px;
+            background: #2563eb;
+            color: #fff;
+            text-decoration: none;
+            font-weight: 600;
+        }
+        .btn:hover {
+            background: #1d4ed8;
+        }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        <div class="card">
+            <h1>Terms and Privacy Policy</h1>
+            <p class="muted">Last updated: February 22, 2026</p>
+
+            <h2>1. Terms of Use</h2>
+            <ul>
+                <li>This portal is for authorized school users only.</li>
+                <li>Do not share your login details with anyone.</li>
+                <li>You are responsible for all actions performed with your account.</li>
+                <li>Unauthorized edits, access, or data export are prohibited.</li>
+            </ul>
+
+            <h2>2. Privacy</h2>
+            <ul>
+                <li>Student and staff data is stored for academic administration.</li>
+                <li>Only role-authorized users can view permitted records.</li>
+                <li>System activity may be logged for audit and security.</li>
+                <li>Use this platform in line with your school policy and local laws.</li>
+            </ul>
+
+            <h2>3. Consent</h2>
+            <p>
+                By checking the Terms and Privacy box at login, you confirm that you have read and agreed to these terms.
+                This agreement is recorded once per user account.
+            </p>
+
+            <div class="actions">
+                <a class="btn" href="{{ url_for('login', terms_read=1) }}">I Have Read This, Continue To Login</a>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student Dashboard - Student Score Management System</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f5f7fa; }
+        .container { max-width: 900px; margin: 0 auto; padding: 20px; }
+        .header { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); color: white; padding: 20px; border-radius: 10px; margin-bottom: 30px; }
+        .header h1 { margin: 0; font-size: 1.8rem; }
+        .header .logout { float: right; color: white; text-decoration: none; }
+        .card { background: white; border-radius: 10px; padding: 25px; margin-bottom: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .card h2 { margin-top: 0; color: #2c3e50; font-size: 1.4rem; border-bottom: 2px solid #3498db; padding-bottom: 10px; }
+        .btn { padding: 12px 24px; border: none; border-radius: 5px; cursor: pointer; font-size: 1rem; font-weight: 500; display: inline-block; text-decoration: none; }
+        .btn-primary { background: #3498db; color: white; }
+        .btn-primary:hover { background: #2980b9; }
+        .flash { padding: 15px; margin-bottom: 20px; border-radius: 5px; }
+        .flash.success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .flash.error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .student-info { background: #e7f3ff; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
+        .student-info h2 { margin: 0 0 10px; color: #2c3e50; }
+        .student-info p { margin: 5px 0; color: #555; }
+        .result-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 20px; }
+        .summary-card { background: #f8f9fa; padding: 15px; border-radius: 8px; text-align: center; }
+        .summary-card h3 { margin: 0; font-size: 2rem; color: #3498db; }
+        .summary-card p { margin: 5px 0 0; color: #7f8c8d; font-size: 0.9rem; }
+        .grade-a { color: #27ae60; }
+        .grade-b { color: #3498db; }
+        .grade-c { color: #f39c12; }
+        .grade-d { color: #e67e22; }
+        .grade-f { color: #e74c3c; }
+        .insight-card { border: 1px solid #dee2e6; border-radius: 10px; padding: 18px; background: #f8f9fa; margin-top: 16px; }
+        .ring-wrap { display: flex; justify-content: center; }
+        .avg-ring {
+            --pct: 0;
+            --ring: #3498db;
+            width: 170px;
+            height: 170px;
+            border-radius: 50%;
+            background: conic-gradient(var(--ring) calc(var(--pct) * 1%), #e3e7ed 0);
+            display: grid;
+            place-items: center;
+            box-shadow: inset 0 0 0 1px rgba(0,0,0,0.06);
+        }
+        .avg-ring::before {
+            content: "";
+            width: 128px;
+            height: 128px;
+            border-radius: 50%;
+            background: #fff;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.08) inset;
+            grid-area: 1 / 1;
+        }
+        .avg-ring-content {
+            grid-area: 1 / 1;
+            text-align: center;
+            z-index: 1;
+        }
+        .avg-ring-value {
+            font-size: 1.9rem;
+            font-weight: 800;
+            line-height: 1.1;
+            color: #2c3e50;
+        }
+        .avg-ring-label {
+            font-size: 0.8rem;
+            color: #6b7280;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 2px;
+        }
+        .under-graph {
+            margin-top: 14px;
+            height: 230px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1><i class="fas fa-user-graduate"></i> Student Dashboard</h1>
+            <a href="{{ url_for('logout') }}" class="logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
+        </div>
+        
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="flash {{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        
+        {% if student %}
+        <div class="student-info">
+            <h2>Welcome, {{ student.firstname }}!</h2>
+            <p><strong>Student ID:</strong> {{ student.student_id }}</p>
+            <p><strong>Class:</strong> {{ student.classname }} | <strong>Term:</strong> {{ student.term }} | <strong>Stream:</strong> {{ student.stream }}</p>
+        </div>
+        {% if dashboard_notice %}
+        <div class="flash error">{{ dashboard_notice }}</div>
+        {% endif %}
+        
+        <div class="card">
+            <h2><i class="fas fa-chart-bar"></i> Your Results</h2>
+            
+            <a href="{{ url_for('student_view_result') }}" class="btn btn-primary"><i class="fas fa-eye"></i> View Full Result</a>
+            <a href="{{ url_for('student_view_result', term='First Term') }}" class="btn btn-primary" style="margin-left: 10px;">First Term</a>
+            <a href="{{ url_for('student_view_result', term='Second Term') }}" class="btn btn-primary" style="margin-left: 10px;">Second Term</a>
+            <a href="{{ url_for('student_view_result', term='Third Term') }}" class="btn btn-primary" style="margin-left: 10px;">Third Term</a>
+
+            {% if student.scores %}
+            {% set totals = [] %}
+            {% for _subject, sc in student.scores.items() %}
+                {% set total = sc.get('overall_mark', sc.get('total_score', 0)) %}
+                {% set _ = totals.append(total|float) %}
+            {% endfor %}
+            {% set avg = (totals|sum / (totals|length)) if totals else 0 %}
+            {% if avg >= 70 %}
+                {% set avg_grade = 'A' %}
+            {% elif avg >= 60 %}
+                {% set avg_grade = 'B' %}
+            {% elif avg >= 50 %}
+                {% set avg_grade = 'C' %}
+            {% elif avg >= 40 %}
+                {% set avg_grade = 'D' %}
+            {% else %}
+                {% set avg_grade = 'F' %}
+            {% endif %}
+            <div class="insight-card">
+                <p style="margin:0 0 10px; color:#666; font-size:0.9rem; text-transform:uppercase; letter-spacing:0.5px; text-align:center;">Overall Average</p>
+                <div class="ring-wrap">
+                    <div
+                        class="avg-ring"
+                        data-target="{{ '%.1f'|format(avg) }}"
+                        style="--pct: 0; --ring:
+                        {% if avg >= 70 %}#27ae60{% elif avg >= 60 %}#3498db{% elif avg >= 50 %}#f39c12{% elif avg >= 40 %}#e67e22{% else %}#e74c3c{% endif %};"
+                    >
+                        <div class="avg-ring-content">
+                            <div class="avg-ring-value">0.0%</div>
+                            <div class="avg-ring-label">Grade {{ avg_grade }}</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="under-graph">
+                    <canvas id="dashboardSubjectChart"></canvas>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+        
+        {% if student.scores %}
+        <div class="card">
+            <h2><i class="fas fa-list"></i> Subject Scores</h2>
+            <table style="width: 100%; border-collapse: collapse;">
+                <thead>
+                    <tr style="background: #f8f9fa;">
+                        <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">Subject</th>
+                        <th style="padding: 12px; text-align: center; border-bottom: 2px solid #ddd;">Test</th>
+                        <th style="padding: 12px; text-align: center; border-bottom: 2px solid #ddd;">Exam</th>
+                        <th style="padding: 12px; text-align: center; border-bottom: 2px solid #ddd;">Total</th>
+                        <th style="padding: 12px; text-align: center; border-bottom: 2px solid #ddd;">Grade</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for subject, scores in student.scores.items() %}
+                    <tr style="border-bottom: 1px solid #eee;">
+                        <td style="padding: 12px;">{{ subject }}</td>
+                        <td style="padding: 12px; text-align: center;">{{ scores.get('total_test', 0) }}</td>
+                        <td style="padding: 12px; text-align: center;">{{ scores.get('total_exam', 0) }}</td>
+                        <td style="padding: 12px; text-align: center;"><strong>{{ scores.get('overall_mark', 0) }}</strong></td>
+                        <td style="padding: 12px; text-align: center;">
+                            <span class="grade-{{ scores.get('grade', 'F').lower() }}"><strong>{{ scores.get('grade', '-') }}</strong></span>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="card">
+            <p>No published result available yet.</p>
+        </div>
+        {% endif %}
+        
+        {% else %}
+        <div class="card">
+            <p>Student data not found. Please contact your school administrator.</p>
+        </div>
+        {% endif %}
+    </div>
+    {% if student and student.scores %}
+    <script id="dashboard-scores-json" type="application/json">{{ (student.scores or {})|tojson }}</script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        (function () {
+            const ring = document.querySelector('.avg-ring[data-target]');
+            if (ring) {
+                const valueEl = ring.querySelector('.avg-ring-value');
+                const target = Math.max(0, Math.min(100, Number(ring.dataset.target || 0)));
+                const durationMs = 1400;
+                const start = performance.now();
+
+                function frame(now) {
+                    const t = Math.min(1, (now - start) / durationMs);
+                    const eased = 1 - Math.pow(1 - t, 3); // ease-out cubic
+                    const current = target * eased;
+                    ring.style.setProperty('--pct', current.toFixed(2));
+                    if (valueEl) valueEl.textContent = current.toFixed(1) + '%';
+                    if (t < 1) {
+                        requestAnimationFrame(frame);
+                    }
+                }
+                requestAnimationFrame(frame);
+            }
+
+            const canvas = document.getElementById('dashboardSubjectChart');
+            if (!canvas || typeof Chart === 'undefined') return;
+            const scoresNode = document.getElementById('dashboard-scores-json');
+            let scores = {};
+            if (scoresNode) {
+                try {
+                    scores = JSON.parse(scoresNode.textContent || '{}');
+                } catch (e) {
+                    scores = {};
+                }
+            }
+            const labels = [];
+            const values = [];
+
+            function toNumber(v) {
+                const n = Number(v);
+                return Number.isFinite(n) ? n : 0;
+            }
+
+            for (const [subject, detail] of Object.entries(scores)) {
+                const d = (detail && typeof detail === 'object') ? detail : {};
+                const totalVal = (
+                    d.overall_mark !== undefined ? d.overall_mark :
+                    (d.total_score !== undefined ? d.total_score :
+                    (d.total !== undefined ? d.total : 0))
+                );
+                labels.push(subject);
+                values.push(toNumber(totalVal));
+            }
+
+            if (!labels.length) return;
+            new Chart(canvas, {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [{
+                        data: values,
+                        backgroundColor: 'rgba(52, 152, 219, 0.75)',
+                        borderColor: 'rgba(52, 152, 219, 1)',
+                        borderWidth: 1.5,
+                        borderRadius: 8,
+                        borderSkipped: false
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { beginAtZero: true, max: 100 },
+                        x: {
+                            ticks: {
+                                autoSkip: false,
+                                minRotation: 45,
+                                maxRotation: 45,
+                                font: { size: 10 }
+                            }
+                        }
+                    }
+                }
+            });
+        })();
+    </script>
+    {% endif %}
+</body>
+</html>

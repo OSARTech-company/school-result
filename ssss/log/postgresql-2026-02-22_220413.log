@@ -1,0 +1,7 @@
+2026-02-22 22:04:13 WAT LOG:  database system was shut down at 2026-02-22 22:03:58 WAT
+2026-02-22 22:09:13 WAT LOG:  checkpoint starting: time
+2026-02-22 22:09:16 WAT LOG:  checkpoint complete: wrote 27 buffers (0.2%), wrote 3 SLRU buffers; 0 WAL file(s) added, 0 removed, 0 recycled; write=2.969 s, sync=0.014 s, total=3.011 s; sync files=10, longest=0.006 s, average=0.002 s; distance=192 kB, estimate=192 kB; lsn=0/18216D8, redo lsn=0/1821680
+2026-02-22 23:44:13 WAT LOG:  checkpoint starting: time
+2026-02-22 23:44:13 WAT LOG:  checkpoint complete: wrote 1 buffers (0.0%), wrote 0 SLRU buffers; 0 WAL file(s) added, 0 removed, 0 recycled; write=0.110 s, sync=0.007 s, total=0.200 s; sync files=1, longest=0.007 s, average=0.007 s; distance=0 kB, estimate=172 kB; lsn=0/1821948, redo lsn=0/18218F0
+2026-02-22 23:49:13 WAT LOG:  checkpoint starting: time
+2026-02-22 23:51:03 WAT LOG:  checkpoint complete: wrote 993 buffers (6.1%), wrote 1 SLRU buffers; 1 WAL file(s) added, 0 removed, 0 recycled; write=108.716 s, sync=0.198 s, total=109.114 s; sync files=306, longest=0.003 s, average=0.001 s; distance=4698 kB, estimate=4698 kB; lsn=0/1CBA118, redo lsn=0/1CB8280

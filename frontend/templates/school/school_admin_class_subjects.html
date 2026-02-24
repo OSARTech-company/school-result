@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Class Subjects - School Admin</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f5f7fa; }
+        .container { max-width: 1100px; margin: 0 auto; padding: 20px; }
+        .header { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); color: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
+        .card { background: white; border-radius: 10px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .form-group { margin-bottom: 14px; }
+        label { display: block; font-weight: 600; margin-bottom: 6px; }
+        input { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; }
+        .flash { padding: 10px; border-radius: 6px; margin-bottom: 10px; }
+        .flash.success { background: #d4edda; color: #155724; }
+        .flash.error { background: #f8d7da; color: #721c24; }
+        .btn { border: none; border-radius: 6px; padding: 10px 14px; cursor: pointer; text-decoration: none; display: inline-block; }
+        .btn-primary { background: #3498db; color: white; }
+        .btn-secondary { background: #6c757d; color: white; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { border-bottom: 1px solid #eee; padding: 10px; text-align: left; vertical-align: top; }
+        th { background: #f8f9fa; }
+        .hint { font-size: 0.9rem; color: #666; }
+        .subject-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 8px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            padding: 10px;
+            background: #fafafa;
+            max-height: 210px;
+            overflow-y: auto;
+        }
+        .subject-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 4px 2px;
+            font-weight: 500;
+        }
+        .subject-item input[type="checkbox"] {
+            width: auto;
+            transform: scale(1.1);
+        }
+        .mini-input {
+            margin-top: 8px;
+        }
+        .mini-label {
+            font-size: 0.85rem;
+            color: #555;
+            margin-top: 8px;
+            display: block;
+        }
+        @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Class Subject Configuration</h1>
+            <a href="{{ url_for('school_admin_dashboard') }}" class="btn btn-secondary">Back to Dashboard</a>
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="flash {{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <div class="card">
+            <h2>Configure a Class</h2>
+            <p class="hint">Tick subjects with the mark box. Non-SS classes and SS1 (when combined) use only Subjects Offered.</p>
+            <form method="post">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <div class="grid">
+                    <div>
+                        <div class="form-group">
+                            <label for="classname">Class Name</label>
+                            <input type="text" id="classname" name="classname" list="classSuggestions" placeholder="e.g. Primary 1, JSS1, SS1" required>
+                            <datalist id="classSuggestions">
+                                {% for class_name in class_options %}
+                                <option value="{{ class_name }}"></option>
+                                {% endfor %}
+                            </datalist>
+                        </div>
+                        <div class="form-group">
+                            <label for="core_subjects" id="coreLabel">Subjects Offered</label>
+                            <div class="subject-grid" id="core_subjects_group"></div>
+                            <label class="mini-label" for="new_core_subjects">Add new core subjects (comma separated)</label>
+                            <input class="mini-input" type="text" id="new_core_subjects" name="new_core_subjects" placeholder="e.g. Verbal Reasoning, Home Economics">
+                        </div>
+                        <div class="form-group" id="optionalSection">
+                            <label>Optional Subjects Pool</label>
+                            <div class="subject-grid" id="optional_subjects_group"></div>
+                            <label class="mini-label" for="new_optional_subjects">Add new optional subjects (comma separated)</label>
+                            <input class="mini-input" type="text" id="new_optional_subjects" name="new_optional_subjects" placeholder="e.g. Music, Animal Husbandry">
+                        </div>
+                        <div class="form-group" id="optionalLimitSection">
+                            <label for="optional_subject_limit">Max Optional Subjects per Student</label>
+                            <input type="number" id="optional_subject_limit" name="optional_subject_limit" min="0" value="0">
+                        </div>
+                    </div>
+                    <div id="ssStreamSection">
+                        <div class="form-group ss-only">
+                            <label>Science Subjects (SS only)</label>
+                            <div class="subject-grid" id="science_subjects_group"></div>
+                            <label class="mini-label" for="new_science_subjects">Add new science subjects (comma separated)</label>
+                            <input class="mini-input" type="text" id="new_science_subjects" name="new_science_subjects" placeholder="e.g. Geography">
+                        </div>
+                        <div class="form-group ss-only">
+                            <label>Art Subjects (SS only)</label>
+                            <div class="subject-grid" id="art_subjects_group"></div>
+                            <label class="mini-label" for="new_art_subjects">Add new art subjects (comma separated)</label>
+                            <input class="mini-input" type="text" id="new_art_subjects" name="new_art_subjects" placeholder="e.g. Fine Art">
+                        </div>
+                        <div class="form-group ss-only">
+                            <label>Commercial Subjects (SS only)</label>
+                            <div class="subject-grid" id="commercial_subjects_group"></div>
+                            <label class="mini-label" for="new_commercial_subjects">Add new commercial subjects (comma separated)</label>
+                            <input class="mini-input" type="text" id="new_commercial_subjects" name="new_commercial_subjects" placeholder="e.g. Office Practice">
+                        </div>
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary">Save Configuration</button>
+            </form>
+        </div>
+
+        <div class="card">
+            <h2>Existing Class Configurations</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Class</th>
+                        <th>Core</th>
+                        <th>Science</th>
+                        <th>Art</th>
+                        <th>Commercial</th>
+                        <th>Optional Pool</th>
+                        <th>Optional Limit</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for class_name, cfg in configs.items() %}
+                    <tr>
+                        <td>{{ class_name }}</td>
+                        <td>{{ cfg.core_subjects|join(', ') }}</td>
+                        <td>{{ cfg.science_subjects|join(', ') }}</td>
+                        <td>{{ cfg.art_subjects|join(', ') }}</td>
+                        <td>{{ cfg.commercial_subjects|join(', ') }}</td>
+                        <td>{{ cfg.optional_subjects|join(', ') }}</td>
+                        <td>{{ cfg.optional_subject_limit }}</td>
+                        <td>
+                            <form method="post" action="{{ url_for('school_admin_delete_class_subject_config') }}" onsubmit="return confirm('Delete subject configuration for {{ class_name }}?');">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                <input type="hidden" name="classname" value="{{ class_name }}"/>
+                                <button type="submit" class="btn btn-secondary" style="background:#e74c3c; color:white;">Delete</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="8">No class subject config yet.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <script>
+        const classNameInput = document.getElementById('classname');
+        const ssSection = document.getElementById('ssStreamSection');
+        const optionalSection = document.getElementById('optionalSection');
+        const optionalLimitSection = document.getElementById('optionalLimitSection');
+        const coreLabel = document.getElementById('coreLabel');
+        const optionalLimitEl = document.getElementById('optional_subject_limit');
+        const ss1StreamMode = "{{ (school.ss1_stream_mode if school else 'separate')|lower }}";
+        const catalogMap = {{ (subject_catalog_map or {})|tojson }};
+
+        function uncheckGroup(groupId) {
+            const group = document.getElementById(groupId);
+            if (!group) return;
+            group.querySelectorAll('input[type=\"checkbox\"]').forEach((el) => {
+                el.checked = false;
+            });
+        }
+
+        function renderSubjectGroup(groupId, inputName, values) {
+            const group = document.getElementById(groupId);
+            if (!group) return;
+            group.innerHTML = '';
+            (values || []).forEach((subject) => {
+                const label = document.createElement('label');
+                label.className = 'subject-item';
+                const input = document.createElement('input');
+                input.type = 'checkbox';
+                input.name = inputName;
+                input.value = subject;
+                const span = document.createElement('span');
+                span.textContent = subject;
+                label.appendChild(input);
+                label.appendChild(span);
+                group.appendChild(label);
+            });
+        }
+
+        function normalizeClassName(v) {
+            return (v || '').replace(/[^a-z0-9]/gi, '').toUpperCase();
+        }
+
+        function classUsesStream(v) {
+            const n = normalizeClassName(v);
+            return ['SS1', 'SS2', 'SS3', 'SSS1', 'SSS2', 'SSS3'].includes(n);
+        }
+        function isSs1(v) {
+            const n = normalizeClassName(v);
+            return ['SS1', 'SSS1'].includes(n);
+        }
+
+        function refreshSsFields() {
+            const classVal = classNameInput.value;
+            const classKey = normalizeClassName(classVal);
+            const classCatalog = catalogMap[classKey] || {core: [], science: [], art: [], commercial: [], optional: []};
+            const ss1Combined = isSs1(classVal) && ss1StreamMode === 'combined';
+            const mergedOffered = Array.from(new Set([]
+                .concat(classCatalog.core || [])
+                .concat(classCatalog.science || [])
+                .concat(classCatalog.art || [])
+                .concat(classCatalog.commercial || [])
+                .concat(classCatalog.optional || [])
+            ));
+            renderSubjectGroup('core_subjects_group', 'core_subjects', ss1Combined ? mergedOffered : (classCatalog.core || []));
+            renderSubjectGroup('science_subjects_group', 'science_subjects', classCatalog.science || []);
+            renderSubjectGroup('art_subjects_group', 'art_subjects', classCatalog.art || []);
+            renderSubjectGroup('commercial_subjects_group', 'commercial_subjects', classCatalog.commercial || []);
+            renderSubjectGroup('optional_subjects_group', 'optional_subjects', classCatalog.optional || []);
+
+            let useSs = classUsesStream(classVal);
+            if (useSs && isSs1(classVal) && ss1StreamMode === 'combined') {
+                useSs = false;
+            }
+            ssSection.style.display = useSs ? 'block' : 'none';
+            optionalSection.style.display = useSs ? 'block' : 'none';
+            optionalLimitSection.style.display = useSs ? 'block' : 'none';
+            coreLabel.textContent = useSs ? 'Core Subjects (all students)' : (ss1Combined ? 'Subjects Offered (SS1 Combined)' : 'Subjects Offered');
+            if (!useSs) {
+                uncheckGroup('science_subjects_group');
+                uncheckGroup('art_subjects_group');
+                uncheckGroup('commercial_subjects_group');
+                uncheckGroup('optional_subjects_group');
+                optionalLimitEl.value = '0';
+            }
+        }
+
+        classNameInput.addEventListener('input', refreshSsFields);
+        refreshSsFields();
+    </script>
+</body>
+</html>
