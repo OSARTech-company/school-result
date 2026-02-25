@@ -82,3 +82,124 @@
 2026-02-25 08:09:05,819 - WARNING - Missing DB guards. indexes=none, constraints=['fk_students_school', 'fk_teachers_school']
 2026-02-25 08:09:06,064 - WARNING -  * Debugger is active!
 2026-02-25 08:09:06,069 - INFO -  * Debugger PIN: 988-619-374
+2026-02-25 14:49:55,407 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\db.py', reloading
+2026-02-25 14:49:55,711 - INFO -  * Restarting with stat
+2026-02-25 14:50:03,608 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-02-25 14:50:04,323 - WARNING - Missing DB guards. indexes=none, constraints=['fk_students_school', 'fk_teachers_school']
+2026-02-25 14:50:04,544 - WARNING -  * Debugger is active!
+2026-02-25 14:50:04,548 - INFO -  * Debugger PIN: 988-619-374
+2026-02-25 14:53:40,425 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\db.py', reloading
+2026-02-25 14:53:40,537 - INFO -  * Restarting with stat
+2026-02-25 14:53:41,713 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-02-25 14:53:42,246 - WARNING - Missing DB guards. indexes=none, constraints=['fk_students_school', 'fk_teachers_school']
+2026-02-25 14:53:42,395 - WARNING -  * Debugger is active!
+2026-02-25 14:53:42,399 - INFO -  * Debugger PIN: 988-619-374
+2026-02-25 14:54:08,081 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\db.py', reloading
+2026-02-25 14:54:08,151 - INFO -  * Restarting with stat
+2026-02-25 14:54:09,507 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-02-25 14:54:10,094 - WARNING - Missing DB guards. indexes=none, constraints=['fk_students_school', 'fk_teachers_school']
+2026-02-25 14:54:10,239 - WARNING -  * Debugger is active!
+2026-02-25 14:54:10,241 - INFO -  * Debugger PIN: 988-619-374
+2026-02-25 14:54:27,644 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\db.py', reloading
+2026-02-25 14:54:27,731 - INFO -  * Restarting with stat
+2026-02-25 14:54:28,610 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-02-25 14:54:29,116 - WARNING - Missing DB guards. indexes=none, constraints=['fk_students_school', 'fk_teachers_school']
+2026-02-25 14:54:29,247 - WARNING -  * Debugger is active!
+2026-02-25 14:54:29,249 - INFO -  * Debugger PIN: 988-619-374
+2026-02-25 14:54:36,458 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\db.py', reloading
+2026-02-25 14:54:36,529 - INFO -  * Restarting with stat
+2026-02-25 14:54:37,461 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-02-25 14:54:37,947 - WARNING - Missing DB guards. indexes=none, constraints=['fk_students_school', 'fk_teachers_school']
+2026-02-25 14:54:38,105 - WARNING -  * Debugger is active!
+2026-02-25 14:54:38,108 - INFO -  * Debugger PIN: 988-619-374
+2026-02-25 14:54:41,232 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\db.py', reloading
+2026-02-25 14:54:41,326 - INFO -  * Restarting with stat
+2026-02-25 14:54:42,603 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-02-25 14:54:43,223 - WARNING - Missing DB guards. indexes=none, constraints=['fk_students_school', 'fk_teachers_school']
+2026-02-25 14:54:43,414 - WARNING -  * Debugger is active!
+2026-02-25 14:54:43,417 - INFO -  * Debugger PIN: 988-619-374
+2026-02-25 14:54:47,570 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\db.py', reloading
+2026-02-25 14:54:47,691 - INFO -  * Restarting with stat
+2026-02-25 14:54:48,633 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-02-25 14:54:49,119 - WARNING - Missing DB guards. indexes=none, constraints=['fk_students_school', 'fk_teachers_school']
+2026-02-25 14:54:49,311 - WARNING -  * Debugger is active!
+2026-02-25 14:54:49,313 - INFO -  * Debugger PIN: 988-619-374
+2026-02-25 14:54:51,373 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\db.py', reloading
+2026-02-25 14:54:51,456 - INFO -  * Restarting with stat
+2026-02-25 14:54:52,497 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-02-25 14:54:52,967 - WARNING - Missing DB guards. indexes=none, constraints=['fk_students_school', 'fk_teachers_school']
+2026-02-25 14:54:53,092 - WARNING -  * Debugger is active!
+2026-02-25 14:54:53,095 - INFO -  * Debugger PIN: 988-619-374
+2026-02-25 14:54:55,174 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\db.py', reloading
+2026-02-25 14:54:55,266 - INFO -  * Restarting with stat
+2026-02-25 14:54:56,182 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-02-25 14:54:56,765 - WARNING - Missing DB guards. indexes=none, constraints=['fk_students_school', 'fk_teachers_school']
+2026-02-25 14:54:56,932 - WARNING -  * Debugger is active!
+2026-02-25 14:54:56,935 - INFO -  * Debugger PIN: 988-619-374
+2026-02-25 14:54:57,991 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\db.py', reloading
+2026-02-25 14:54:58,108 - INFO -  * Restarting with stat
+2026-02-25 14:54:59,171 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-02-25 14:54:59,807 - WARNING - Missing DB guards. indexes=none, constraints=['fk_students_school', 'fk_teachers_school']
+2026-02-25 14:54:59,988 - WARNING -  * Debugger is active!
+2026-02-25 14:54:59,991 - INFO -  * Debugger PIN: 988-619-374
+2026-02-25 14:55:04,158 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\db.py', reloading
+2026-02-25 14:55:04,238 - INFO -  * Restarting with stat
+2026-02-25 14:55:05,364 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-02-25 14:55:05,960 - WARNING - Missing DB guards. indexes=none, constraints=['fk_students_school', 'fk_teachers_school']
+2026-02-25 14:55:06,212 - WARNING -  * Debugger is active!
+2026-02-25 14:55:06,214 - INFO -  * Debugger PIN: 988-619-374
+2026-02-25 14:55:08,284 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\db.py', reloading
+2026-02-25 14:55:08,378 - INFO -  * Restarting with stat
+2026-02-25 14:55:09,233 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-02-25 14:55:09,781 - WARNING - Missing DB guards. indexes=none, constraints=['fk_students_school', 'fk_teachers_school']
+2026-02-25 14:55:09,948 - WARNING -  * Debugger is active!
+2026-02-25 14:55:09,951 - INFO -  * Debugger PIN: 988-619-374
+2026-02-25 14:55:11,027 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\db.py', reloading
+2026-02-25 14:55:11,099 - INFO -  * Restarting with stat
+2026-02-25 14:55:12,167 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-02-25 14:55:12,759 - WARNING - Missing DB guards. indexes=none, constraints=['fk_students_school', 'fk_teachers_school']
+2026-02-25 14:55:12,956 - WARNING -  * Debugger is active!
+2026-02-25 14:55:12,961 - INFO -  * Debugger PIN: 988-619-374
+2026-02-25 14:55:15,034 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\db.py', reloading
+2026-02-25 14:55:15,119 - INFO -  * Restarting with stat
+2026-02-25 14:55:16,053 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-02-25 14:55:16,595 - WARNING - Missing DB guards. indexes=none, constraints=['fk_students_school', 'fk_teachers_school']
+2026-02-25 14:55:16,772 - WARNING -  * Debugger is active!
+2026-02-25 14:55:16,777 - INFO -  * Debugger PIN: 988-619-374
+2026-02-25 14:55:17,855 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\db.py', reloading
+2026-02-25 14:55:18,017 - INFO -  * Restarting with stat
+2026-02-25 14:55:19,104 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-02-25 14:55:19,558 - WARNING - Missing DB guards. indexes=none, constraints=['fk_students_school', 'fk_teachers_school']
+2026-02-25 14:55:19,704 - WARNING -  * Debugger is active!
+2026-02-25 14:55:19,707 - INFO -  * Debugger PIN: 988-619-374
+2026-02-25 14:55:39,239 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\db.py', reloading
+2026-02-25 14:55:39,318 - INFO -  * Restarting with stat
+2026-02-25 14:55:40,190 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-02-25 14:55:40,699 - WARNING - Missing DB guards. indexes=none, constraints=['fk_students_school', 'fk_teachers_school']
+2026-02-25 14:55:41,121 - WARNING -  * Debugger is active!
+2026-02-25 14:55:41,128 - INFO -  * Debugger PIN: 988-619-374
+2026-02-25 14:55:49,351 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\db.py', reloading
+2026-02-25 14:55:49,466 - INFO -  * Restarting with stat
+2026-02-25 14:55:50,395 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-02-25 14:55:50,881 - WARNING - Missing DB guards. indexes=none, constraints=['fk_students_school', 'fk_teachers_school']
+2026-02-25 14:55:51,024 - WARNING -  * Debugger is active!
+2026-02-25 14:55:51,027 - INFO -  * Debugger PIN: 988-619-374
+2026-02-25 14:56:29,941 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\db.py', reloading
+2026-02-25 14:56:30,059 - INFO -  * Restarting with stat
+2026-02-25 14:56:31,061 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-02-25 14:56:31,564 - WARNING - Missing DB guards. indexes=none, constraints=['fk_students_school', 'fk_teachers_school']
+2026-02-25 14:56:31,759 - WARNING -  * Debugger is active!
+2026-02-25 14:56:31,762 - INFO -  * Debugger PIN: 988-619-374
+2026-02-25 14:56:33,825 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\db.py', reloading
+2026-02-25 14:56:33,963 - INFO -  * Restarting with stat
+2026-02-25 14:56:34,862 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-02-25 14:56:35,309 - WARNING - Missing DB guards. indexes=none, constraints=['fk_students_school', 'fk_teachers_school']
+2026-02-25 14:56:35,439 - WARNING -  * Debugger is active!
+2026-02-25 14:56:35,442 - INFO -  * Debugger PIN: 988-619-374
+2026-02-25 14:59:05,959 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\db.py', reloading
+2026-02-25 14:59:06,057 - INFO -  * Restarting with stat
+2026-02-25 14:59:07,090 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-02-25 14:59:07,691 - WARNING - Missing DB guards. indexes=none, constraints=['fk_students_school', 'fk_teachers_school']
+2026-02-25 14:59:07,911 - WARNING -  * Debugger is active!
+2026-02-25 14:59:07,915 - INFO -  * Debugger PIN: 988-619-374
+2026-02-25 14:59:21,308 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\db.py', reloading
