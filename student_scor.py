@@ -5,7 +5,7 @@ A comprehensive Flask web application for managing student academic records,
 including multi-school support, role-based access, and advanced features.
 
 Author: OSondu Stanley
-Version: 2.0.0
+Version: 2.1.0
 """
 
 from flask import Flask, render_template, request, redirect, url_for, session, flash, send_file, Response
