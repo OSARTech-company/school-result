@@ -5,6 +5,37 @@ from datetime import datetime, timedelta
 import pytest
 
 
+def test_db_execute_transaction_resets(monkeypatch):
+    import student_scor
+    # ensure db_execute rolls back on error and commits on success so a
+    # failed migration statement doesn't abort the entire startup sequence
+    class DummyConn:
+        def __init__(self):
+            self.committed = False
+            self.rolled = False
+        def commit(self):
+            self.committed = True
+        def rollback(self):
+            self.rolled = True
+    class DummyCursor:
+        def __init__(self, conn):
+            self.connection = conn
+            self.queries = []
+        def execute(self, query, params=None):
+            self.queries.append(query)
+            if 'fail' in query:
+                raise RuntimeError('simulated error')
+    conn = DummyConn()
+    c = DummyCursor(conn)
+
+    with pytest.raises(RuntimeError):
+        student_scor.db_execute(c, 'please fail')
+    assert conn.rolled, "db_execute should rollback after error"
+
+    student_scor.db_execute(c, 'all good')
+    assert conn.committed, "db_execute should commit after successful statement"
+
+
 @pytest.fixture
 def app_module(monkeypatch):
     monkeypatch.setenv("SECRET_KEY", "x" * 40)

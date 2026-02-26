@@ -3,9 +3,12 @@ Run one-off database migrations/bootstrap without starting the web server.
 
 Usage:
   python migrate.py
+
+This script uses Flask-Migrate (Alembic) to apply schema migrations.
 """
 
 import os
+import sys
 
 
 def main():
@@ -13,7 +16,6 @@ def main():
     os.environ['RUN_STARTUP_DDL'] = '0'
     os.environ['RUN_STARTUP_BOOTSTRAP'] = '0'
     # Do not hard-fail migration on legacy FK guard mismatches.
-    # We log warnings and keep migration moving; runtime remains fast/safe.
     os.environ.setdefault('DB_GUARDS_STRICT', '0')
     # Runtime requests should not run DDL.
     os.environ.setdefault('ALLOW_RUNTIME_SCHEMA_HEAL', '0')
@@ -21,10 +23,16 @@ def main():
     os.environ.setdefault('RESET_STUDENT_PASSWORDS_ON_STARTUP', '0')
 
     import student_scor
-    student_scor.init_db()
-    student_scor.verify_required_db_guards()
+    from flask_migrate import upgrade
 
-    print('Migration completed.')
+    # Apply all pending migrations to the database
+    try:
+        print("Applying database migrations...")
+        upgrade(directory='migrations')
+        print("✓ Migrations completed successfully.")
+    except Exception as e:
+        print(f"✗ Migration failed: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == '__main__':

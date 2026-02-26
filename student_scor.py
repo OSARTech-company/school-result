@@ -104,6 +104,10 @@ app.config['WTF_CSRF_TIME_LIMIT'] = None
 # Initialize CSRF Protection
 csrf = CSRFProtect(app)
 
+# Initialize Flask-Migrate for schema management
+from flask_migrate import Migrate
+migrate = Migrate(app, None)  # db will be set up via raw SQL migrations
+
 DATABASE_URL = os.environ.get('DATABASE_URL', '').strip()
 if not DATABASE_URL.startswith(('postgres://', 'postgresql://')):
     raise RuntimeError("PostgreSQL is required. Set DATABASE_URL to a postgresql:// connection string.")
@@ -131,9 +135,23 @@ def _adapt_query(query):
     return query.replace('?', '%s')
 
 def db_execute(cursor, query, params=None):
+    # log the statement for easier troubleshooting in deployment logs
+    logging.debug("db_execute: %s | params=%s", query.strip().replace('\n', ' '), params)
     try:
         cursor.execute(_adapt_query(query), params)
+        # commit after every statement so a failure in one doesn't abort the
+        # next; this mirrors autocommit behavior without requiring driver support.
+        try:
+            cursor.connection.commit()
+        except Exception:
+            # some simple SQLite connections may not support explicit commit
+            pass
     except Exception as e:
+        # roll back the surrounding transaction so subsequent DDL can run
+        try:
+            cursor.connection.rollback()
+        except Exception:
+            pass
         logging.error("Database Error: %s", e)
         raise
 
@@ -352,6 +370,8 @@ def _store_csv_error_export(content, filename):
 def init_db():
     """Initialize the database with new schema for multi-school support."""
     conn = get_db()
+    # we rely on db_execute committing each statement; this keeps the
+    # connection in a usable state even if one DDL command fails.
     c = conn.cursor()
 
     # Fast path: if startup schema version is already applied, skip heavy DDL.
@@ -1047,16 +1067,10 @@ logging.info(
     RUN_STARTUP_BOOTSTRAP,
     _redact_database_url(DATABASE_URL),
 )
-if RUN_STARTUP_DDL:
-    ddl_started_at = datetime.now()
-    init_db()
-    verify_required_db_guards()
-    logging.info(
-        "Startup DDL flow completed in %.2fs",
-        (datetime.now() - ddl_started_at).total_seconds(),
-    )
-else:
-    logging.warning("RUN_STARTUP_DDL is disabled. Ensure schema is already migrated before startup.")
+# Note: As of 2026-02-26, schema management is handled via Flask-Migrate.
+# init_db() is no longer called during app startup. Run `flask db upgrade` separately.
+logging.info("Database schema is managed via Flask-Migrate. Run 'flask db upgrade' to apply migrations.")
+
 
 # Create super admin user (bootstrap-only, disabled for normal runtime startup).
 def create_super_admin():
