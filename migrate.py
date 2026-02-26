@@ -28,10 +28,14 @@ def main():
     # Apply all pending migrations to the database
     try:
         print("Applying database migrations...")
-        upgrade(directory='migrations')
+        # Upgrade within app context so Flask-Migrate can find the migrate object
+        with student_scor.app.app_context():
+            upgrade(directory='migrations')
         print("✓ Migrations completed successfully.")
     except Exception as e:
         print(f"✗ Migration failed: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
 
 
