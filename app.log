@@ -17300,3 +17300,37 @@ with app.app_context(). See the documentation for more information.
 2026-02-26 21:17:27,152 - INFO - 127.0.0.1 - - [26/Feb/2026 21:17:27] "POST /login HTTP/1.1" 200 -
 2026-02-26 21:17:27,292 - INFO - 127.0.0.1 - - [26/Feb/2026 21:17:27] "[36mGET /manifest.webmanifest HTTP/1.1[0m" 304 -
 2026-02-26 21:17:28,975 - INFO - 127.0.0.1 - - [26/Feb/2026 21:17:28] "[36mGET /sw.js HTTP/1.1[0m" 304 -
+2026-02-26 21:43:12,029 - INFO - 127.0.0.1 - - [26/Feb/2026 21:43:12] "POST /login HTTP/1.1" 200 -
+2026-02-26 21:43:12,273 - INFO - 127.0.0.1 - - [26/Feb/2026 21:43:12] "[36mGET /manifest.webmanifest HTTP/1.1[0m" 304 -
+2026-02-26 21:43:14,009 - INFO - 127.0.0.1 - - [26/Feb/2026 21:43:14] "[36mGET /sw.js HTTP/1.1[0m" 304 -
+2026-02-26 21:43:26,070 - INFO - 127.0.0.1 - - [26/Feb/2026 21:43:26] "[32mPOST /login HTTP/1.1[0m" 302 -
+2026-02-26 21:43:26,102 - INFO - 127.0.0.1 - - [26/Feb/2026 21:43:26] "GET /super-admin HTTP/1.1" 200 -
+2026-02-26 21:43:26,276 - INFO - 127.0.0.1 - - [26/Feb/2026 21:43:26] "[36mGET /manifest.webmanifest HTTP/1.1[0m" 304 -
+2026-02-26 21:43:27,909 - INFO - 127.0.0.1 - - [26/Feb/2026 21:43:27] "[36mGET /sw.js HTTP/1.1[0m" 304 -
+2026-02-26 22:43:25,257 - INFO -  * Detected change in 'C:\\Aka\\School_Result\\student_scor.py', reloading
+2026-02-26 22:43:25,754 - INFO -  * Restarting with stat
+2026-02-26 22:43:35,274 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-02-26 22:43:35,275 - INFO - DB startup config: RUN_STARTUP_DDL=True, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-02-26 22:43:35,275 - INFO - Database schema is managed via Flask-Migrate. Run 'flask db upgrade' to apply migrations.
+2026-02-26 22:43:35,275 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-02-26 22:43:35,488 - WARNING -  * Debugger is active!
+2026-02-26 22:43:35,495 - INFO -  * Debugger PIN: 988-619-374
+2026-02-26 22:48:58,432 - INFO -  * Detected change in 'C:\\Aka\\School_Result\\student_scor.py', reloading
+2026-02-26 22:48:58,688 - INFO -  * Restarting with stat
+2026-02-26 22:49:01,825 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-02-26 22:49:01,825 - INFO - DB startup config: RUN_STARTUP_DDL=True, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-02-26 22:49:01,826 - INFO - Database schema is managed via Flask-Migrate. Run 'flask db upgrade' to apply migrations.
+2026-02-26 22:49:01,826 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-02-26 22:49:01,902 - WARNING -  * Debugger is active!
+2026-02-26 22:49:01,908 - INFO -  * Debugger PIN: 988-619-374
+2026-02-26 22:49:11,166 - INFO -  * Detected change in 'C:\\Aka\\School_Result\\student_scor.py', reloading
+2026-02-26 22:49:11,367 - INFO -  * Restarting with stat
+2026-02-26 22:57:05,748 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-02-26 22:57:05,748 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-02-26 22:57:05,748 - INFO - Database schema is managed via Flask-Migrate. Run 'flask db upgrade' to apply migrations.
+2026-02-26 22:57:05,749 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-02-26 22:57:05,917 - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.1.112:5000
+2026-02-26 22:57:05,917 - INFO - [33mPress CTRL+C to quit[0m

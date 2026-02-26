@@ -135,8 +135,9 @@ def _adapt_query(query):
     return query.replace('?', '%s')
 
 def db_execute(cursor, query, params=None):
-    # log the statement for easier troubleshooting in deployment logs
-    logging.debug("db_execute: %s | params=%s", query.strip().replace('\n', ' '), params)
+    # log the statement at DEBUG level; production can disable via logging config
+    if logging.getLogger().isEnabledFor(logging.DEBUG):
+        logging.debug("db_execute: %s | params=%s", query.strip().replace('\n', ' '), params)
     try:
         cursor.execute(_adapt_query(query), params)
         # commit after every statement so a failure in one doesn't abort the
@@ -248,7 +249,7 @@ def _get_db_pool():
         from psycopg2.extras import DictCursor
     except ImportError as exc:
         raise RuntimeError("PostgreSQL backend requires psycopg2-binary") from exc
-    min_conn = max(1, int(os.environ.get('DB_POOL_MIN_CONN', '1') or 1))
+    min_conn = max(2, int(os.environ.get('DB_POOL_MIN_CONN', '2') or 2))
     max_conn = max(min_conn, int(os.environ.get('DB_POOL_MAX_CONN', '20') or 20))
     _DB_POOL = pool.ThreadedConnectionPool(
         minconn=min_conn,
@@ -1367,6 +1368,7 @@ def format_timestamp(ts):
 
 def save_student_with_cursor(c, school_id, student_id, student_data):
     """Save one student using an existing DB cursor/transaction."""
+    logging.info(f"save_student_with_cursor called: school_id={school_id}, student_id={student_id}")
     firstname = normalize_person_name(student_data.get('firstname', ''))
     subjects = _dedupe_keep_order([normalize_subject_name(s) for s in (student_data.get('subjects', []) or []) if s])
     subjects_str = json.dumps(subjects)
@@ -3928,16 +3930,17 @@ def get_next_student_index(school_id, first_year_class):
     """Get next numeric index for generated IDs in a first-year class."""
     with db_connection() as conn:
         c = conn.cursor()
-        db_execute(c, '''SELECT student_id FROM students
-                       WHERE school_id = ? AND first_year_class = ?''',
+        # Extract numeric index from student_id and find max in one query
+        db_execute(c, '''SELECT COALESCE(
+                           MAX(CAST(SPLIT_PART(student_id, '/', 3) AS INTEGER)), 0
+                         )
+                       FROM students
+                       WHERE school_id = ? 
+                         AND first_year_class = ?
+                         AND student_id LIKE '%/%/%/%' ''',
                    (school_id, first_year_class))
-        max_index = 0
-        for row in c.fetchall():
-            idx = extract_generated_id_index(row[0] if row else '')
-            if idx is None:
-                continue
-            if idx > max_index:
-                max_index = idx
+        row = c.fetchone()
+        max_index = int(row[0] or 0) if row else 0
         return max_index + 1
 
 def get_next_student_index_for_class(school_id, classname):
@@ -3947,16 +3950,17 @@ def get_next_student_index_for_class(school_id, classname):
     """
     with db_connection() as conn:
         c = conn.cursor()
-        db_execute(c, '''SELECT student_id FROM students
-                      WHERE school_id = ? AND LOWER(classname) = LOWER(?)''',
+        # Extract numeric index from student_id and find max in one query
+        db_execute(c, '''SELECT COALESCE(
+                           MAX(CAST(SPLIT_PART(student_id, '/', 3) AS INTEGER)), 0
+                         )
+                       FROM students
+                       WHERE school_id = ? 
+                         AND LOWER(classname) = LOWER(?)
+                         AND student_id LIKE '%/%/%/%' ''',
                    (school_id, classname))
-        max_index = 0
-        for row in c.fetchall():
-            idx = extract_generated_id_index(row[0] if row else '')
-            if idx is None:
-                continue
-            if idx > max_index:
-                max_index = idx
+        row = c.fetchone()
+        max_index = int(row[0] or 0) if row else 0
         return max_index + 1
 
 def promote_students(school_id, from_class, to_class, action_by_student, term=''):
@@ -5434,7 +5438,8 @@ def school_admin_add_students_by_class():
         
         if added_students:
             flash(f'Successfully added {len(added_students)} students to {classname}!', 'success')
-            selected_class = classname
+            # Redirect to GET to prevent accidental form resubmission on refresh
+            return redirect(url_for('school_admin_add_students_by_class', **{'class': classname}))
 
     # Always build listing from fresh DB state so ordering and new additions are correct.
     all_students = load_students(school_id)
