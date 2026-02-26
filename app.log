@@ -17237,3 +17237,66 @@ with app.app_context(). See the documentation for more information.
 2026-02-26 19:50:40,146 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
 2026-02-26 19:50:40,193 - WARNING -  * Debugger is active!
 2026-02-26 19:50:40,195 - INFO -  * Debugger PIN: 988-619-374
+2026-02-26 20:31:34,245 - INFO -  * Detected change in 'C:\\Aka\\School_Result\\migrate.py', reloading
+2026-02-26 20:31:34,552 - INFO -  * Restarting with stat
+2026-02-26 20:31:36,775 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-02-26 20:31:36,775 - INFO - DB startup config: RUN_STARTUP_DDL=True, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-02-26 20:31:36,775 - INFO - Database schema is managed via Flask-Migrate. Run 'flask db upgrade' to apply migrations.
+2026-02-26 20:31:36,775 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-02-26 20:31:36,846 - WARNING -  * Debugger is active!
+2026-02-26 20:31:36,850 - INFO -  * Debugger PIN: 988-619-374
+2026-02-26 20:31:37,911 - INFO -  * Detected change in 'C:\\Aka\\School_Result\\migrate.py', reloading
+2026-02-26 20:31:38,075 - INFO -  * Restarting with stat
+2026-02-26 20:31:39,879 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-02-26 20:31:39,880 - INFO - DB startup config: RUN_STARTUP_DDL=True, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-02-26 20:31:39,880 - INFO - Database schema is managed via Flask-Migrate. Run 'flask db upgrade' to apply migrations.
+2026-02-26 20:31:39,880 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-02-26 20:31:39,948 - WARNING -  * Debugger is active!
+2026-02-26 20:31:39,951 - INFO -  * Debugger PIN: 988-619-374
+2026-02-26 20:31:43,176 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-02-26 20:31:43,177 - INFO - DB startup config: RUN_STARTUP_DDL=True, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-02-26 20:31:43,177 - INFO - Database schema is managed via Flask-Migrate. Run 'flask db upgrade' to apply migrations.
+2026-02-26 20:31:43,177 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-02-26 20:41:37,061 - INFO -  * Detected change in 'C:\\Aka\\School_Result\\migrate.py', reloading
+2026-02-26 20:41:37,265 - INFO -  * Restarting with stat
+2026-02-26 20:41:39,472 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-02-26 20:41:39,472 - INFO - DB startup config: RUN_STARTUP_DDL=True, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-02-26 20:41:39,472 - INFO - Database schema is managed via Flask-Migrate. Run 'flask db upgrade' to apply migrations.
+2026-02-26 20:41:39,472 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-02-26 20:41:39,543 - WARNING -  * Debugger is active!
+2026-02-26 20:41:39,546 - INFO -  * Debugger PIN: 988-619-374
+2026-02-26 20:41:41,624 - INFO -  * Detected change in 'C:\\Aka\\School_Result\\migrate.py', reloading
+2026-02-26 20:41:41,859 - INFO -  * Restarting with stat
+2026-02-26 20:41:44,026 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-02-26 20:41:44,027 - INFO - DB startup config: RUN_STARTUP_DDL=True, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-02-26 20:41:44,027 - INFO - Database schema is managed via Flask-Migrate. Run 'flask db upgrade' to apply migrations.
+2026-02-26 20:41:44,027 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-02-26 20:41:44,125 - WARNING -  * Debugger is active!
+2026-02-26 20:41:44,130 - INFO -  * Debugger PIN: 988-619-374
+2026-02-26 20:41:52,337 - INFO -  * Detected change in 'C:\\Aka\\School_Result\\migrations\\env.py', reloading
+2026-02-26 20:41:52,499 - INFO -  * Restarting with stat
+2026-02-26 20:41:54,445 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-02-26 20:41:54,446 - INFO - DB startup config: RUN_STARTUP_DDL=True, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-02-26 20:41:54,446 - INFO - Database schema is managed via Flask-Migrate. Run 'flask db upgrade' to apply migrations.
+2026-02-26 20:41:54,446 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-02-26 20:41:54,508 - WARNING -  * Debugger is active!
+2026-02-26 20:41:54,514 - INFO -  * Debugger PIN: 988-619-374
+2026-02-26 20:51:40,407 - INFO - 127.0.0.1 - - [26/Feb/2026 20:51:40] "[32mGET /menu HTTP/1.1[0m" 302 -
+2026-02-26 20:51:40,591 - INFO - 127.0.0.1 - - [26/Feb/2026 20:51:40] "GET /school-admin HTTP/1.1" 200 -
+2026-02-26 20:51:40,842 - INFO - 127.0.0.1 - - [26/Feb/2026 20:51:40] "GET /manifest.webmanifest HTTP/1.1" 200 -
+2026-02-26 20:51:42,559 - INFO - 127.0.0.1 - - [26/Feb/2026 20:51:42] "GET /sw.js HTTP/1.1" 200 -
+2026-02-26 20:51:42,821 - INFO - 127.0.0.1 - - [26/Feb/2026 20:51:42] "[32mGET /logout HTTP/1.1[0m" 302 -
+2026-02-26 20:51:42,850 - INFO - 127.0.0.1 - - [26/Feb/2026 20:51:42] "GET / HTTP/1.1" 200 -
+2026-02-26 20:51:42,950 - INFO - 127.0.0.1 - - [26/Feb/2026 20:51:42] "[36mGET /manifest.webmanifest HTTP/1.1[0m" 304 -
+2026-02-26 20:51:44,598 - INFO - 127.0.0.1 - - [26/Feb/2026 20:51:44] "[36mGET /sw.js HTTP/1.1[0m" 304 -
+2026-02-26 20:52:09,422 - INFO - 127.0.0.1 - - [26/Feb/2026 20:52:09] "[32mPOST /login HTTP/1.1[0m" 302 -
+2026-02-26 20:52:09,496 - INFO - 127.0.0.1 - - [26/Feb/2026 20:52:09] "GET /super-admin HTTP/1.1" 200 -
+2026-02-26 20:52:09,670 - INFO - 127.0.0.1 - - [26/Feb/2026 20:52:09] "[36mGET /manifest.webmanifest HTTP/1.1[0m" 304 -
+2026-02-26 20:52:11,264 - INFO - 127.0.0.1 - - [26/Feb/2026 20:52:11] "[36mGET /sw.js HTTP/1.1[0m" 304 -
+2026-02-26 21:16:25,621 - INFO - 127.0.0.1 - - [26/Feb/2026 21:16:25] "[32mGET /logout HTTP/1.1[0m" 302 -
+2026-02-26 21:16:25,641 - INFO - 127.0.0.1 - - [26/Feb/2026 21:16:25] "GET / HTTP/1.1" 200 -
+2026-02-26 21:16:25,842 - INFO - 127.0.0.1 - - [26/Feb/2026 21:16:25] "[36mGET /manifest.webmanifest HTTP/1.1[0m" 304 -
+2026-02-26 21:16:27,557 - INFO - 127.0.0.1 - - [26/Feb/2026 21:16:27] "[36mGET /sw.js HTTP/1.1[0m" 304 -
+2026-02-26 21:17:27,152 - INFO - 127.0.0.1 - - [26/Feb/2026 21:17:27] "POST /login HTTP/1.1" 200 -
+2026-02-26 21:17:27,292 - INFO - 127.0.0.1 - - [26/Feb/2026 21:17:27] "[36mGET /manifest.webmanifest HTTP/1.1[0m" 304 -
+2026-02-26 21:17:28,975 - INFO - 127.0.0.1 - - [26/Feb/2026 21:17:28] "[36mGET /sw.js HTTP/1.1[0m" 304 -
