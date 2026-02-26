@@ -279,6 +279,13 @@
       messages %} {% for category, message in messages %}
       <div class="flash {{ category }}">{{ message }}</div>
       {% endfor %} {% endif %} {% endwith %}
+      {% if not approval_workflow_enabled %}
+      <div class="flash error">
+        Approval workflow is not enabled. Run <code>python migrate.py</code> or
+        set <code>ALLOW_RUNTIME_SCHEMA_HEAL=1</code> and restart to add the
+        required columns.
+      </div>
+      {% endif %}
 
       <div class="stats-grid">
         <div class="stat-card">
@@ -605,8 +612,10 @@
               <th>Class</th>
               <th>Teacher</th>
               <th>Upload Status</th>
+              <th>Approval</th>
               <th>Published At</th>
               <th>Viewed</th>
+              <th>Action</th>
             </tr>
           </thead>
           <tbody>
@@ -627,8 +636,40 @@
                 >
                 {% endif %}
               </td>
+              <td>
+                {% if p.is_published %}
+                <span style="color: #27ae60; font-weight: 700">Approved</span>
+                {% elif p.approval_status == 'pending' %}
+                <span style="color: #8e44ad; font-weight: 700">Pending</span>
+                <br /><small>Submitted: {{ p.submitted_at or '-' }}</small>
+                {% elif p.approval_status == 'rejected' %}
+                <span style="color: #e74c3c; font-weight: 700">Rejected</span>
+                {% if p.review_note %}
+                <br /><small>{{ p.review_note }}</small>
+                {% endif %}
+                {% else %}
+                <span style="color: #7f8c8d; font-weight: 700">Not submitted</span>
+                {% endif %}
+              </td>
               <td>{{ p.published_at or '-' }}</td>
               <td>{{ p.viewed_count or 0 }}/{{ p.published_count or 0 }}</td>
+              <td>
+                {% if p.approval_status == 'pending' and not p.is_published %}
+                <form action="{{ url_for('school_admin_approve_results') }}" method="POST" style="display:inline;">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                  <input type="hidden" name="classname" value="{{ p.classname }}" />
+                  <button type="submit" class="btn btn-success" style="padding:6px 10px; font-size:0.85rem;">Approve</button>
+                </form>
+                <form action="{{ url_for('school_admin_reject_results') }}" method="POST" style="display:inline;">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                  <input type="hidden" name="classname" value="{{ p.classname }}" />
+                  <input type="text" name="review_note" placeholder="Reason (optional)" style="width:140px; padding:5px; margin:4px 0;" />
+                  <button type="submit" class="btn btn-primary" style="padding:6px 10px; font-size:0.85rem; background:#e74c3c;">Reject</button>
+                </form>
+                {% else %}
+                <span style="color:#7f8c8d;">-</span>
+                {% endif %}
+              </td>
             </tr>
             {% endfor %}
           </tbody>

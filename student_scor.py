@@ -5,12 +5,10 @@ A comprehensive Flask web application for managing student academic records,
 including multi-school support, role-based access, and advanced features.
 
 Author: OSondu Stanley
-Version: 2.1.0
+Version: 2.0.0
 """
 
 from flask import Flask, render_template, request, redirect, url_for, session, flash, send_file, Response
-from flask_wtf import FlaskForm
-from wtforms import StringField, PasswordField, IntegerField, TextAreaField, SelectField, validators
 from flask_wtf.csrf import CSRFProtect, CSRFError
 import json
 import csv
@@ -23,11 +21,10 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 import os
 import secrets
+import atexit
 from contextlib import contextmanager
-from tempfile import SpooledTemporaryFile
 
 import logging
-from dotenv import load_dotenv
 try:
     from dotenv import load_dotenv
 except Exception:
@@ -37,7 +34,60 @@ if load_dotenv:
     load_dotenv()
 
 app = Flask(__name__, template_folder='frontend/templates', static_folder='static')
-load_dotenv()
+
+PWA_HEAD_SNIPPET = """
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#1e3c72">
+<meta name="mobile-web-app-capable" content="yes">
+"""
+
+PWA_BODY_SNIPPET = """
+<script>
+(function () {
+  function ensureOfflineBanner() {
+    if (document.getElementById('offline-status-banner')) return;
+    var style = document.createElement('style');
+    style.textContent = '#offline-status-banner{position:fixed;left:12px;right:12px;bottom:12px;z-index:99999;display:none;padding:10px 12px;border-radius:10px;background:#b91c1c;color:#fff;font:600 14px/1.4 Arial,sans-serif;box-shadow:0 6px 18px rgba(0,0,0,.25)}#offline-status-banner.online{background:#0f766e}';
+    document.head.appendChild(style);
+    var banner = document.createElement('div');
+    banner.id = 'offline-status-banner';
+    banner.setAttribute('role', 'status');
+    banner.setAttribute('aria-live', 'polite');
+    document.body.appendChild(banner);
+
+    function showOnline() {
+      banner.textContent = 'Back online';
+      banner.classList.add('online');
+      banner.style.display = 'block';
+      setTimeout(function () {
+        if (navigator.onLine) banner.style.display = 'none';
+      }, 2500);
+    }
+    function showOffline() {
+      banner.textContent = 'You are offline. Live data may be unavailable.';
+      banner.classList.remove('online');
+      banner.style.display = 'block';
+    }
+    window.addEventListener('online', showOnline);
+    window.addEventListener('offline', showOffline);
+    if (!navigator.onLine) showOffline();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', ensureOfflineBanner);
+  } else {
+    ensureOfflineBanner();
+  }
+
+  if (!('serviceWorker' in navigator)) return;
+  var isSecure = window.isSecureContext || location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+  if (!isSecure) return;
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('/sw.js').catch(function () {});
+  });
+})();
+</script>
+"""
 ALLOW_INSECURE_DEFAULTS = os.environ.get('ALLOW_INSECURE_DEFAULTS', '').strip().lower() in ('1', 'true', 'yes')
 secret_key = os.environ.get('SECRET_KEY')
 if not secret_key:
@@ -57,28 +107,35 @@ csrf = CSRFProtect(app)
 DATABASE_URL = os.environ.get('DATABASE_URL', '').strip()
 if not DATABASE_URL.startswith(('postgres://', 'postgresql://')):
     raise RuntimeError("PostgreSQL is required. Set DATABASE_URL to a postgresql:// connection string.")
+RUN_STARTUP_DDL = os.environ.get('RUN_STARTUP_DDL', '0').strip().lower() in ('1', 'true', 'yes')
+RUN_STARTUP_BOOTSTRAP = os.environ.get('RUN_STARTUP_BOOTSTRAP', '0').strip().lower() in ('1', 'true', 'yes')
 SUPER_ADMIN_USERNAME = os.environ.get('SUPER_ADMIN_USERNAME', 'osondu stanley').strip()
 SUPER_ADMIN_PASSWORD = os.environ.get('SUPER_ADMIN_PASSWORD', '').strip()
-if not SUPER_ADMIN_PASSWORD:
-    raise RuntimeError("SUPER_ADMIN_PASSWORD is required. Set it in environment variables.")
-if len(SUPER_ADMIN_PASSWORD) < 12:
-    raise RuntimeError("SUPER_ADMIN_PASSWORD is too short. Use at least 12 characters.")
+if RUN_STARTUP_BOOTSTRAP:
+    if not SUPER_ADMIN_PASSWORD:
+        raise RuntimeError("SUPER_ADMIN_PASSWORD is required when RUN_STARTUP_BOOTSTRAP=1.")
+    if len(SUPER_ADMIN_PASSWORD) < 12:
+        raise RuntimeError("SUPER_ADMIN_PASSWORD is too short. Use at least 12 characters.")
 DEFAULT_STUDENT_PASSWORD = os.environ.get('DEFAULT_STUDENT_PASSWORD', '').strip()
 if not DEFAULT_STUDENT_PASSWORD:
     raise RuntimeError("DEFAULT_STUDENT_PASSWORD is required. Set it in environment variables.")
 if not ALLOW_INSECURE_DEFAULTS and len(DEFAULT_STUDENT_PASSWORD) < 8:
     raise RuntimeError("DEFAULT_STUDENT_PASSWORD is too short. Use at least 8 characters in production.")
-PK_COLUMN_SQL = 'SERIAL PRIMARY KEY'
+
 LOGIN_MAX_ATTEMPTS = 4
 LOGIN_LOCK_MINUTES = 15
+STARTUP_SCHEMA_VERSION = '2026-02-26.1'
+_DB_POOL = None
 
 def _adapt_query(query):
     return query.replace('?', '%s')
 
 def db_execute(cursor, query, params=None):
-    if params is None:
-        return cursor.execute(_adapt_query(query))
-    return cursor.execute(_adapt_query(query), params)
+    try:
+        cursor.execute(_adapt_query(query), params)
+    except Exception as e:
+        logging.error("Database Error: %s", e)
+        raise
 
 def canonicalize_classname(value):
     """Canonical class key used for shared subject catalog (e.g. 'Primary 1' -> 'PRIMARY1')."""
@@ -163,16 +220,103 @@ def get_db():
         raise RuntimeError("PostgreSQL backend requires psycopg2-binary") from exc
     return psycopg2.connect(DATABASE_URL, cursor_factory=DictCursor, connect_timeout=10)
 
+def _get_db_pool():
+    """Lazily initialize a PostgreSQL connection pool for request-time DB access."""
+    global _DB_POOL
+    if _DB_POOL is not None:
+        return _DB_POOL
+    try:
+        from psycopg2 import pool
+        from psycopg2.extras import DictCursor
+    except ImportError as exc:
+        raise RuntimeError("PostgreSQL backend requires psycopg2-binary") from exc
+    min_conn = max(1, int(os.environ.get('DB_POOL_MIN_CONN', '1') or 1))
+    max_conn = max(min_conn, int(os.environ.get('DB_POOL_MAX_CONN', '20') or 20))
+    _DB_POOL = pool.ThreadedConnectionPool(
+        minconn=min_conn,
+        maxconn=max_conn,
+        dsn=DATABASE_URL,
+        cursor_factory=DictCursor,
+        connect_timeout=10,
+    )
+    return _DB_POOL
+
+def _close_db_pool():
+    global _DB_POOL
+    if _DB_POOL is not None:
+        _DB_POOL.closeall()
+        _DB_POOL = None
+
+atexit.register(_close_db_pool)
+
 @contextmanager
 def db_connection(commit=False):
-    """Context manager for SQLite connections with optional commit."""
-    conn = get_db()
+    """Context manager for PostgreSQL pooled connections with optional commit."""
+    pool = _get_db_pool()
+    conn = pool.getconn()
     try:
         yield conn
         if commit:
             conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
-        conn.close()
+        pool.putconn(conn)
+
+_STUDENTS_PROMOTED_IS_BOOL = None
+_STUDENTS_HAS_USER_ID = None
+
+def students_has_user_id_column():
+    """Detect whether students.user_id exists on this DB."""
+    global _STUDENTS_HAS_USER_ID
+    if _STUDENTS_HAS_USER_ID is not None:
+        return _STUDENTS_HAS_USER_ID
+    try:
+        with db_connection() as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                '''SELECT 1
+                   FROM information_schema.columns
+                   WHERE table_schema = 'public'
+                     AND table_name = 'students'
+                     AND column_name = 'user_id'
+                   LIMIT 1''',
+            )
+            _STUDENTS_HAS_USER_ID = bool(c.fetchone())
+    except Exception:
+        _STUDENTS_HAS_USER_ID = False
+    return _STUDENTS_HAS_USER_ID
+
+def students_promoted_is_boolean():
+    """Detect whether students.promoted column is boolean on this DB."""
+    global _STUDENTS_PROMOTED_IS_BOOL
+    if _STUDENTS_PROMOTED_IS_BOOL is not None:
+        return _STUDENTS_PROMOTED_IS_BOOL
+    try:
+        with db_connection() as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                '''SELECT data_type
+                   FROM information_schema.columns
+                   WHERE table_schema = 'public'
+                     AND table_name = 'students'
+                     AND column_name = 'promoted'
+                   LIMIT 1''',
+            )
+            row = c.fetchone()
+            _STUDENTS_PROMOTED_IS_BOOL = bool(row and str(row[0]).strip().lower() == 'boolean')
+    except Exception:
+        _STUDENTS_PROMOTED_IS_BOOL = False
+    return _STUDENTS_PROMOTED_IS_BOOL
+
+def normalize_promoted_db_value(value):
+    """Return promoted value compatible with current students.promoted column type."""
+    if students_promoted_is_boolean():
+        return bool(value)
+    return 1 if bool(value) else 0
 
 # Set up logging
 logging.basicConfig(filename='app.log', level=logging.INFO, 
@@ -203,23 +347,37 @@ def _store_csv_error_export(content, filename):
     }
     return token
 
+
+
 def init_db():
     """Initialize the database with new schema for multi-school support."""
     conn = get_db()
     c = conn.cursor()
-    
+
+    # Fast path: if startup schema version is already applied, skip heavy DDL.
+    try:
+        db_execute(c, "SELECT to_regclass('public.app_meta')")
+        row = c.fetchone()
+        if row and row[0]:
+            db_execute(c, 'SELECT value FROM app_meta WHERE key = ?', ('schema_version',))
+            current = c.fetchone()
+            if current and str(current[0] or '').strip() == STARTUP_SCHEMA_VERSION:
+                logging.info("Schema already at version %s; skipping startup DDL.", STARTUP_SCHEMA_VERSION)
+                conn.close()
+                return
+    except Exception as exc:
+        # If fast-path check fails for any reason, continue with full migration path.
+        logging.warning("Schema fast-path check failed; continuing with startup DDL: %s", exc)
+
     def safe_exec_ignore(sql):
-        """
-        Execute DDL that may fail if column/index already exists, without
-        poisoning the whole PostgreSQL transaction.
-        """
-        db_execute(c, 'SAVEPOINT ddl_ignore')
+        c.execute('SAVEPOINT ddl_ignore_stmt')
         try:
-            db_execute(c, sql)
-        except Exception:
-            db_execute(c, 'ROLLBACK TO SAVEPOINT ddl_ignore')
+            c.execute(_adapt_query(sql))
+        except Exception as e:
+            c.execute('ROLLBACK TO SAVEPOINT ddl_ignore_stmt')
+            logging.info("Ignored DB migration statement error: %s", e)
         finally:
-            db_execute(c, 'RELEASE SAVEPOINT ddl_ignore')
+            c.execute('RELEASE SAVEPOINT ddl_ignore_stmt')
 
     def _quote_ident(name):
         return '"' + str(name).replace('"', '""') + '"'
@@ -229,6 +387,7 @@ def init_db():
         Drop any FK constraints on public tables that include a school_id column.
         Legacy deployments may have varying FK names/types.
         """
+        db_execute(c, 'SAVEPOINT ddl_ignore')
         try:
             db_execute(
                 c,
@@ -252,11 +411,13 @@ def init_db():
                     f'DROP CONSTRAINT IF EXISTS {_quote_ident(con_name)}'
                 )
         except Exception:
-            pass
+            db_execute(c, 'ROLLBACK TO SAVEPOINT ddl_ignore')
+        finally:
+            db_execute(c, "RELEASE SAVEPOINT ddl_ignore")
 
     # Users table with roles: super_admin, school_admin, teacher, student
-    db_execute(c, f'''CREATE TABLE IF NOT EXISTS users (
-                        id {PK_COLUMN_SQL},
+    db_execute(c, '''CREATE TABLE IF NOT EXISTS users (
+                        id SERIAL PRIMARY KEY,
                         username TEXT UNIQUE NOT NULL,
                         password_hash TEXT NOT NULL,
                         role TEXT DEFAULT 'student',
@@ -289,8 +450,8 @@ def init_db():
     safe_exec_ignore('ALTER TABLE users ADD COLUMN last_login_at TIMESTAMP')
     
     # Schools table
-    db_execute(c, f'''CREATE TABLE IF NOT EXISTS schools (
-                        id {PK_COLUMN_SQL},
+    db_execute(c, '''CREATE TABLE IF NOT EXISTS schools (
+                        id SERIAL PRIMARY KEY,
                         school_id TEXT UNIQUE NOT NULL,
                         school_name TEXT NOT NULL,
                         location TEXT,
@@ -335,10 +496,7 @@ def init_db():
     # Migration: Add school_id column if it doesn't exist (for legacy databases)
     safe_exec_ignore("ALTER TABLE schools ADD COLUMN school_id TEXT")
     # Backfill school_id for existing schools (using id column value)
-    try:
-        db_execute(c, "UPDATE schools SET school_id = CAST(id AS TEXT) WHERE school_id IS NULL OR school_id = ''")
-    except Exception:
-        pass  # Skip if already up to date or column doesn't exist
+    safe_exec_ignore("UPDATE schools SET school_id = CAST(id AS TEXT) WHERE school_id IS NULL OR school_id = ''")
     # Migrate all tables to use schools.id (as text) for school_id values.
     # This normalizes legacy text IDs to index-based IDs.
     safe_exec_ignore('ALTER TABLE class_assignments DROP CONSTRAINT IF EXISTS fk_class_assignments_teacher')
@@ -455,12 +613,12 @@ def init_db():
                  AND rv.school_id <> m.new_school_id'''
         )
         db_execute(c, 'UPDATE schools SET school_id = CAST(id AS TEXT) WHERE school_id <> CAST(id AS TEXT)')
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.warning("Legacy school_id backfill skipped due to error: %s", exc)
     
     # Students table with ID format: YY/school_id/index/start_year_yy
-    db_execute(c, f'''CREATE TABLE IF NOT EXISTS students (
-                        id {PK_COLUMN_SQL},
+    db_execute(c, '''CREATE TABLE IF NOT EXISTS students (
+                        id SERIAL PRIMARY KEY,
                         user_id TEXT NOT NULL,
                         school_id TEXT NOT NULL,
                         student_id TEXT NOT NULL,
@@ -478,8 +636,8 @@ def init_db():
                     )''')
     
     # Teachers table
-    db_execute(c, f'''CREATE TABLE IF NOT EXISTS teachers (
-                        id {PK_COLUMN_SQL},
+    db_execute(c, '''CREATE TABLE IF NOT EXISTS teachers (
+                        id SERIAL PRIMARY KEY,
                         user_id TEXT NOT NULL,
                         school_id TEXT NOT NULL,
                         firstname TEXT NOT NULL,
@@ -491,8 +649,8 @@ def init_db():
     safe_exec_ignore("ALTER TABLE teachers ADD COLUMN signature_image TEXT")
     
     # Class assignments
-    db_execute(c, f'''CREATE TABLE IF NOT EXISTS class_assignments (
-                        id {PK_COLUMN_SQL},
+    db_execute(c, '''CREATE TABLE IF NOT EXISTS class_assignments (
+                        id SERIAL PRIMARY KEY,
                         school_id TEXT NOT NULL,
                         teacher_id TEXT NOT NULL,
                         classname TEXT NOT NULL,
@@ -501,8 +659,8 @@ def init_db():
                     )''')
 
     # Class subject configuration (set by school admin).
-    db_execute(c, f'''CREATE TABLE IF NOT EXISTS class_subject_configs (
-                        id {PK_COLUMN_SQL},
+    db_execute(c, '''CREATE TABLE IF NOT EXISTS class_subject_configs (
+                        id SERIAL PRIMARY KEY,
                         school_id TEXT NOT NULL,
                         classname TEXT NOT NULL,
                         core_subjects TEXT NOT NULL,
@@ -516,8 +674,8 @@ def init_db():
                         UNIQUE(school_id, classname)
                     )''')
     # Global subject catalog by class (shared across all schools).
-    db_execute(c, f'''CREATE TABLE IF NOT EXISTS global_class_subject_catalog (
-                        id {PK_COLUMN_SQL},
+    db_execute(c, '''CREATE TABLE IF NOT EXISTS global_class_subject_catalog (
+                        id SERIAL PRIMARY KEY,
                         classname TEXT NOT NULL,
                         bucket TEXT NOT NULL,
                         subject_name TEXT NOT NULL,
@@ -526,8 +684,8 @@ def init_db():
                     )''')
 
     # Per-level assessment/exam configuration (primary, jss, ss).
-    db_execute(c, f'''CREATE TABLE IF NOT EXISTS assessment_configs (
-                        id {PK_COLUMN_SQL},
+    db_execute(c, '''CREATE TABLE IF NOT EXISTS assessment_configs (
+                        id SERIAL PRIMARY KEY,
                         school_id TEXT NOT NULL,
                         level TEXT NOT NULL,
                         exam_mode TEXT NOT NULL DEFAULT 'separate',
@@ -538,8 +696,8 @@ def init_db():
                         UNIQUE(school_id, level)
                     )''')
     # Result publication/ranking gate per class + term.
-    db_execute(c, f'''CREATE TABLE IF NOT EXISTS result_publications (
-                        id {PK_COLUMN_SQL},
+    db_execute(c, '''CREATE TABLE IF NOT EXISTS result_publications (
+                        id SERIAL PRIMARY KEY,
                         school_id TEXT NOT NULL,
                         classname TEXT NOT NULL,
                         term TEXT NOT NULL,
@@ -556,9 +714,15 @@ def init_db():
     safe_exec_ignore("ALTER TABLE result_publications ADD COLUMN academic_year TEXT DEFAULT ''")
     safe_exec_ignore("ALTER TABLE result_publications ADD COLUMN teacher_name TEXT DEFAULT ''")
     safe_exec_ignore("ALTER TABLE result_publications ADD COLUMN principal_name TEXT DEFAULT ''")
+    safe_exec_ignore("ALTER TABLE result_publications ADD COLUMN approval_status TEXT DEFAULT 'not_submitted'")
+    safe_exec_ignore("ALTER TABLE result_publications ADD COLUMN submitted_at TIMESTAMP")
+    safe_exec_ignore("ALTER TABLE result_publications ADD COLUMN submitted_by TEXT")
+    safe_exec_ignore("ALTER TABLE result_publications ADD COLUMN reviewed_at TIMESTAMP")
+    safe_exec_ignore("ALTER TABLE result_publications ADD COLUMN reviewed_by TEXT")
+    safe_exec_ignore("ALTER TABLE result_publications ADD COLUMN review_note TEXT")
     # Immutable snapshot of published student results per term.
-    db_execute(c, f'''CREATE TABLE IF NOT EXISTS published_student_results (
-                        id {PK_COLUMN_SQL},
+    db_execute(c, '''CREATE TABLE IF NOT EXISTS published_student_results (
+                        id SERIAL PRIMARY KEY,
                         school_id TEXT NOT NULL,
                         student_id TEXT NOT NULL,
                         firstname TEXT NOT NULL,
@@ -577,8 +741,8 @@ def init_db():
                         UNIQUE(school_id, student_id, academic_year, term)
                     )''')
     # Track when students view published results.
-    db_execute(c, f'''CREATE TABLE IF NOT EXISTS result_views (
-                        id {PK_COLUMN_SQL},
+    db_execute(c, '''CREATE TABLE IF NOT EXISTS result_views (
+                        id SERIAL PRIMARY KEY,
                         school_id TEXT NOT NULL,
                         student_id TEXT NOT NULL,
                         term TEXT NOT NULL,
@@ -592,8 +756,8 @@ def init_db():
     safe_exec_ignore('ALTER TABLE published_student_results ADD COLUMN academic_year TEXT')
     
     # Reports table
-    db_execute(c, f'''CREATE TABLE IF NOT EXISTS reports (
-                        id {PK_COLUMN_SQL},
+    db_execute(c, '''CREATE TABLE IF NOT EXISTS reports (
+                        id SERIAL PRIMARY KEY,
                         user_id TEXT NOT NULL,
                         description TEXT NOT NULL,
                         timestamp TEXT NOT NULL,
@@ -601,8 +765,8 @@ def init_db():
                         read_at TEXT
                     )''')
     # Login attempt tracking for brute-force protection.
-    db_execute(c, f'''CREATE TABLE IF NOT EXISTS login_attempts (
-                        id {PK_COLUMN_SQL},
+    db_execute(c, '''CREATE TABLE IF NOT EXISTS login_attempts (
+                        id SERIAL PRIMARY KEY,
                         endpoint TEXT NOT NULL,
                         username TEXT NOT NULL,
                         ip_address TEXT NOT NULL,
@@ -615,8 +779,10 @@ def init_db():
 
     # Create indexes
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)')
+    db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_users_username_lower ON users(LOWER(username))')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_students_school ON students(school_id)')
+    db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_students_student_id_lower ON students(LOWER(student_id))')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_students_class ON students(school_id, classname)')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_students_school_class_term ON students(school_id, classname, term)')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_students_school_term ON students(school_id, term)')
@@ -626,6 +792,7 @@ def init_db():
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_global_subject_catalog_class_bucket ON global_class_subject_catalog(classname, bucket)')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_assessment_configs_school_level ON assessment_configs(school_id, level)')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_result_views_lookup ON result_views(school_id, term, student_id)')
+    db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_result_views_lookup_year ON result_views(school_id, term, academic_year, student_id)')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_login_attempts_lookup ON login_attempts(endpoint, username, ip_address)')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_login_attempts_locked_until ON login_attempts(locked_until)')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_result_publications_school_class_term_year ON result_publications(school_id, classname, term, academic_year)')
@@ -707,11 +874,29 @@ def init_db():
     safe_exec_ignore('DROP INDEX IF EXISTS result_publications_school_id_classname_term_key')
     safe_exec_ignore('DROP INDEX IF EXISTS uq_result_publications')
     db_execute(c, 'CREATE UNIQUE INDEX IF NOT EXISTS uq_result_publications ON result_publications(school_id, classname, term, academic_year)')
+    # Auto-heal legacy/orphan school references before adding FK guards.
+    # This preserves rows by creating placeholder school records when needed.
+    db_execute(
+        c,
+        '''INSERT INTO schools (school_id, school_name)
+           SELECT x.school_id, CONCAT('Recovered School ', x.school_id)
+           FROM (
+               SELECT DISTINCT school_id FROM students WHERE school_id IS NOT NULL AND school_id <> ''
+               UNION
+               SELECT DISTINCT school_id FROM teachers WHERE school_id IS NOT NULL AND school_id <> ''
+               UNION
+               SELECT DISTINCT school_id FROM class_assignments WHERE school_id IS NOT NULL AND school_id <> ''
+           ) x
+           LEFT JOIN schools s ON s.school_id = x.school_id
+           WHERE s.school_id IS NULL'''
+    )
     # Best-effort tenancy integrity constraints for multi-school isolation.
-    safe_exec_ignore('ALTER TABLE students ADD CONSTRAINT fk_students_school FOREIGN KEY (school_id) REFERENCES schools(school_id) ON DELETE CASCADE')
-    safe_exec_ignore('ALTER TABLE teachers ADD CONSTRAINT fk_teachers_school FOREIGN KEY (school_id) REFERENCES schools(school_id) ON DELETE CASCADE')
-    safe_exec_ignore('ALTER TABLE class_assignments ADD CONSTRAINT fk_class_assignments_school FOREIGN KEY (school_id) REFERENCES schools(school_id) ON DELETE CASCADE')
-    safe_exec_ignore('ALTER TABLE class_assignments ADD CONSTRAINT fk_class_assignments_teacher FOREIGN KEY (school_id, teacher_id) REFERENCES teachers(school_id, user_id) ON DELETE CASCADE')
+    # Use NOT VALID for legacy deployments with pre-existing dirty data.
+    # This creates FK guards for new writes immediately and allows later validation.
+    safe_exec_ignore('ALTER TABLE students ADD CONSTRAINT fk_students_school FOREIGN KEY (school_id) REFERENCES schools(school_id) ON DELETE CASCADE NOT VALID')
+    safe_exec_ignore('ALTER TABLE teachers ADD CONSTRAINT fk_teachers_school FOREIGN KEY (school_id) REFERENCES schools(school_id) ON DELETE CASCADE NOT VALID')
+    safe_exec_ignore('ALTER TABLE class_assignments ADD CONSTRAINT fk_class_assignments_school FOREIGN KEY (school_id) REFERENCES schools(school_id) ON DELETE CASCADE NOT VALID')
+    safe_exec_ignore('ALTER TABLE class_assignments ADD CONSTRAINT fk_class_assignments_teacher FOREIGN KEY (school_id, teacher_id) REFERENCES teachers(school_id, user_id) ON DELETE CASCADE NOT VALID')
 
     # Seed global catalog defaults and backfill custom subjects from existing per-school configs.
     try:
@@ -739,8 +924,27 @@ def init_db():
                     values = []
                 for subject in values:
                     _upsert_global_catalog_subject_with_cursor(c, classname, bucket, subject)
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.warning("Global subject catalog backfill skipped due to error: %s", exc)
+
+    # Persist schema version marker so subsequent startups can skip heavy DDL.
+    db_execute(
+        c,
+        '''CREATE TABLE IF NOT EXISTS app_meta (
+               key TEXT PRIMARY KEY,
+               value TEXT NOT NULL,
+               updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+           )'''
+    )
+    db_execute(
+        c,
+        '''INSERT INTO app_meta (key, value, updated_at)
+           VALUES (?, ?, CURRENT_TIMESTAMP)
+           ON CONFLICT(key) DO UPDATE
+             SET value = excluded.value,
+                 updated_at = CURRENT_TIMESTAMP''',
+        ('schema_version', STARTUP_SCHEMA_VERSION),
+    )
 
     conn.commit()
     conn.close()
@@ -754,10 +958,6 @@ def verify_required_db_guards():
         'uq_class_term_assignment',
         'uq_result_publications',
     }
-    required_constraints = {
-        'fk_students_school',
-        'fk_teachers_school',
-    }
     with db_connection() as conn:
         c = conn.cursor()
         db_execute(
@@ -767,15 +967,61 @@ def verify_required_db_guards():
                WHERE schemaname = 'public' '''
         )
         present_indexes = {str(row[0]) for row in c.fetchall() if row and row[0]}
+        # Validate required FK guards by relationship semantics (not constraint name),
+        # because legacy deployments may have different FK names.
         db_execute(
             c,
-            '''SELECT conname
-               FROM pg_constraint'''
+            '''SELECT EXISTS (
+                   SELECT 1
+                   FROM pg_constraint con
+                   JOIN pg_class rel ON rel.oid = con.conrelid
+                   JOIN pg_namespace relns ON relns.oid = rel.relnamespace
+                   JOIN pg_class ref ON ref.oid = con.confrelid
+                   JOIN pg_namespace refns ON refns.oid = ref.relnamespace
+                   JOIN unnest(con.conkey) AS ck(attnum) ON TRUE
+                   JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = ck.attnum
+                   JOIN unnest(con.confkey) AS fk(attnum) ON TRUE
+                   JOIN pg_attribute b ON b.attrelid = con.confrelid AND b.attnum = fk.attnum
+                   WHERE con.contype = 'f'
+                     AND relns.nspname = 'public'
+                     AND refns.nspname = 'public'
+                     AND rel.relname = 'students'
+                     AND ref.relname = 'schools'
+                     AND a.attname = 'school_id'
+                     AND b.attname = 'school_id'
+               )'''
         )
-        present_constraints = {str(row[0]) for row in c.fetchall() if row and row[0]}
+        has_students_school_fk = bool((c.fetchone() or [False])[0])
+        db_execute(
+            c,
+            '''SELECT EXISTS (
+                   SELECT 1
+                   FROM pg_constraint con
+                   JOIN pg_class rel ON rel.oid = con.conrelid
+                   JOIN pg_namespace relns ON relns.oid = rel.relnamespace
+                   JOIN pg_class ref ON ref.oid = con.confrelid
+                   JOIN pg_namespace refns ON refns.oid = ref.relnamespace
+                   JOIN unnest(con.conkey) AS ck(attnum) ON TRUE
+                   JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = ck.attnum
+                   JOIN unnest(con.confkey) AS fk(attnum) ON TRUE
+                   JOIN pg_attribute b ON b.attrelid = con.confrelid AND b.attnum = fk.attnum
+                   WHERE con.contype = 'f'
+                     AND relns.nspname = 'public'
+                     AND refns.nspname = 'public'
+                     AND rel.relname = 'teachers'
+                     AND ref.relname = 'schools'
+                     AND a.attname = 'school_id'
+                     AND b.attname = 'school_id'
+               )'''
+        )
+        has_teachers_school_fk = bool((c.fetchone() or [False])[0])
 
     missing_indexes = sorted(required_indexes - present_indexes)
-    missing_constraints = sorted(required_constraints - present_constraints)
+    missing_constraints = []
+    if not has_students_school_fk:
+        missing_constraints.append('students.school_id -> schools.school_id FK')
+    if not has_teachers_school_fk:
+        missing_constraints.append('teachers.school_id -> schools.school_id FK')
     if not missing_indexes and not missing_constraints:
         return
 
@@ -788,14 +1034,31 @@ def verify_required_db_guards():
     logging.warning(message)
 
 # Initialize database (can be disabled when schema is managed by migrations).
-RUN_STARTUP_DDL = os.environ.get('RUN_STARTUP_DDL', '1').strip().lower() in ('1', 'true', 'yes')
+# Default to disabled for production safety; enable explicitly via env var.
+def _redact_database_url(url):
+    if not url:
+        return ''
+    # Mask password in postgresql://user:pass@host/db
+    return re.sub(r'//([^/@:]+):[^@]*@', r'//\1:***@', url)
+
+logging.info(
+    "DB startup config: RUN_STARTUP_DDL=%s, RUN_STARTUP_BOOTSTRAP=%s, DATABASE_URL=%s",
+    RUN_STARTUP_DDL,
+    RUN_STARTUP_BOOTSTRAP,
+    _redact_database_url(DATABASE_URL),
+)
 if RUN_STARTUP_DDL:
+    ddl_started_at = datetime.now()
     init_db()
+    verify_required_db_guards()
+    logging.info(
+        "Startup DDL flow completed in %.2fs",
+        (datetime.now() - ddl_started_at).total_seconds(),
+    )
 else:
     logging.warning("RUN_STARTUP_DDL is disabled. Ensure schema is already migrated before startup.")
-verify_required_db_guards()
 
-# Create super admin user
+# Create super admin user (bootstrap-only, disabled for normal runtime startup).
 def create_super_admin():
     """Ensure super admin account exists; do not reset password on every startup."""
     with db_connection() as conn:
@@ -809,7 +1072,7 @@ def create_super_admin():
                 )
             password_hash = generate_password_hash(SUPER_ADMIN_PASSWORD)
             db_execute(c, '''INSERT INTO users (username, password_hash, role, school_id) 
-                           VALUES (?, ?, ?, ?)''', (SUPER_ADMIN_USERNAME, password_hash, 'super_admin', None))
+                           VALUES (%s, %s, %s, %s)''', (SUPER_ADMIN_USERNAME, password_hash, 'super_admin', None))
             logging.info("Super admin user created: %s", SUPER_ADMIN_USERNAME)
         else:
             # Using DictCursor - access by column name instead of index
@@ -823,14 +1086,17 @@ def create_super_admin():
                 )
         conn.commit()
 
-create_super_admin()
+if RUN_STARTUP_BOOTSTRAP:
+    create_super_admin()
+else:
+    logging.info("RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.")
 
 def normalize_all_student_passwords():
     """Ensure all student accounts use the configured default password."""
     default_hash = generate_password_hash(DEFAULT_STUDENT_PASSWORD)
     with db_connection(commit=True) as conn:
         c = conn.cursor()
-        db_execute(c, "UPDATE users SET password_hash = ? WHERE role = 'student'", (default_hash,))
+        db_execute(c, "UPDATE users SET password_hash = %s WHERE role = 'student'", (default_hash,))
 
 if os.environ.get('RESET_STUDENT_PASSWORDS_ON_STARTUP', '').strip().lower() in ('1', 'true', 'yes'):
     if not ALLOW_INSECURE_DEFAULTS:
@@ -843,12 +1109,9 @@ def get_user(username):
     """Fetch one user by username."""
     with db_connection() as conn:
         c = conn.cursor()
-        db_execute(c, 'SELECT username, password_hash, role, school_id, terms_accepted FROM users WHERE username = ?', (username,))
+        # Case-insensitive lookup with index support (idx_users_username_lower).
+        db_execute(c, 'SELECT username, password_hash, role, school_id, terms_accepted FROM users WHERE LOWER(username) = LOWER(?) LIMIT 1', (username,))
         row = c.fetchone()
-        if not row:
-            # Fallback to case-insensitive lookup so login is less brittle.
-            db_execute(c, 'SELECT username, password_hash, role, school_id, terms_accepted FROM users WHERE LOWER(username) = LOWER(?) LIMIT 1', (username,))
-            row = c.fetchone()
         if not row:
             return None
         return {
@@ -1098,38 +1361,68 @@ def save_student_with_cursor(c, school_id, student_id, student_data):
     stream = student_data.get('stream', 'Science')
     first_year_class = student_data.get('first_year_class', student_data.get('classname', ''))
     number_of_subject = len(subjects)
-    user_id = student_id
-
-    db_execute(
-        c,
-        '''INSERT INTO students
-           (user_id, school_id, student_id, firstname, classname, first_year_class, term, stream, number_of_subject, subjects, scores, promoted)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(school_id, student_id) DO UPDATE SET
-             firstname = excluded.firstname,
-             classname = excluded.classname,
-             first_year_class = excluded.first_year_class,
-             term = excluded.term,
-             stream = excluded.stream,
-             number_of_subject = excluded.number_of_subject,
-             subjects = excluded.subjects,
-             scores = excluded.scores,
-             promoted = excluded.promoted''',
-        (
-            user_id,
-            school_id,
-            student_id,
-            firstname,
-            student_data['classname'],
-            first_year_class,
-            term,
-            stream,
-            number_of_subject,
-            subjects_str,
-            scores_str,
-            student_data.get('promoted', 0),
-        ),
-    )
+    if students_has_user_id_column():
+        user_id = student_id
+        db_execute(
+            c,
+            '''INSERT INTO students
+               (user_id, school_id, student_id, firstname, classname, first_year_class, term, stream, number_of_subject, subjects, scores, promoted)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(school_id, student_id) DO UPDATE SET
+                 firstname = excluded.firstname,
+                 classname = excluded.classname,
+                 first_year_class = excluded.first_year_class,
+                 term = excluded.term,
+                 stream = excluded.stream,
+                 number_of_subject = excluded.number_of_subject,
+                 subjects = excluded.subjects,
+                 scores = excluded.scores,
+                 promoted = excluded.promoted''',
+            (
+                user_id,
+                school_id,
+                student_id,
+                firstname,
+                student_data['classname'],
+                first_year_class,
+                term,
+                stream,
+                number_of_subject,
+                subjects_str,
+                scores_str,
+                normalize_promoted_db_value(student_data.get('promoted', 0)),
+            ),
+        )
+    else:
+        db_execute(
+            c,
+            '''INSERT INTO students
+               (school_id, student_id, firstname, classname, first_year_class, term, stream, number_of_subject, subjects, scores, promoted)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(school_id, student_id) DO UPDATE SET
+                 firstname = excluded.firstname,
+                 classname = excluded.classname,
+                 first_year_class = excluded.first_year_class,
+                 term = excluded.term,
+                 stream = excluded.stream,
+                 number_of_subject = excluded.number_of_subject,
+                 subjects = excluded.subjects,
+                 scores = excluded.scores,
+                 promoted = excluded.promoted''',
+            (
+                school_id,
+                student_id,
+                firstname,
+                student_data['classname'],
+                first_year_class,
+                term,
+                stream,
+                number_of_subject,
+                subjects_str,
+                scores_str,
+                normalize_promoted_db_value(student_data.get('promoted', 0)),
+            ),
+        )
 
 def hash_password(password):
     """Hash a password."""
@@ -1413,7 +1706,7 @@ def get_class_subject_config(school_id, classname):
         db_execute(
             c,
             '''SELECT classname, core_subjects, science_subjects, art_subjects,
-                      commercial_subjects, optional_subjects, optional_subject_limit
+                      commercial_subjects, optional_subjects
                FROM class_subject_configs
                WHERE school_id = ?
                  AND (
@@ -1438,7 +1731,6 @@ def get_class_subject_config(school_id, classname):
         'art_subjects': json.loads(row[3]) if row[3] else [],
         'commercial_subjects': json.loads(row[4]) if row[4] else [],
         'optional_subjects': json.loads(row[5]) if row[5] else [],
-        'optional_subject_limit': int(row[6] or 0),
     }
 
 def get_all_class_subject_configs(school_id):
@@ -1448,7 +1740,7 @@ def get_all_class_subject_configs(school_id):
         db_execute(
             c,
             '''SELECT classname, core_subjects, science_subjects, art_subjects,
-                      commercial_subjects, optional_subjects, optional_subject_limit
+                      commercial_subjects, optional_subjects
                FROM class_subject_configs
                WHERE school_id = ?
                ORDER BY classname''',
@@ -1465,7 +1757,6 @@ def get_all_class_subject_configs(school_id):
             'art_subjects': json.loads(row[3]) if row[3] else [],
             'commercial_subjects': json.loads(row[4]) if row[4] else [],
             'optional_subjects': json.loads(row[5]) if row[5] else [],
-            'optional_subject_limit': int(row[6] or 0),
         }
     return configs
 
@@ -1517,7 +1808,6 @@ def save_class_subject_config(
     art_subjects=None,
     commercial_subjects=None,
     optional_subjects=None,
-    optional_subject_limit=0,
 ):
     """Upsert class subject config."""
     classname = canonicalize_classname(classname)
@@ -1526,7 +1816,6 @@ def save_class_subject_config(
     art = _dedupe_keep_order([normalize_subject_name(s) for s in (art_subjects or [])])
     commercial = _dedupe_keep_order([normalize_subject_name(s) for s in (commercial_subjects or [])])
     optional = _dedupe_keep_order([normalize_subject_name(s) for s in (optional_subjects or [])])
-    optional_limit = max(0, int(optional_subject_limit or 0))
 
     with db_connection(commit=True) as conn:
         c = conn.cursor()
@@ -1534,15 +1823,14 @@ def save_class_subject_config(
             c,
             '''INSERT INTO class_subject_configs
                (school_id, classname, core_subjects, science_subjects, art_subjects,
-                commercial_subjects, optional_subjects, optional_subject_limit, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                commercial_subjects, optional_subjects, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                ON CONFLICT(school_id, classname) DO UPDATE SET
                  core_subjects = excluded.core_subjects,
                  science_subjects = excluded.science_subjects,
                  art_subjects = excluded.art_subjects,
                  commercial_subjects = excluded.commercial_subjects,
                  optional_subjects = excluded.optional_subjects,
-                 optional_subject_limit = excluded.optional_subject_limit,
                  updated_at = CURRENT_TIMESTAMP''',
             (
                 school_id,
@@ -1552,7 +1840,6 @@ def save_class_subject_config(
                 json.dumps(art),
                 json.dumps(commercial),
                 json.dumps(optional),
-                optional_limit,
             ),
         )
 
@@ -1612,10 +1899,6 @@ def build_subjects_from_config(classname, stream, config, selected_optional_subj
     invalid = [s for s in selected_optional if s not in allowed_optional]
     if invalid:
         return None, None, 'Invalid optional subject selection.'
-
-    optional_limit = int(config.get('optional_subject_limit', 0) or 0) if uses_stream else 0
-    if optional_limit > 0 and len(selected_optional) > optional_limit:
-        return None, None, f'Select at most {optional_limit} optional subject(s).'
 
     subjects.extend(selected_optional)
     subjects = _dedupe_keep_order(subjects)
@@ -2006,12 +2289,22 @@ def set_teacher_operations_enabled(school_id, enabled):
 def get_grade_config(school_id):
     """Get grade thresholds for a school."""
     school = get_school(school_id) or {}
+    a = max(0, min(100, safe_int(school.get('grade_a_min', 70), 70)))
+    b = max(0, min(100, safe_int(school.get('grade_b_min', 60), 60)))
+    c = max(0, min(100, safe_int(school.get('grade_c_min', 50), 50)))
+    d = max(0, min(100, safe_int(school.get('grade_d_min', 40), 40)))
+    # Keep ordering valid even if legacy data is corrupted.
+    a = max(a, b, c, d)
+    b = min(b, a)
+    c = min(c, b)
+    d = min(d, c)
+    pass_mark = max(0, min(100, safe_int(school.get('pass_mark', 50), 50)))
     return {
-        'a': int(school.get('grade_a_min', 70) or 70),
-        'b': int(school.get('grade_b_min', 60) or 60),
-        'c': int(school.get('grade_c_min', 50) or 50),
-        'd': int(school.get('grade_d_min', 40) or 40),
-        'pass_mark': int(school.get('pass_mark', 50) or 50),
+        'a': a,
+        'b': b,
+        'c': c,
+        'd': d,
+        'pass_mark': pass_mark,
     }
 
 def grade_from_score(score, cfg):
@@ -2031,6 +2324,24 @@ def status_from_score(score, cfg):
     """Get pass/fail status from score."""
     return 'Pass' if float(score or 0) >= cfg['pass_mark'] else 'Fail'
 
+def _coerce_number(value, default=0.0):
+    """Best-effort numeric coercion for legacy JSON score payloads."""
+    if isinstance(value, (int, float)):
+        number = float(value)
+    elif isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return float(default)
+        try:
+            number = float(text)
+        except (TypeError, ValueError):
+            return float(default)
+    else:
+        return float(default)
+    if not math.isfinite(number):
+        return float(default)
+    return number
+
 def subject_overall_mark(subject_scores):
     """Safely compute one subject total score from stored score fields."""
     if not isinstance(subject_scores, dict):
@@ -2041,17 +2352,22 @@ def subject_overall_mark(subject_scores):
     if not isinstance(total_test, (int, float)):
         total_test = 0.0
         for k, v in subject_scores.items():
-            if str(k).startswith('test_') and isinstance(v, (int, float)):
-                total_test += float(v)
+            if str(k).startswith('test_'):
+                total_test += _coerce_number(v, 0.0)
+    else:
+        total_test = _coerce_number(total_test, 0.0)
 
     total_exam = subject_scores.get('total_exam')
     if not isinstance(total_exam, (int, float)):
-        if isinstance(subject_scores.get('exam_score'), (int, float)):
-            total_exam = float(subject_scores.get('exam_score') or 0)
+        exam_score = subject_scores.get('exam_score')
+        if isinstance(exam_score, (int, float, str)):
+            total_exam = _coerce_number(exam_score, 0.0)
         else:
-            objective = float(subject_scores.get('objective', 0) or 0)
-            theory = float(subject_scores.get('theory', 0) or 0)
+            objective = _coerce_number(subject_scores.get('objective', 0), 0.0)
+            theory = _coerce_number(subject_scores.get('theory', 0), 0.0)
             total_exam = objective + theory
+    else:
+        total_exam = _coerce_number(total_exam, 0.0)
 
     # Backward-compat: if legacy rows only have overall_mark and no components, use it.
     has_components = (
@@ -2062,8 +2378,8 @@ def subject_overall_mark(subject_scores):
         isinstance(subject_scores.get('theory'), (int, float)) or
         any(str(k).startswith('test_') and isinstance(v, (int, float)) for k, v in subject_scores.items())
     )
-    if not has_components and isinstance(explicit, (int, float)):
-        return float(explicit)
+    if not has_components and isinstance(explicit, (int, float, str)):
+        return _coerce_number(explicit, 0.0)
 
     return float(total_test or 0) + float(total_exam or 0)
 
@@ -2080,6 +2396,232 @@ def safe_float(value, default):
         return float(value)
     except (TypeError, ValueError):
         return float(default)
+
+def _pdf_escape(text):
+    return str(text or '').replace('\\', '\\\\').replace('(', '\\(').replace(')', '\\)')
+
+def _build_simple_pdf(lines):
+    """
+    Minimal single-file PDF generator (no external dependencies).
+    Keeps output lightweight for server-side downloads.
+    """
+    normalized = [str(line or '') for line in (lines or [])]
+    max_lines = 56
+    if len(normalized) > max_lines:
+        normalized = normalized[:max_lines - 1] + ['... (truncated)']
+
+    y = 800
+    rendered = ['BT', '/F1 10 Tf']
+    for line in normalized:
+        rendered.append(f'1 0 0 1 40 {y} Tm ({_pdf_escape(line)}) Tj')
+        y -= 14
+    rendered.append('ET')
+    stream = '\n'.join(rendered).encode('latin-1', errors='replace')
+
+    objects = []
+    objects.append(b'1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n')
+    objects.append(b'2 0 obj\n<< /Type /Pages /Kids [4 0 R] /Count 1 >>\nendobj\n')
+    objects.append(b'3 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n')
+    objects.append(
+        b'4 0 obj\n'
+        b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] '
+        b'/Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>\n'
+        b'endobj\n'
+    )
+    objects.append(
+        b'5 0 obj\n<< /Length ' + str(len(stream)).encode('ascii') + b' >>\nstream\n'
+        + stream + b'\nendstream\nendobj\n'
+    )
+
+    out = bytearray(b'%PDF-1.4\n%\xe2\xe3\xcf\xd3\n')
+    offsets = [0]
+    for obj in objects:
+        offsets.append(len(out))
+        out.extend(obj)
+    xref_pos = len(out)
+    out.extend(f'xref\n0 {len(offsets)}\n'.encode('ascii'))
+    out.extend(b'0000000000 65535 f \n')
+    for off in offsets[1:]:
+        out.extend(f'{off:010d} 00000 n \n'.encode('ascii'))
+    out.extend(
+        f'trailer\n<< /Size {len(offsets)} /Root 1 0 R >>\nstartxref\n{xref_pos}\n%%EOF\n'.encode('ascii')
+    )
+    return bytes(out)
+
+def _build_rich_result_pdf_reportlab(report):
+    """
+    Rich PDF rendering with reportlab (if installed).
+    Returns bytes on success, otherwise None.
+    """
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.lib.units import mm
+        from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+    except Exception:
+        return None
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=12 * mm,
+        rightMargin=12 * mm,
+        topMargin=10 * mm,
+        bottomMargin=10 * mm,
+        title="Academic Report Card",
+    )
+    styles = getSampleStyleSheet()
+    story = []
+
+    school_name = (report.get('school_name') or '').strip() or 'School Result'
+    student_name = (report.get('student_name') or '').strip()
+    student_id = (report.get('student_id') or '').strip()
+    class_name = (report.get('class_name') or '').strip()
+    term = (report.get('term') or '').strip()
+    year = (report.get('year') or '').strip()
+    average = report.get('average')
+    grade = (report.get('grade') or '').strip()
+    status = (report.get('status') or '').strip()
+    teacher_name = (report.get('teacher_name') or '').strip()
+    principal_name = (report.get('principal_name') or '').strip()
+    teacher_signature_ref = (report.get('teacher_signature') or '').strip()
+    principal_signature_ref = (report.get('principal_signature') or '').strip()
+    generated_on = (report.get('generated_on') or '').strip()
+    subject_rows = report.get('subject_rows') or []
+
+    def _decode_signature_ref(ref):
+        raw = (ref or '').strip()
+        if not raw:
+            return None
+        data_uri = re.match(r'^data:image/[^;]+;base64,(.+)$', raw, flags=re.IGNORECASE | re.DOTALL)
+        if data_uri:
+            try:
+                return base64.b64decode(data_uri.group(1), validate=False)
+            except Exception:
+                return None
+        if os.path.isfile(raw):
+            try:
+                with open(raw, 'rb') as f:
+                    return f.read()
+            except Exception:
+                return None
+        return None
+
+    def _signature_cell(ref):
+        blob = _decode_signature_ref(ref)
+        if not blob:
+            return Paragraph("-", styles['Normal'])
+        try:
+            img = Image(BytesIO(blob))
+            img.drawHeight = 14 * mm
+            img.drawWidth = 45 * mm
+            return img
+        except Exception:
+            return Paragraph("-", styles['Normal'])
+
+    story.append(Paragraph(f"<b>{_pdf_escape(school_name)}</b>", styles['Title']))
+    story.append(Paragraph("Academic Report Card", styles['Heading2']))
+    story.append(Spacer(1, 6))
+
+    meta_data = [
+        ["Student", student_name, "Student ID", student_id],
+        ["Class", class_name, "Term", term],
+        ["Academic Year", year or "-", "Generated", generated_on or "-"],
+        ["Average", _format_mark(average), "Grade / Status", f"{grade} / {status}"],
+    ]
+    meta_table = Table(meta_data, colWidths=[28 * mm, 58 * mm, 30 * mm, 58 * mm])
+    meta_table.setStyle(
+        TableStyle([
+            ('GRID', (0, 0), (-1, -1), 0.4, colors.grey),
+            ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f3f5f7')),
+            ('BACKGROUND', (2, 0), (2, -1), colors.HexColor('#f3f5f7')),
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 6),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 6),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ])
+    )
+    story.append(meta_table)
+    story.append(Spacer(1, 8))
+
+    subject_table_data = [[
+        "Subject", "Total Exam", "Highest", "Lowest", "Total", "Grade", "Position"
+    ]]
+    for row in subject_rows:
+        subject_table_data.append([
+            str(row.get('subject') or ''),
+            _format_mark(row.get('total_exam')),
+            _format_mark(row.get('highest')),
+            _format_mark(row.get('lowest')),
+            _format_mark(row.get('total')),
+            str(row.get('grade') or '-'),
+            str(row.get('position') or '-'),
+        ])
+    if len(subject_table_data) == 1:
+        subject_table_data.append(['-', '-', '-', '-', '-', '-', '-'])
+
+    subject_table = Table(
+        subject_table_data,
+        repeatRows=1,
+        colWidths=[50 * mm, 22 * mm, 22 * mm, 22 * mm, 20 * mm, 16 * mm, 20 * mm],
+    )
+    subject_table.setStyle(
+        TableStyle([
+            ('GRID', (0, 0), (-1, -1), 0.35, colors.HexColor('#8b8f94')),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1f3f7a')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8.5),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 4),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+            ('TOPPADDING', (0, 0), (-1, -1), 3),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ])
+    )
+    story.append(subject_table)
+    story.append(Spacer(1, 8))
+
+    signature_table = Table(
+        [
+            ["Teacher Signature", "Principal Signature"],
+            [_signature_cell(teacher_signature_ref), _signature_cell(principal_signature_ref)],
+            [teacher_name or "-", principal_name or "-"],
+            ["(Term Class Teacher)", "(Principal)"],
+        ],
+        colWidths=[86 * mm, 86 * mm],
+    )
+    signature_table.setStyle(
+        TableStyle([
+            ('GRID', (0, 0), (-1, -1), 0.35, colors.HexColor('#8b8f94')),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f3f5f7')),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 4),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ])
+    )
+    story.append(signature_table)
+    doc.build(story)
+    return buffer.getvalue()
+
+def _format_mark(value):
+    if value is None:
+        return '-'
+    num = _coerce_number(value, 0.0)
+    return f'{num:.1f}'
 
 def get_current_term(school):
     return (school or {}).get('current_term') or 'First Term'
@@ -2211,6 +2753,8 @@ def is_student_score_complete(student, school, term):
 
 def set_result_published(school_id, classname, term, academic_year, teacher_id, is_published, teacher_name='', principal_name=''):
     """Publish/unpublish a class result for a term."""
+    ensure_result_publication_approval_columns()
+    has_approval_cols = result_publication_has_approval_columns()
     school = get_school(school_id) or {}
     resolved_principal_name = (principal_name or school.get('principal_name', '') or '').strip()
     resolved_teacher_name = (teacher_name or '').strip()
@@ -2232,30 +2776,69 @@ def set_result_published(school_id, classname, term, academic_year, teacher_id, 
                 resolved_teacher_name = str(teacher_id)
     with db_connection(commit=True) as conn:
         c = conn.cursor()
-        db_execute(
-            c,
-            '''INSERT INTO result_publications
-               (school_id, classname, term, academic_year, teacher_id, teacher_name, principal_name, is_published, published_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-               ON CONFLICT(school_id, classname, term, academic_year) DO UPDATE SET
-                 teacher_id = excluded.teacher_id,
-                 teacher_name = excluded.teacher_name,
-                 principal_name = excluded.principal_name,
-                 is_published = excluded.is_published,
-                 published_at = excluded.published_at,
-                 updated_at = CURRENT_TIMESTAMP''',
-            (
-                school_id,
-                classname,
-                term,
-                academic_year or '',
-                teacher_id,
-                resolved_teacher_name,
-                resolved_principal_name,
-                1 if is_published else 0,
-                datetime.now().isoformat() if is_published else None,
-            ),
-        )
+        if has_approval_cols:
+            db_execute(
+                c,
+                '''INSERT INTO result_publications
+                   (school_id, classname, term, academic_year, teacher_id, teacher_name, principal_name, is_published, published_at,
+                    approval_status, submitted_at, submitted_by, reviewed_at, reviewed_by, review_note, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                   ON CONFLICT(school_id, classname, term, academic_year) DO UPDATE SET
+                     teacher_id = excluded.teacher_id,
+                     teacher_name = excluded.teacher_name,
+                     principal_name = excluded.principal_name,
+                     is_published = excluded.is_published,
+                     published_at = excluded.published_at,
+                     approval_status = excluded.approval_status,
+                     submitted_at = excluded.submitted_at,
+                     submitted_by = excluded.submitted_by,
+                     reviewed_at = excluded.reviewed_at,
+                     reviewed_by = excluded.reviewed_by,
+                     review_note = excluded.review_note,
+                     updated_at = CURRENT_TIMESTAMP''',
+                (
+                    school_id,
+                    classname,
+                    term,
+                    academic_year or '',
+                    teacher_id,
+                    resolved_teacher_name,
+                    resolved_principal_name,
+                    1 if is_published else 0,
+                    datetime.now().isoformat() if is_published else None,
+                    'approved' if is_published else 'not_submitted',
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                ),
+            )
+        else:
+            db_execute(
+                c,
+                '''INSERT INTO result_publications
+                   (school_id, classname, term, academic_year, teacher_id, teacher_name, principal_name, is_published, published_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                   ON CONFLICT(school_id, classname, term, academic_year) DO UPDATE SET
+                     teacher_id = excluded.teacher_id,
+                     teacher_name = excluded.teacher_name,
+                     principal_name = excluded.principal_name,
+                     is_published = excluded.is_published,
+                     published_at = excluded.published_at,
+                     updated_at = CURRENT_TIMESTAMP''',
+                (
+                    school_id,
+                    classname,
+                    term,
+                    academic_year or '',
+                    teacher_id,
+                    resolved_teacher_name,
+                    resolved_principal_name,
+                    1 if is_published else 0,
+                    datetime.now().isoformat() if is_published else None,
+                ),
+            )
 
 def is_result_published(school_id, classname, term, academic_year=''):
     with db_connection() as conn:
@@ -2270,59 +2853,207 @@ def is_result_published(school_id, classname, term, academic_year=''):
         row = c.fetchone()
         return bool(row and int(row[0]) == 1)
 
-def snapshot_published_results_for_class(school_id, classname, term):
-    """Save/refresh per-student published snapshots for one class+term."""
-    school = get_school(school_id) or {}
-    academic_year = school.get('academic_year', '')
-    grade_cfg = get_grade_config(school_id)
-    class_students = load_students(school_id, class_filter=classname, term_filter=term)
-    with db_connection(commit=True) as conn:
-        c = conn.cursor()
-        for sid, student in class_students.items():
-            scores = student.get('scores', {}) if isinstance(student.get('scores', {}), dict) else {}
-            overall_marks = [subject_overall_mark(s) for s in scores.values() if isinstance(s, dict)]
-            average_marks = (sum(overall_marks) / len(overall_marks)) if overall_marks else 0
-            grade = grade_from_score(average_marks, grade_cfg)
-            status = status_from_score(average_marks, grade_cfg)
+_RESULT_PUBLICATION_APPROVAL_COLS = (
+    'approval_status',
+    'submitted_at',
+    'submitted_by',
+    'reviewed_at',
+    'reviewed_by',
+    'review_note',
+)
+_RESULT_PUBLICATION_APPROVAL_STATE = None
+_RESULT_PUBLICATION_APPROVAL_WARNED = False
+
+def ensure_result_publication_approval_columns():
+    """Schema guard for approval workflow columns.
+
+    By default, request-time DDL is disabled. Run migration/bootstrap to apply
+    schema changes, or explicitly enable runtime schema heal via env var.
+    """
+    global _RESULT_PUBLICATION_APPROVAL_STATE, _RESULT_PUBLICATION_APPROVAL_WARNED
+    if _RESULT_PUBLICATION_APPROVAL_STATE is True:
+        return True
+    allow_runtime_heal = os.environ.get('ALLOW_RUNTIME_SCHEMA_HEAL', '0').strip().lower() in ('1', 'true', 'yes')
+    if not allow_runtime_heal:
+        present = result_publication_has_approval_columns()
+        _RESULT_PUBLICATION_APPROVAL_STATE = True if present else False
+        if not present and not _RESULT_PUBLICATION_APPROVAL_WARNED:
+            logging.warning(
+                "Approval columns missing on result_publications. "
+                "Run migrations (python migrate.py) or set ALLOW_RUNTIME_SCHEMA_HEAL=1 temporarily."
+            )
+            _RESULT_PUBLICATION_APPROVAL_WARNED = True
+        return present
+    try:
+        with db_connection(commit=True) as conn:
+            c = conn.cursor()
+            db_execute(c, "ALTER TABLE result_publications ADD COLUMN IF NOT EXISTS approval_status TEXT DEFAULT 'not_submitted'")
+            db_execute(c, "ALTER TABLE result_publications ADD COLUMN IF NOT EXISTS submitted_at TIMESTAMP")
+            db_execute(c, "ALTER TABLE result_publications ADD COLUMN IF NOT EXISTS submitted_by TEXT")
+            db_execute(c, "ALTER TABLE result_publications ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMP")
+            db_execute(c, "ALTER TABLE result_publications ADD COLUMN IF NOT EXISTS reviewed_by TEXT")
+            db_execute(c, "ALTER TABLE result_publications ADD COLUMN IF NOT EXISTS review_note TEXT")
+        _RESULT_PUBLICATION_APPROVAL_STATE = True
+        return True
+    except Exception as exc:
+        logging.warning("Approval schema auto-heal failed: %s", exc)
+        _RESULT_PUBLICATION_APPROVAL_STATE = False
+        return False
+
+def result_publication_has_approval_columns():
+    """Check if approval workflow columns exist on result_publications."""
+    global _RESULT_PUBLICATION_APPROVAL_STATE
+    if _RESULT_PUBLICATION_APPROVAL_STATE is True:
+        return True
+    if _RESULT_PUBLICATION_APPROVAL_STATE is False:
+        return False
+    try:
+        with db_connection() as conn:
+            c = conn.cursor()
             db_execute(
                 c,
-                '''INSERT INTO published_student_results
-                   (school_id, student_id, firstname, classname, academic_year, term, stream, number_of_subject, subjects, scores, teacher_comment, average_marks, grade, status, published_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                   ON CONFLICT(school_id, student_id, academic_year, term) DO UPDATE SET
-                     firstname = excluded.firstname,
-                     classname = excluded.classname,
-                     academic_year = excluded.academic_year,
-                     stream = excluded.stream,
-                     number_of_subject = excluded.number_of_subject,
-                     subjects = excluded.subjects,
-                     scores = excluded.scores,
-                     teacher_comment = excluded.teacher_comment,
-                     average_marks = excluded.average_marks,
-                     grade = excluded.grade,
-                     status = excluded.status,
-                     published_at = excluded.published_at''',
+                '''SELECT column_name
+                   FROM information_schema.columns
+                   WHERE table_schema = 'public'
+                     AND table_name = 'result_publications'
+                     AND column_name = ANY(%s)''',
+                (list(_RESULT_PUBLICATION_APPROVAL_COLS),),
+            )
+            present = {str(row[0]) for row in c.fetchall() if row and row[0]}
+            has_all = all(col in present for col in _RESULT_PUBLICATION_APPROVAL_COLS)
+            if has_all:
+                _RESULT_PUBLICATION_APPROVAL_STATE = True
+            return has_all
+    except Exception:
+        return False
+
+def get_result_publication_row(school_id, classname, term, academic_year=''):
+    ensure_result_publication_approval_columns()
+    has_approval_cols = result_publication_has_approval_columns()
+    with db_connection() as conn:
+        c = conn.cursor()
+        if has_approval_cols:
+            db_execute(
+                c,
+                '''SELECT school_id, classname, term, COALESCE(academic_year, ''), teacher_id, teacher_name, principal_name,
+                          is_published, published_at, COALESCE(approval_status, 'not_submitted'),
+                          submitted_at, submitted_by, reviewed_at, reviewed_by, review_note
+                   FROM result_publications
+                   WHERE school_id = ? AND classname = ? AND term = ? AND COALESCE(academic_year, '') = COALESCE(?, '')
+                   LIMIT 1''',
+                (school_id, classname, term, academic_year or ''),
+            )
+        else:
+            db_execute(
+                c,
+                '''SELECT school_id, classname, term, COALESCE(academic_year, ''), teacher_id, teacher_name, principal_name,
+                          is_published, published_at
+                   FROM result_publications
+                   WHERE school_id = ? AND classname = ? AND term = ? AND COALESCE(academic_year, '') = COALESCE(?, '')
+                   LIMIT 1''',
+                (school_id, classname, term, academic_year or ''),
+            )
+        row = c.fetchone()
+    if not row:
+        return {}
+    if not has_approval_cols:
+        return {
+            'school_id': row[0] or '',
+            'classname': row[1] or '',
+            'term': row[2] or '',
+            'academic_year': row[3] or '',
+            'teacher_id': row[4] or '',
+            'teacher_name': row[5] or '',
+            'principal_name': row[6] or '',
+            'is_published': bool(int(row[7] or 0)),
+            'published_at': row[8] or '',
+            'approval_status': 'approved' if bool(int(row[7] or 0)) else 'not_submitted',
+            'submitted_at': '',
+            'submitted_by': '',
+            'reviewed_at': '',
+            'reviewed_by': '',
+            'review_note': '',
+        }
+    return {
+        'school_id': row[0] or '',
+        'classname': row[1] or '',
+        'term': row[2] or '',
+        'academic_year': row[3] or '',
+        'teacher_id': row[4] or '',
+        'teacher_name': row[5] or '',
+        'principal_name': row[6] or '',
+        'is_published': bool(int(row[7] or 0)),
+        'published_at': row[8] or '',
+        'approval_status': (row[9] or 'not_submitted'),
+        'submitted_at': row[10] or '',
+        'submitted_by': row[11] or '',
+        'reviewed_at': row[12] or '',
+        'reviewed_by': row[13] or '',
+        'review_note': row[14] or '',
+    }
+
+def submit_result_approval_request(school_id, classname, term, academic_year, teacher_id):
+    ensure_result_publication_approval_columns()
+    school = get_school(school_id) or {}
+    resolved_principal_name = (school.get('principal_name', '') or '').strip()
+    teacher_profile = get_teachers(school_id).get(teacher_id, {})
+    resolved_teacher_name = f"{teacher_profile.get('firstname', '')} {teacher_profile.get('lastname', '')}".strip() or str(teacher_id)
+    submitted_at = datetime.now().isoformat()
+    has_approval_cols = result_publication_has_approval_columns()
+    with db_connection(commit=True) as conn:
+        c = conn.cursor()
+        if has_approval_cols:
+            db_execute(
+                c,
+                '''INSERT INTO result_publications
+                   (school_id, classname, term, academic_year, teacher_id, teacher_name, principal_name, is_published, published_at,
+                    approval_status, submitted_at, submitted_by, reviewed_at, reviewed_by, review_note, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL, 'pending', ?, ?, NULL, NULL, NULL, CURRENT_TIMESTAMP)
+                   ON CONFLICT(school_id, classname, term, academic_year) DO UPDATE SET
+                     teacher_id = excluded.teacher_id,
+                     teacher_name = excluded.teacher_name,
+                     principal_name = excluded.principal_name,
+                     is_published = 0,
+                     published_at = NULL,
+                     approval_status = 'pending',
+                     submitted_at = excluded.submitted_at,
+                     submitted_by = excluded.submitted_by,
+                     reviewed_at = NULL,
+                     reviewed_by = NULL,
+                     review_note = NULL,
+                     updated_at = CURRENT_TIMESTAMP''',
                 (
                     school_id,
-                    sid,
-                    student.get('firstname', ''),
                     classname,
-                    academic_year,
                     term,
-                    student.get('stream', 'N/A'),
-                    int(student.get('number_of_subject', 0) or 0),
-                    json.dumps(student.get('subjects', [])),
-                    json.dumps(scores),
-                    (student.get('teacher_comment') or '').strip(),
-                    float(average_marks),
-                    grade,
-                    status,
-                    datetime.now().isoformat(),
+                    academic_year or '',
+                    teacher_id,
+                    resolved_teacher_name,
+                    resolved_principal_name,
+                    submitted_at,
+                    teacher_id,
                 ),
             )
+        else:
+            db_execute(
+                c,
+                '''INSERT INTO result_publications
+                   (school_id, classname, term, academic_year, teacher_id, teacher_name, principal_name, is_published, published_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL, CURRENT_TIMESTAMP)
+                   ON CONFLICT(school_id, classname, term, academic_year) DO UPDATE SET
+                     teacher_id = excluded.teacher_id,
+                     teacher_name = excluded.teacher_name,
+                     principal_name = excluded.principal_name,
+                     is_published = 0,
+                     published_at = NULL,
+                     updated_at = CURRENT_TIMESTAMP''',
+                (school_id, classname, term, academic_year or '', teacher_id, resolved_teacher_name, resolved_principal_name),
+            )
 
-def publish_results_for_class_atomic(school_id, classname, term, teacher_id):
+def publish_results_for_class_atomic(school_id, classname, term, teacher_id, reviewed_by='', review_note=''):
     """Publish class results in a single transaction (snapshot + publish flag)."""
+    ensure_result_publication_approval_columns()
+    has_approval_cols = result_publication_has_approval_columns()
     school = get_school(school_id) or {}
     academic_year = school.get('academic_year', '')
     grade_cfg = get_grade_config(school_id)
@@ -2376,30 +3107,113 @@ def publish_results_for_class_atomic(school_id, classname, term, teacher_id):
                 ),
             )
 
+        if has_approval_cols:
+            db_execute(
+                c,
+                '''INSERT INTO result_publications
+                   (school_id, classname, term, academic_year, teacher_id, teacher_name, principal_name, is_published, published_at,
+                    approval_status, reviewed_at, reviewed_by, review_note, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'approved', ?, ?, ?, CURRENT_TIMESTAMP)
+                   ON CONFLICT(school_id, classname, term, academic_year) DO UPDATE SET
+                     teacher_id = excluded.teacher_id,
+                     teacher_name = excluded.teacher_name,
+                     principal_name = excluded.principal_name,
+                     is_published = excluded.is_published,
+                     published_at = excluded.published_at,
+                     approval_status = 'approved',
+                     reviewed_at = excluded.reviewed_at,
+                     reviewed_by = excluded.reviewed_by,
+                     review_note = excluded.review_note,
+                     updated_at = CURRENT_TIMESTAMP''',
+                (
+                    school_id,
+                    classname,
+                    term,
+                    academic_year,
+                    teacher_id,
+                    teacher_name,
+                    principal_name,
+                    1,
+                    datetime.now().isoformat(),
+                    datetime.now().isoformat(),
+                    reviewed_by or None,
+                    (review_note or '').strip() or None,
+                ),
+            )
+        else:
+            db_execute(
+                c,
+                '''INSERT INTO result_publications
+                   (school_id, classname, term, academic_year, teacher_id, teacher_name, principal_name, is_published, published_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                   ON CONFLICT(school_id, classname, term, academic_year) DO UPDATE SET
+                     teacher_id = excluded.teacher_id,
+                     teacher_name = excluded.teacher_name,
+                     principal_name = excluded.principal_name,
+                     is_published = excluded.is_published,
+                     published_at = excluded.published_at,
+                     updated_at = CURRENT_TIMESTAMP''',
+                (
+                    school_id,
+                    classname,
+                    term,
+                    academic_year,
+                    teacher_id,
+                    teacher_name,
+                    principal_name,
+                    1,
+                    datetime.now().isoformat(),
+                ),
+            )
+
+def review_result_approval_request(school_id, classname, term, academic_year, admin_user_id, approve, review_note=''):
+    ensure_result_publication_approval_columns()
+    row = get_result_publication_row(school_id, classname, term, academic_year)
+    if not row:
+        return False, 'No submission found for this class.'
+    if row.get('approval_status') != 'pending':
+        if row.get('is_published'):
+            return False, 'This class is already published.'
+        return False, 'Only pending submissions can be reviewed.'
+
+    if approve:
+        publish_results_for_class_atomic(
+            school_id=school_id,
+            classname=classname,
+            term=term,
+            teacher_id=row.get('teacher_id', ''),
+            reviewed_by=admin_user_id,
+            review_note=review_note,
+        )
+        return True, 'Results approved and published.'
+
+    if not result_publication_has_approval_columns():
+        return False, 'Approval columns are missing. Run migration and retry.'
+
+    with db_connection(commit=True) as conn:
+        c = conn.cursor()
         db_execute(
             c,
-            '''INSERT INTO result_publications
-               (school_id, classname, term, academic_year, teacher_id, teacher_name, principal_name, is_published, published_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-               ON CONFLICT(school_id, classname, term, academic_year) DO UPDATE SET
-                 teacher_id = excluded.teacher_id,
-                 teacher_name = excluded.teacher_name,
-                 principal_name = excluded.principal_name,
-                 is_published = excluded.is_published,
-                 published_at = excluded.published_at,
-                 updated_at = CURRENT_TIMESTAMP''',
+            '''UPDATE result_publications
+               SET is_published = 0,
+                   published_at = NULL,
+                   approval_status = 'rejected',
+                   reviewed_at = ?,
+                   reviewed_by = ?,
+                   review_note = ?,
+                   updated_at = CURRENT_TIMESTAMP
+               WHERE school_id = ? AND classname = ? AND term = ? AND COALESCE(academic_year, '') = COALESCE(?, '')''',
             (
+                datetime.now().isoformat(),
+                admin_user_id,
+                (review_note or '').strip() or None,
                 school_id,
                 classname,
                 term,
-                academic_year,
-                teacher_id,
-                teacher_name,
-                principal_name,
-                1,
-                datetime.now().isoformat(),
+                academic_year or '',
             ),
         )
+    return True, 'Submission rejected. Teacher can update and resubmit.'
 
 def get_published_terms_for_student(school_id, student_id, classname=''):
     with db_connection() as conn:
@@ -2617,10 +3431,13 @@ def get_viewed_student_ids_for_classes(school_id, classnames, term, academic_yea
         )
         return {row[0] for row in c.fetchall() if row and row[0]}
 
-def get_school_publication_statuses(school_id, term, academic_year=''):
+def get_school_publication_statuses(school_id, term, academic_year='', assignments=None):
     """Get class publication/view status for school admin dashboard."""
+    ensure_result_publication_approval_columns()
+    has_approval_cols = result_publication_has_approval_columns()
+    source_assignments = assignments if assignments is not None else get_class_assignments(school_id)
     assignments = [
-        a for a in get_class_assignments(school_id)
+        a for a in source_assignments
         if (a.get('term') or '') == term and (a.get('academic_year') or '') == (academic_year or '')
     ]
     classes = [a.get('classname', '') for a in assignments if a.get('classname')]
@@ -2629,19 +3446,48 @@ def get_school_publication_statuses(school_id, term, academic_year=''):
     publication_rows = {}
     with db_connection() as conn:
         c = conn.cursor()
-        db_execute(
-            c,
-            '''SELECT classname, teacher_id, is_published, published_at
-               FROM result_publications
-               WHERE school_id = ? AND term = ? AND COALESCE(academic_year, '') = COALESCE(?, '')''',
-            (school_id, term, academic_year or ''),
-        )
-        for row in c.fetchall():
-            publication_rows[row[0]] = {
-                'teacher_id': row[1],
-                'is_published': bool(int(row[2] or 0)),
-                'published_at': row[3] or '',
-            }
+        if has_approval_cols:
+            db_execute(
+                c,
+                '''SELECT classname, teacher_id, is_published, published_at,
+                          COALESCE(approval_status, 'not_submitted'),
+                          submitted_at, submitted_by, reviewed_at, reviewed_by, review_note
+                   FROM result_publications
+                   WHERE school_id = ? AND term = ? AND COALESCE(academic_year, '') = COALESCE(?, '')''',
+                (school_id, term, academic_year or ''),
+            )
+            for row in c.fetchall():
+                publication_rows[row[0]] = {
+                    'teacher_id': row[1],
+                    'is_published': bool(int(row[2] or 0)),
+                    'published_at': row[3] or '',
+                    'approval_status': row[4] or 'not_submitted',
+                    'submitted_at': row[5] or '',
+                    'submitted_by': row[6] or '',
+                    'reviewed_at': row[7] or '',
+                    'reviewed_by': row[8] or '',
+                    'review_note': row[9] or '',
+                }
+        else:
+            db_execute(
+                c,
+                '''SELECT classname, teacher_id, is_published, published_at
+                   FROM result_publications
+                   WHERE school_id = ? AND term = ? AND COALESCE(academic_year, '') = COALESCE(?, '')''',
+                (school_id, term, academic_year or ''),
+            )
+            for row in c.fetchall():
+                publication_rows[row[0]] = {
+                    'teacher_id': row[1],
+                    'is_published': bool(int(row[2] or 0)),
+                    'published_at': row[3] or '',
+                    'approval_status': 'approved' if bool(int(row[2] or 0)) else 'not_submitted',
+                    'submitted_at': '',
+                    'submitted_by': '',
+                    'reviewed_at': '',
+                    'reviewed_by': '',
+                    'review_note': '',
+                }
 
     out = []
     for a in assignments:
@@ -2655,10 +3501,81 @@ def get_school_publication_statuses(school_id, term, academic_year=''):
             'term': term,
             'is_published': bool(pub.get('is_published', False)),
             'published_at': pub.get('published_at', ''),
+            'approval_status': pub.get('approval_status', 'not_submitted'),
+            'submitted_at': pub.get('submitted_at', ''),
+            'submitted_by': pub.get('submitted_by', ''),
+            'reviewed_at': pub.get('reviewed_at', ''),
+            'reviewed_by': pub.get('reviewed_by', ''),
+            'review_note': pub.get('review_note', ''),
             'published_count': int(cnt.get('published_count', 0)),
             'viewed_count': int(cnt.get('viewed_count', 0)),
         })
     out.sort(key=lambda x: (x.get('classname', ''), x.get('teacher_name', '')))
+    return out
+
+def get_publication_rows_for_classes(school_id, term, academic_year, classnames):
+    """Bulk-fetch publication metadata for class list (avoids N+1 lookups)."""
+    classes = [c for c in (classnames or []) if c]
+    if not classes:
+        return {}
+    ensure_result_publication_approval_columns()
+    has_approval_cols = result_publication_has_approval_columns()
+    placeholders = ', '.join('?' for _ in classes)
+    params = [school_id, term, academic_year or '']
+    params.extend(classes)
+    out = {}
+    with db_connection() as conn:
+        c = conn.cursor()
+        if has_approval_cols:
+            db_execute(
+                c,
+                f'''SELECT classname, teacher_id, teacher_name, principal_name, is_published, published_at,
+                           COALESCE(approval_status, 'not_submitted'),
+                           submitted_at, submitted_by, reviewed_at, reviewed_by, review_note
+                    FROM result_publications
+                    WHERE school_id = ? AND term = ? AND COALESCE(academic_year, '') = COALESCE(?, '')
+                      AND classname IN ({placeholders})''',
+                tuple(params),
+            )
+            for row in c.fetchall():
+                out[row[0]] = {
+                    'classname': row[0] or '',
+                    'teacher_id': row[1] or '',
+                    'teacher_name': row[2] or '',
+                    'principal_name': row[3] or '',
+                    'is_published': bool(int(row[4] or 0)),
+                    'published_at': row[5] or '',
+                    'approval_status': row[6] or 'not_submitted',
+                    'submitted_at': row[7] or '',
+                    'submitted_by': row[8] or '',
+                    'reviewed_at': row[9] or '',
+                    'reviewed_by': row[10] or '',
+                    'review_note': row[11] or '',
+                }
+        else:
+            db_execute(
+                c,
+                f'''SELECT classname, teacher_id, teacher_name, principal_name, is_published, published_at
+                    FROM result_publications
+                    WHERE school_id = ? AND term = ? AND COALESCE(academic_year, '') = COALESCE(?, '')
+                      AND classname IN ({placeholders})''',
+                tuple(params),
+            )
+            for row in c.fetchall():
+                out[row[0]] = {
+                    'classname': row[0] or '',
+                    'teacher_id': row[1] or '',
+                    'teacher_name': row[2] or '',
+                    'principal_name': row[3] or '',
+                    'is_published': bool(int(row[4] or 0)),
+                    'published_at': row[5] or '',
+                    'approval_status': 'approved' if bool(int(row[4] or 0)) else 'not_submitted',
+                    'submitted_at': '',
+                    'submitted_by': '',
+                    'reviewed_at': '',
+                    'reviewed_by': '',
+                    'review_note': '',
+                }
     return out
 
 def build_subject_positions_for_student(school_id, student, school):
@@ -2742,18 +3659,30 @@ def build_positions_from_published_results(school, classname, term, class_result
     for subject in subjects or []:
         ranked = []
         for x in results_for_rank:
-            sdata = x.get('scores', {}).get(subject, {}) if isinstance(x.get('scores', {}), dict) else {}
+            scores_map = x.get('scores', {})
+            if not isinstance(scores_map, dict) or subject not in scores_map:
+                continue
+            sdata = scores_map.get(subject, {})
+            if not isinstance(sdata, dict):
+                continue
             mark = subject_overall_mark(sdata)
             ranked.append((x.get('student_id', ''), float(mark)))
         ranked.sort(key=lambda k: k[1], reverse=True)
         size = len(ranked)
+        highest = ranked[0][1] if ranked else None
+        lowest = ranked[-1][1] if ranked else None
         prev_score = None
         current_pos = 0
         for idx, (sid, score) in enumerate(ranked, 1):
             if prev_score is None or not same_score(score, prev_score):
                 current_pos = idx
             if sid == student_id:
-                subject_positions[subject] = {'pos': current_pos, 'size': size}
+                subject_positions[subject] = {
+                    'pos': current_pos,
+                    'size': size,
+                    'highest': highest,
+                    'lowest': lowest,
+                }
                 break
             prev_score = score
     return position, subject_positions
@@ -2830,6 +3759,47 @@ def load_students_for_classes(school_id, classnames, term_filter=''):
             }
         return students_data
 
+def get_student_filter_options(school_id, classnames=None):
+    """Return (available_classes, available_terms) without loading full student payloads."""
+    class_list = [str(c).strip() for c in (classnames or []) if str(c).strip()]
+    with db_connection() as conn:
+        c = conn.cursor()
+        where = ['school_id = ?']
+        params = [school_id]
+        if class_list:
+            placeholders = ','.join(['?'] * len(class_list))
+            where.append(f'classname IN ({placeholders})')
+            params.extend(class_list)
+        where_sql = ' AND '.join(where)
+
+        db_execute(
+            c,
+            f'''SELECT DISTINCT classname
+                FROM students
+                WHERE {where_sql}
+                  AND classname IS NOT NULL
+                  AND classname <> ''
+                ORDER BY classname''',
+            tuple(params),
+        )
+        available_classes = [(row[0] or '').strip() for row in c.fetchall() if row and (row[0] or '').strip()]
+
+        db_execute(
+            c,
+            f'''SELECT DISTINCT term
+                FROM students
+                WHERE {where_sql}
+                  AND term IS NOT NULL
+                  AND CHAR_LENGTH(BTRIM(term)) > 0''',
+            tuple(params),
+        )
+        available_terms = sorted(
+            {(row[0] or '').strip() for row in c.fetchall() if row and (row[0] or '').strip()},
+            key=lambda t: (term_sort_value(t), t),
+        )
+
+    return available_classes, available_terms
+
 def load_student(school_id, student_id):
     """Load a single student."""
     with db_connection() as conn:
@@ -2881,25 +3851,42 @@ def save_student(school_id, student_id, student_data):
         stream = student_data.get('stream', 'Science')
         first_year_class = student_data.get('first_year_class', student_data.get('classname', ''))
         number_of_subject = len(subjects)
-        # user_id is used for student login - same as student_id
-        user_id = student_id
-        
-        db_execute(c, '''INSERT INTO students
-                         (user_id, school_id, student_id, firstname, classname, first_year_class, term, stream, number_of_subject, subjects, scores, promoted)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                         ON CONFLICT(school_id, student_id) DO UPDATE SET
-                            firstname = excluded.firstname,
-                            classname = excluded.classname,
-                            first_year_class = excluded.first_year_class,
-                            term = excluded.term,
-                            stream = excluded.stream,
-                            number_of_subject = excluded.number_of_subject,
-                           subjects = excluded.subjects,
-                           scores = excluded.scores,
-                           promoted = excluded.promoted''',
-                   (user_id, school_id, student_id, firstname, student_data['classname'],
-                    first_year_class, term, stream, number_of_subject,
-                    subjects_str, scores_str, student_data.get('promoted', 0)))
+        if students_has_user_id_column():
+            # user_id is used for student login - same as student_id
+            user_id = student_id
+            db_execute(c, '''INSERT INTO students
+                             (user_id, school_id, student_id, firstname, classname, first_year_class, term, stream, number_of_subject, subjects, scores, promoted)
+                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                             ON CONFLICT(school_id, student_id) DO UPDATE SET
+                                firstname = excluded.firstname,
+                                classname = excluded.classname,
+                                first_year_class = excluded.first_year_class,
+                                term = excluded.term,
+                                stream = excluded.stream,
+                                number_of_subject = excluded.number_of_subject,
+                               subjects = excluded.subjects,
+                               scores = excluded.scores,
+                               promoted = excluded.promoted''',
+                       (user_id, school_id, student_id, firstname, student_data['classname'],
+                        first_year_class, term, stream, number_of_subject,
+                        subjects_str, scores_str, normalize_promoted_db_value(student_data.get('promoted', 0))))
+        else:
+            db_execute(c, '''INSERT INTO students
+                             (school_id, student_id, firstname, classname, first_year_class, term, stream, number_of_subject, subjects, scores, promoted)
+                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                             ON CONFLICT(school_id, student_id) DO UPDATE SET
+                                firstname = excluded.firstname,
+                                classname = excluded.classname,
+                                first_year_class = excluded.first_year_class,
+                                term = excluded.term,
+                                stream = excluded.stream,
+                                number_of_subject = excluded.number_of_subject,
+                               subjects = excluded.subjects,
+                               scores = excluded.scores,
+                               promoted = excluded.promoted''',
+                       (school_id, student_id, firstname, student_data['classname'],
+                        first_year_class, term, stream, number_of_subject,
+                        subjects_str, scores_str, normalize_promoted_db_value(student_data.get('promoted', 0))))
 
 def delete_student(school_id, student_id):
     """Delete a student."""
@@ -3034,7 +4021,7 @@ def promote_students(school_id, from_class, to_class, action_by_student, term=''
                 else:
                     new_subjects = []
                     new_stream = 'N/A'
-                promoted_flag = 1
+                promoted_flag = normalize_promoted_db_value(True)
                 db_execute(
                     c,
                     '''UPDATE students
@@ -3059,12 +4046,13 @@ def promote_students(school_id, from_class, to_class, action_by_student, term=''
                 db_execute(c, 'DELETE FROM users WHERE school_id = ? AND username = ? AND role = ?', (school_id, student_id, 'student'))
             else:
                 # Not passed / repeat class
+                promoted_value = normalize_promoted_db_value(False)
                 db_execute(
                     c,
                     '''UPDATE students
-                       SET promoted = 0, scores = ?
+                       SET promoted = %s, scores = %s
                        WHERE school_id = ? AND student_id = ?''',
-                    (json.dumps({}), school_id, student_id)
+                    (promoted_value, json.dumps({}), school_id, student_id)
                 )
 
 def rollover_school_term_data_with_cursor(c, school_id, from_term, to_term, from_year='', to_year=''):
@@ -3094,10 +4082,11 @@ def rollover_school_term_data_with_cursor(c, school_id, from_term, to_term, from
            ON CONFLICT(school_id, classname, term, academic_year) DO NOTHING''',
         (dst_term, dst_year, school_id, src_term, src_year),
     )
+    promoted_reset_sql = 'FALSE' if students_promoted_is_boolean() else '0'
     db_execute(
         c,
-        '''UPDATE students
-           SET term = ?, scores = ?, promoted = 0
+        f'''UPDATE students
+           SET term = ?, scores = ?, promoted = {promoted_reset_sql}
            WHERE school_id = ?
              AND LOWER(COALESCE(term, '')) = LOWER(COALESCE(?, ''))
              AND REGEXP_REPLACE(UPPER(COALESCE(classname, '')), '[^A-Z0-9]+', '', 'g') <> 'GRADUATED' ''',
@@ -3151,11 +4140,6 @@ def set_principal_signature(school_id, signature_image):
                WHERE school_id = ?''',
             (signature_image, datetime.now(), school_id),
         )
-
-def get_signatures_for_result(school_id, classname, term, academic_year=''):
-    """Resolve teacher+principal signatures tied to the publication record."""
-    details = get_result_signoff_details(school_id, classname, term, academic_year)
-    return details.get('teacher_signature', ''), details.get('principal_signature', '')
 
 def get_result_signoff_details(school_id, classname, term, academic_year=''):
     """Resolve signature images and signer names for published result authorization."""
@@ -3445,6 +4429,14 @@ def save_report(user_id, description):
 
 # ==================== ROUTES ====================
 
+@app.route('/sw.js')
+def service_worker():
+    return send_file('static/sw.js', mimetype='application/javascript')
+
+@app.route('/manifest.webmanifest')
+def web_manifest():
+    return send_file('static/manifest.webmanifest', mimetype='application/manifest+json')
+
 @app.route('/')
 def home():
     # Render the login page directly as the landing page
@@ -3508,6 +4500,38 @@ def enforce_school_operations_toggle():
         return redirect(url_for('school_admin_dashboard'))
 
     return None
+
+@app.after_request
+def apply_pwa_and_cache_headers(response):
+    """
+    Safe PWA policy:
+    - Inject manifest/SW registration into HTML responses.
+    - Prevent browser caching of authenticated dynamic pages.
+    """
+    try:
+        content_type = (response.content_type or '').lower()
+        if 'text/html' in content_type:
+            body = response.get_data(as_text=True)
+            if '</head>' in body and '/manifest.webmanifest' not in body:
+                body = body.replace('</head>', f'{PWA_HEAD_SNIPPET}\n</head>')
+            if '</body>' in body and "register('/sw.js')" not in body:
+                body = body.replace('</body>', f'{PWA_BODY_SNIPPET}\n</body>')
+            response.set_data(body)
+            response.headers['Content-Length'] = str(len(response.get_data()))
+    except Exception:
+        # Keep response delivery resilient even if HTML injection fails.
+        pass
+
+    path = (request.path or '').strip()
+    is_static_or_pwa = (
+        path.startswith('/static/')
+        or path in {'/manifest.webmanifest', '/sw.js'}
+    )
+    if session.get('user_id') and not is_static_or_pwa:
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+    return response
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -3825,7 +4849,13 @@ def school_admin_dashboard():
     teachers = get_teachers(school_id)
     class_counts = get_student_count_by_class(school_id)
     assignments = get_class_assignments(school_id)
-    publication_statuses = get_school_publication_statuses(school_id, current_term, current_year)
+    publication_statuses = get_school_publication_statuses(
+        school_id,
+        current_term,
+        current_year,
+        assignments=assignments,
+    )
+    approval_workflow_enabled = result_publication_has_approval_columns()
     last_login_at = format_timestamp(get_last_login_at(session.get('user_id')))
     has_principal_signature = bool((school or {}).get('principal_signature_image'))
     
@@ -3839,7 +4869,8 @@ def school_admin_dashboard():
                          current_year=current_year,
                          last_login_at=last_login_at,
                          has_principal_signature=has_principal_signature,
-                         publication_statuses=publication_statuses)
+                         publication_statuses=publication_statuses,
+                         approval_workflow_enabled=approval_workflow_enabled)
 
 @app.route('/school-admin/upload-principal-signature', methods=['POST'])
 def school_admin_upload_principal_signature():
@@ -3905,10 +4936,7 @@ def school_admin_class_subjects():
             commercial_subjects = _dedupe_keep_order(commercial_subjects + new_commercial)
         if new_optional:
             optional_subjects = _dedupe_keep_order(optional_subjects + new_optional)
-        try:
-            optional_limit = int(request.form.get('optional_subject_limit', 0))
-        except (TypeError, ValueError):
-            optional_limit = 0
+        
 
         uses_stream = class_uses_stream_for_school(school, classname)
         if not uses_stream:
@@ -3920,7 +4948,6 @@ def school_admin_class_subjects():
             art_subjects = []
             commercial_subjects = []
             optional_subjects = []
-            optional_limit = 0
 
         if not core_subjects:
             flash('Subjects offered are required.', 'error')
@@ -3950,7 +4977,6 @@ def school_admin_class_subjects():
                 art_subjects=art_subjects,
                 commercial_subjects=commercial_subjects,
                 optional_subjects=optional_subjects,
-                optional_subject_limit=max(0, optional_limit),
             )
             flash(f'Subject configuration saved for {classname}.', 'success')
         except Exception as exc:
@@ -4518,17 +5544,23 @@ def teacher_dashboard():
     }
     class_publish_status = {}
     class_view_status = get_class_published_view_counts(school_id, current_term, current_year, classes)
+    publication_rows = get_publication_rows_for_classes(school_id, current_term, current_year, classes)
     viewed_student_ids = get_viewed_student_ids_for_classes(school_id, classes, current_term, current_year)
     for classname in classes:
         class_students = [s for s in students.values() if s.get('classname') == classname and s.get('term') == current_term]
         total = len(class_students)
         completed = sum(1 for s in class_students if is_student_score_complete(s, school, current_term))
         class_views = class_view_status.get(classname, {})
+        pub = publication_rows.get(classname, {})
         class_publish_status[classname] = {
             'total': total,
             'completed': completed,
             'ready': total > 0 and completed == total,
-            'published': is_result_published(school_id, classname, current_term, current_year),
+            'published': bool(pub.get('is_published', False)),
+            'approval_status': pub.get('approval_status', 'not_submitted'),
+            'submitted_at': pub.get('submitted_at', ''),
+            'reviewed_at': pub.get('reviewed_at', ''),
+            'review_note': pub.get('review_note', ''),
             'published_students': int(class_views.get('published_count', 0)),
             'viewed_students': int(class_views.get('viewed_count', 0)),
         }
@@ -4591,6 +5623,10 @@ def teacher_publish_results():
     if is_result_published(school_id, classname, current_term, current_year):
         flash(f'{classname} ({current_term}) is already published. Republish is not allowed.', 'error')
         return redirect(url_for('teacher_dashboard'))
+    existing_pub = get_result_publication_row(school_id, classname, current_term, current_year)
+    if (existing_pub.get('approval_status') or '') == 'pending':
+        flash(f'{classname} ({current_term}) is already submitted and pending admin review.', 'error')
+        return redirect(url_for('teacher_dashboard'))
     class_students = load_students(school_id, class_filter=classname, term_filter=current_term)
     student_list = list(class_students.values())
     if not student_list:
@@ -4602,9 +5638,61 @@ def teacher_publish_results():
         flash(f'Cannot publish yet. Complete scores for all students in {classname} ({current_term}) first.', 'error')
         return redirect(url_for('teacher_dashboard'))
 
-    publish_results_for_class_atomic(school_id, classname, current_term, teacher_id)
-    flash(f'Results ranked/published for {classname} ({current_term}). Students can now view results.', 'success')
+    submit_result_approval_request(school_id, classname, current_term, current_year, teacher_id)
+    flash(f'Results submitted for admin approval: {classname} ({current_term}).', 'success')
     return redirect(url_for('teacher_dashboard'))
+
+@app.route('/school-admin/approve-results', methods=['POST'])
+def school_admin_approve_results():
+    if session.get('role') != 'school_admin':
+        return redirect(url_for('login'))
+    school_id = session.get('school_id')
+    admin_user_id = session.get('user_id')
+    classname = request.form.get('classname', '').strip()
+    if not classname:
+        flash('Class is required.', 'error')
+        return redirect(url_for('school_admin_dashboard'))
+    school = get_school(school_id) or {}
+    current_term = get_current_term(school)
+    current_year = school.get('academic_year', '')
+    review_note = (request.form.get('review_note', '') or '').strip()
+    ok, message = review_result_approval_request(
+        school_id=school_id,
+        classname=classname,
+        term=current_term,
+        academic_year=current_year,
+        admin_user_id=admin_user_id,
+        approve=True,
+        review_note=review_note,
+    )
+    flash(message, 'success' if ok else 'error')
+    return redirect(url_for('school_admin_dashboard'))
+
+@app.route('/school-admin/reject-results', methods=['POST'])
+def school_admin_reject_results():
+    if session.get('role') != 'school_admin':
+        return redirect(url_for('login'))
+    school_id = session.get('school_id')
+    admin_user_id = session.get('user_id')
+    classname = request.form.get('classname', '').strip()
+    if not classname:
+        flash('Class is required.', 'error')
+        return redirect(url_for('school_admin_dashboard'))
+    school = get_school(school_id) or {}
+    current_term = get_current_term(school)
+    current_year = school.get('academic_year', '')
+    review_note = (request.form.get('review_note', '') or '').strip()
+    ok, message = review_result_approval_request(
+        school_id=school_id,
+        classname=classname,
+        term=current_term,
+        academic_year=current_year,
+        admin_user_id=admin_user_id,
+        approve=False,
+        review_note=review_note,
+    )
+    flash(message, 'success' if ok else 'error')
+    return redirect(url_for('school_admin_dashboard'))
 
 @app.route('/teacher/allocate-stream', methods=['GET', 'POST'])
 def teacher_allocate_stream():
@@ -4625,10 +5713,6 @@ def teacher_allocate_stream():
     if not student:
         flash('Student not found.', 'error')
         return redirect(url_for('teacher_dashboard'))
-    if not teacher_has_class_access(school_id, teacher_id, student.get('classname', ''), term=current_term, academic_year=current_year):
-        flash('You are not assigned to this student class.', 'error')
-        return redirect(url_for('teacher_dashboard'))
-
     classname = student.get('classname', '')
     if not teacher_has_class_access(school_id, teacher_id, classname, term=current_term, academic_year=current_year):
         flash('You are not assigned to this class.', 'error')
@@ -4669,7 +5753,16 @@ def teacher_allocate_stream():
         flash(f'Stream allocated for {student.get("firstname", "")}.', 'success')
         return redirect(url_for('teacher_dashboard'))
 
-    return render_template('teacher/teacher_allocate_stream.html', student=student, config=config)
+    selected_optional_subjects = set(
+        s for s in (student.get('subjects') or [])
+        if s in (config.get('optional_subjects') or [])
+    )
+    return render_template(
+        'teacher/teacher_allocate_stream.html',
+        student=student,
+        config=config,
+        selected_optional_subjects=selected_optional_subjects,
+    )
 
 @app.route('/teacher/enter-scores', methods=['GET', 'POST'])
 def teacher_enter_scores():
@@ -5032,6 +6125,8 @@ def teacher_upload_csv():
             if processed_rows == 0:
                 raise ValueError('No valid data rows found. Fill at least Student ID and Subject in one row.')
 
+            ensure_result_publication_approval_columns()
+            has_approval_cols = result_publication_has_approval_columns()
             with db_connection(commit=True) as conn:
                 c = conn.cursor()
                 principal_name = (school.get('principal_name', '') or '').strip()
@@ -5039,20 +6134,43 @@ def teacher_upload_csv():
                 for sid, student_data in staged_students.items():
                     save_student_with_cursor(c, school_id, sid, student_data)
                 for classname in touched_classes:
-                    db_execute(
-                        c,
-                        '''INSERT INTO result_publications
-                           (school_id, classname, term, academic_year, teacher_id, teacher_name, principal_name, is_published, published_at, updated_at)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                           ON CONFLICT(school_id, classname, term, academic_year) DO UPDATE SET
-                             teacher_id = excluded.teacher_id,
-                             teacher_name = excluded.teacher_name,
-                             principal_name = excluded.principal_name,
-                             is_published = excluded.is_published,
-                             published_at = excluded.published_at,
-                             updated_at = CURRENT_TIMESTAMP''',
-                        (school_id, classname, current_term, current_year or '', teacher_id, teacher_name, principal_name, 0, None),
-                    )
+                    if has_approval_cols:
+                        db_execute(
+                            c,
+                            '''INSERT INTO result_publications
+                               (school_id, classname, term, academic_year, teacher_id, teacher_name, principal_name, is_published, published_at,
+                                approval_status, submitted_at, submitted_by, reviewed_at, reviewed_by, review_note, updated_at)
+                               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'not_submitted', NULL, NULL, NULL, NULL, NULL, CURRENT_TIMESTAMP)
+                               ON CONFLICT(school_id, classname, term, academic_year) DO UPDATE SET
+                                 teacher_id = excluded.teacher_id,
+                                 teacher_name = excluded.teacher_name,
+                                 principal_name = excluded.principal_name,
+                                 is_published = excluded.is_published,
+                                 published_at = excluded.published_at,
+                                 approval_status = excluded.approval_status,
+                                 submitted_at = NULL,
+                                 submitted_by = NULL,
+                                 reviewed_at = NULL,
+                                 reviewed_by = NULL,
+                                 review_note = NULL,
+                                 updated_at = CURRENT_TIMESTAMP''',
+                            (school_id, classname, current_term, current_year or '', teacher_id, teacher_name, principal_name, 0, None),
+                        )
+                    else:
+                        db_execute(
+                            c,
+                            '''INSERT INTO result_publications
+                               (school_id, classname, term, academic_year, teacher_id, teacher_name, principal_name, is_published, published_at, updated_at)
+                               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                               ON CONFLICT(school_id, classname, term, academic_year) DO UPDATE SET
+                                 teacher_id = excluded.teacher_id,
+                                 teacher_name = excluded.teacher_name,
+                                 principal_name = excluded.principal_name,
+                                 is_published = excluded.is_published,
+                                 published_at = excluded.published_at,
+                                 updated_at = CURRENT_TIMESTAMP''',
+                            (school_id, classname, current_term, current_year or '', teacher_id, teacher_name, principal_name, 0, None),
+                        )
 
             csv_result.update({
                 'success': True,
@@ -5448,6 +6566,166 @@ def student_view_result():
                          exam_config=exam_config,
                          now=datetime.now())
 
+@app.route('/result/download-pdf')
+def download_result_pdf():
+    """Server-side PDF download for published result (student/school admin only)."""
+    role = (session.get('role') or '').strip().lower()
+    if role not in {'student', 'school_admin'}:
+        flash('Login required to download PDF.', 'error')
+        return redirect(url_for('login'))
+
+    school_id = (session.get('school_id') or '').strip()
+    if not school_id:
+        return redirect(url_for('login'))
+
+    requested_term = (request.args.get('term', '') or '').strip()
+    selected_class = (request.args.get('class_name', '') or '').strip()
+    sid = ''
+    if role == 'student':
+        sid = (session.get('user_id') or '').strip()
+    else:
+        sid = (request.args.get('student_id', '') or '').strip()
+        if not sid:
+            flash('Student ID is required.', 'error')
+            return redirect(url_for('school_admin_dashboard'))
+        if not load_student(school_id, sid):
+            flash('Student not found in your school.', 'error')
+            return redirect(url_for('school_admin_dashboard'))
+
+    school = get_school(school_id) or {}
+    current_term = get_current_term(school)
+    current_year = (school or {}).get('academic_year', '')
+    if role == 'student':
+        published_terms = filter_visible_terms_for_student(
+            school,
+            get_published_terms_for_student(school_id, sid, classname=selected_class),
+        )
+    else:
+        published_terms = get_published_terms_for_student(school_id, sid)
+    if not published_terms:
+        flash('No published result available for PDF download.', 'error')
+        return redirect(url_for('menu'))
+
+    if requested_term:
+        target_entry = resolve_requested_published_term(
+            published_terms,
+            requested_term,
+            current_term=current_term,
+            current_year=current_year,
+        )
+        if not target_entry:
+            flash('Requested term is not available for this result.', 'error')
+            return redirect(url_for('menu'))
+    else:
+        target_entry = pick_default_published_term(published_terms, current_term, current_year)
+    if not target_entry:
+        flash('No published result available for PDF download.', 'error')
+        return redirect(url_for('menu'))
+
+    target_term = target_entry.get('term', '') or ''
+    target_year = target_entry.get('academic_year', '') or ''
+    snapshot = load_published_student_result(
+        school_id,
+        sid,
+        target_term,
+        target_year,
+        classname=selected_class if role == 'student' else '',
+    )
+    if not snapshot:
+        flash('Published result snapshot not found.', 'error')
+        return redirect(url_for('menu'))
+
+    class_results = load_published_class_results(
+        school_id,
+        snapshot.get('classname', ''),
+        target_term,
+        target_year,
+    )
+    _position, subject_positions = build_positions_from_published_results(
+        school=school,
+        classname=snapshot.get('classname', ''),
+        term=target_term,
+        class_results=class_results,
+        student_id=sid,
+        student_stream=snapshot.get('stream', ''),
+        subjects=snapshot.get('subjects', []),
+    )
+
+    exam_config = get_assessment_config_for_class(school_id, snapshot.get('classname', ''))
+    combined_exam = (exam_config.get('exam_mode') or 'separate').strip().lower() == 'combined'
+    scores = snapshot.get('scores', {}) if isinstance(snapshot.get('scores', {}), dict) else {}
+    signoff = get_result_signoff_details(
+        school_id,
+        snapshot.get('classname', ''),
+        target_term,
+        target_year,
+    )
+
+    lines = [
+        f"School: {(school or {}).get('school_name', '')}",
+        f"Student: {snapshot.get('firstname', '')} ({sid})",
+        f"Class: {snapshot.get('classname', '')}",
+        f"Term: {target_term}" + (f"  Year: {target_year}" if target_year else ''),
+        f"Average: {_format_mark(snapshot.get('average_marks', 0))}  Grade: {snapshot.get('Grade', 'F')}  Status: {snapshot.get('Status', 'Fail')}",
+        "",
+        "Subject | Total Exam | Highest | Lowest | Total | Grade | Position",
+    ]
+    subject_rows = []
+
+    for subject, s in scores.items():
+        if not isinstance(s, dict):
+            continue
+        if combined_exam:
+            total_exam = _coerce_number(s.get('exam_score', s.get('total_exam', 0)), 0.0)
+        else:
+            total_exam = _coerce_number(s.get('objective', 0), 0.0) + _coerce_number(s.get('theory', 0), 0.0)
+        total_score = _coerce_number(s.get('overall_mark', s.get('total', 0)), 0.0)
+        grade = (s.get('grade') or '').strip() or grade_from_score(total_score, get_grade_config(school_id))
+        sp = subject_positions.get(subject) if isinstance(subject_positions, dict) else None
+        pos = f"{sp.get('pos', '-')}/{sp.get('size', '-')}" if isinstance(sp, dict) else '-'
+        high = _format_mark(sp.get('highest')) if isinstance(sp, dict) else '-'
+        low = _format_mark(sp.get('lowest')) if isinstance(sp, dict) else '-'
+        subject_rows.append({
+            'subject': subject,
+            'total_exam': total_exam,
+            'highest': sp.get('highest') if isinstance(sp, dict) else None,
+            'lowest': sp.get('lowest') if isinstance(sp, dict) else None,
+            'total': total_score,
+            'grade': grade,
+            'position': pos,
+        })
+        lines.append(
+            f"{subject} | {_format_mark(total_exam)} | {high} | {low} | {_format_mark(total_score)} | {grade} | {pos}"
+        )
+
+    rich_report = {
+        'school_name': (school or {}).get('school_name', ''),
+        'student_name': snapshot.get('firstname', ''),
+        'student_id': sid,
+        'class_name': snapshot.get('classname', ''),
+        'term': target_term,
+        'year': target_year,
+        'average': snapshot.get('average_marks', 0),
+        'grade': snapshot.get('Grade', 'F'),
+        'status': snapshot.get('Status', 'Fail'),
+        'teacher_name': signoff.get('teacher_name', ''),
+        'principal_name': signoff.get('principal_name', ''),
+        'teacher_signature': signoff.get('teacher_signature', ''),
+        'principal_signature': signoff.get('principal_signature', ''),
+        'generated_on': datetime.now().strftime('%Y-%m-%d %H:%M'),
+        'subject_rows': subject_rows,
+    }
+    pdf_bytes = _build_rich_result_pdf_reportlab(rich_report) or _build_simple_pdf(lines)
+    token_term = re.sub(r'[^A-Za-z0-9_-]+', '_', (target_term or 'term').strip())
+    token_year = re.sub(r'[^A-Za-z0-9_-]+', '_', (target_year or '').strip())
+    token_sid = re.sub(r'[^A-Za-z0-9_-]+', '_', (sid or 'student').strip())
+    filename = f"result_{token_sid}_{token_term}{('_' + token_year) if token_year else ''}.pdf"
+    return Response(
+        pdf_bytes,
+        mimetype='application/pdf',
+        headers={'Content-Disposition': f'attachment; filename=\"{filename}\"'},
+    )
+
 @app.route('/school-admin/student-result')
 def school_admin_student_result():
     """School admin can view any student's published result and switch terms."""
@@ -5755,19 +7033,16 @@ def view_students():
     if not selected_term:
         selected_term = current_term
 
-    students_data = load_students(school_id)
     if session.get('role') == 'teacher':
         teacher_id = session.get('user_id')
         current_year = (school or {}).get('academic_year', '')
         class_set = set(get_teacher_classes(school_id, teacher_id, term=selected_term, academic_year=current_year))
         students_data = load_students_for_classes(school_id, class_set, term_filter=selected_term)
-
-    available_classes = sorted({(s.get('classname', '') or '').strip() for s in students_data.values() if (s.get('classname', '') or '').strip()})
-    term_order = {'First Term': 1, 'Second Term': 2, 'Third Term': 3}
-    available_terms = sorted(
-        {(s.get('term', '') or '').strip() for s in students_data.values() if (s.get('term', '') or '').strip()},
-        key=lambda t: (term_order.get(t, 99), t)
-    )
+        available_classes, available_terms = get_student_filter_options(school_id, classnames=class_set)
+    else:
+        # School admin path: query only currently requested class/term when provided.
+        students_data = load_students(school_id, class_filter=selected_class, term_filter=selected_term)
+        available_classes, available_terms = get_student_filter_options(school_id)
 
     if selected_class:
         students_data = {sid: s for sid, s in students_data.items() if (s.get('classname', '') or '').strip() == selected_class}
@@ -5957,4 +7232,5 @@ if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     debug = os.environ.get('FLASK_DEBUG', '0').strip().lower() in ('1', 'true', 'yes')
     app.run(host='0.0.0.0', port=port, debug=debug)
+
 

@@ -503,6 +503,8 @@
                         <th rowspan="2" style="width: 15%;">Subject</th>
                         <th colspan="{{ result_max_tests }}">Continuous Assessment</th>
                         <th colspan="{{ 1 if combined_exam else 2 }}">Examination (70%)</th>
+                        <th rowspan="2">Highest<br>In Class</th>
+                        <th rowspan="2">Lowest<br>In Class</th>
                         <th rowspan="2">Total<br>(100%)</th>
                         <th rowspan="2">Grade</th>
                         <th rowspan="2">Subject Position</th>
@@ -532,12 +534,14 @@
                             <td>{{ s.get('objective', s.get('cbt', '-')) if s.get('objective', s.get('cbt', '-')) != '-' else '-' }}</td>
                             <td>{{ s.get('theory', '-') if s.get('theory', '-') != '-' else '-' }}</td>
                         {% endif %}
+                        {% set sp = subject_positions.get(subject) if subject_positions else None %}
+                        <td>{{ "%.1f"|format(sp.highest) if sp and sp.highest is not none else '-' }}</td>
+                        <td>{{ "%.1f"|format(sp.lowest) if sp and sp.lowest is not none else '-' }}</td>
                         <td style="font-weight: bold;">{{ s.get('overall_mark', s.get('total', '-')) if s.get('overall_mark', s.get('total', '-')) != '-' else '-' }}</td>
                         <td style="font-weight: bold;" class="{% if s.get('grade') == 'A' %}grade-a{% elif s.get('grade') == 'B' %}grade-b{% elif s.get('grade') == 'C' %}grade-c{% elif s.get('grade') == 'D' %}grade-d{% else %}grade-f{% endif %}">
                             {{ s.get('grade', '-') }}
                         </td>
                         <td style="font-weight: bold;">
-                            {% set sp = subject_positions.get(subject) if subject_positions else None %}
                             {% if sp %}
                                 {{ sp.pos|ordinal }}/{{ sp.size }}
                             {% else %}
@@ -550,7 +554,7 @@
                 <tfoot>
                     <tr class="summary-row">
                         <td style="text-align: left; font-weight: bold;">OVERALL AVERAGE</td>
-                        <td colspan="{{ result_max_tests + (1 if combined_exam else 2) }}" style="text-align: center; font-weight: bold;">Average Score</td>
+                        <td colspan="{{ result_max_tests + (1 if combined_exam else 2) + 2 }}" style="text-align: center; font-weight: bold;">Average Score</td>
                         <td style="font-weight: bold;">{{ "%.1f"|format(student.average_marks) }}</td>
                         <td style="font-weight: bold;">{{ student.Grade }}</td>
                         <td>-</td>
@@ -562,8 +566,8 @@
         <div class="teacher-comment">
             <div class="comment-title">Teacher's Comment</div>
             <div style="min-height: 60px; line-height: 1.6;">
-                {% if student.teacher_comment %}
-                    {{ student.teacher_comment }}
+                {% if (student.teacher_comment or '')|trim %}
+                    {{ (student.teacher_comment or '')|trim }}
                 {% elif student.average_marks >= 70 %}
                     Excellent performance! {{ student.first_name }} has shown outstanding academic ability and consistent effort throughout the term. Keep up the great work!
                 {% elif student.average_marks >= 60 %}
@@ -616,6 +620,15 @@
     </div>
 
     <div class="action-buttons">
+        {% if session.get('role') == 'student' or session.get('role') == 'school_admin' %}
+        <a
+            href="{{ url_for('download_result_pdf', student_id=student.student_id, term=current_term_token, class_name=selected_result_class) }}"
+            class="btn btn-back"
+        >
+            <i class="fas fa-file-pdf"></i>
+            Download PDF
+        </a>
+        {% endif %}
         <button class="btn btn-print" onclick="window.print()">
             <i class="fas fa-print"></i>
             Print Report Card

@@ -1,0 +1,22 @@
+{
+  "name": "School Result Management",
+  "short_name": "SchoolResult",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f9f9f9",
+  "theme_color": "#1e3c72",
+  "description": "School result management system for multi-school use.",
+  "icons": [
+    {
+      "src": "/static/FullLogo.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/FullLogo.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

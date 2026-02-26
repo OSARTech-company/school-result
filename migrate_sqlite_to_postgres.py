@@ -1,8 +1,10 @@
+import argparse
 import os
 import sqlite3
 from contextlib import closing
 
 import psycopg2
+from psycopg2 import sql
 from dotenv import load_dotenv
 
 
@@ -20,122 +22,53 @@ TABLES = [
     "reports",
 ]
 
-TABLE_COLUMNS = {
-    "users": ["id", "username", "password_hash", "role", "school_id", "terms_accepted", "created_at"],
-    "schools": [
-        "id",
-        "school_id",
-        "school_name",
-        "school_logo",
-        "academic_year",
-        "current_term",
-        "operations_enabled",
-        "test_enabled",
-        "exam_enabled",
-        "max_tests",
-        "test_score_max",
-        "exam_objective_max",
-        "exam_theory_max",
-        "grade_a_min",
-        "grade_b_min",
-        "grade_c_min",
-        "grade_d_min",
-        "pass_mark",
-        "ss_ranking_mode",
-        "ss1_stream_mode",
-        "created_at",
-    ],
-    "students": [
-        "id",
-        "user_id",
-        "school_id",
-        "student_id",
-        "firstname",
-        "classname",
-        "first_year_class",
-        "term",
-        "stream",
-        "number_of_subject",
-        "subjects",
-        "scores",
-        "promoted",
-        "created_at",
-    ],
-    "teachers": ["id", "user_id", "school_id", "firstname", "lastname", "assigned_classes", "created_at"],
-    "class_assignments": ["id", "school_id", "teacher_id", "classname", "term", "academic_year"],
-    "class_subject_configs": [
-        "id",
-        "school_id",
-        "classname",
-        "core_subjects",
-        "science_subjects",
-        "art_subjects",
-        "commercial_subjects",
-        "optional_subjects",
-        "optional_subject_limit",
-        "created_at",
-        "updated_at",
-    ],
-    "assessment_configs": [
-        "id",
-        "school_id",
-        "level",
-        "exam_mode",
-        "objective_max",
-        "theory_max",
-        "exam_score_max",
-        "updated_at",
-    ],
-    "result_publications": [
-        "id",
-        "school_id",
-        "classname",
-        "term",
-        "teacher_id",
-        "is_published",
-        "published_at",
-        "created_at",
-        "updated_at",
-    ],
-    "published_student_results": [
-        "id",
-        "school_id",
-        "student_id",
-        "firstname",
-        "classname",
-        "academic_year",
-        "term",
-        "stream",
-        "number_of_subject",
-        "subjects",
-        "scores",
-        "teacher_comment",
-        "average_marks",
-        "grade",
-        "status",
-        "published_at",
-    ],
-    "result_views": [
-        "id",
-        "school_id",
-        "student_id",
-        "term",
-        "academic_year",
-        "first_viewed_at",
-        "last_viewed_at",
-        "view_count",
-    ],
-    "reports": ["id", "user_id", "description", "timestamp", "status", "read_at"],
-}
+
+def sqlite_columns(conn, table_name):
+    with closing(conn.cursor()) as cur:
+        cur.execute(f"PRAGMA table_info({table_name})")
+        return [row[1] for row in cur.fetchall()]
+
+
+def postgres_columns(conn, table_name):
+    with closing(conn.cursor()) as cur:
+        cur.execute(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = %s
+            ORDER BY ordinal_position
+            """,
+            (table_name,),
+        )
+        return [row[0] for row in cur.fetchall()]
+
+
+def has_existing_data(conn, table_name):
+    with closing(conn.cursor()) as cur:
+        cur.execute(sql.SQL("SELECT 1 FROM {} LIMIT 1").format(sql.Identifier(table_name)))
+        return cur.fetchone() is not None
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Migrate local SQLite data into PostgreSQL.")
+    parser.add_argument(
+        "--sqlite-path",
+        default=os.path.join(os.getcwd(), "student_score.db"),
+        help="Path to SQLite database file (default: ./student_score.db)",
+    )
+    parser.add_argument(
+        "--truncate",
+        action="store_true",
+        help="Dangerous: truncate PostgreSQL target tables before import.",
+    )
+    args = parser.parse_args()
+
     load_dotenv()
     database_url = os.getenv("DATABASE_URL", "").strip()
     if not database_url:
         raise RuntimeError("DATABASE_URL is not set in environment/.env")
 
-    sqlite_path = os.path.join(os.getcwd(), "student_score.db")
+    sqlite_path = os.path.abspath(args.sqlite_path)
     if not os.path.exists(sqlite_path):
         raise RuntimeError(f"SQLite DB not found: {sqlite_path}")
 
@@ -143,27 +76,51 @@ def main():
         sconn.row_factory = sqlite3.Row
         pconn.autocommit = False
 
+        if not args.truncate:
+            existing = [t for t in TABLES if has_existing_data(pconn, t)]
+            if existing:
+                raise RuntimeError(
+                    "Target PostgreSQL has existing data in: "
+                    + ", ".join(existing)
+                    + ". Re-run with --truncate if you intentionally want a full replace."
+                )
+
         with closing(sconn.cursor()) as scur, closing(pconn.cursor()) as pcur:
-            # Clear existing data so migration is deterministic.
-            pcur.execute("TRUNCATE TABLE " + ", ".join(TABLES) + " RESTART IDENTITY CASCADE;")
+            if args.truncate:
+                pcur.execute(
+                    "TRUNCATE TABLE " + ", ".join(TABLES) + " RESTART IDENTITY CASCADE;"
+                )
 
             for table in TABLES:
-                cols = TABLE_COLUMNS[table]
-                col_csv = ", ".join(cols)
+                src_cols = sqlite_columns(sconn, table)
+                dst_cols = set(postgres_columns(pconn, table))
+                shared_cols = [c for c in src_cols if c in dst_cols]
+                if not shared_cols:
+                    print(f"{table}: skipped (no shared columns)")
+                    continue
+
+                col_csv = ", ".join(shared_cols)
                 scur.execute(f"SELECT {col_csv} FROM {table}")
                 rows = scur.fetchall()
+
                 if rows:
-                    placeholders = ", ".join(["%s"] * len(cols))
+                    placeholders = ", ".join(["%s"] * len(shared_cols))
                     pcur.executemany(
                         f"INSERT INTO {table} ({col_csv}) VALUES ({placeholders})",
-                        [tuple(row[c] for c in cols) for row in rows],
+                        [tuple(row[c] for c in shared_cols) for row in rows],
                     )
                 print(f"{table}: {len(rows)} row(s)")
 
-            # Ensure serial sequences continue after imported ids.
+            # Keep serial sequences aligned when explicit id values were inserted.
             for table in TABLES:
+                dst_cols = set(postgres_columns(pconn, table))
+                if "id" not in dst_cols:
+                    continue
                 pcur.execute(
-                    "SELECT setval(pg_get_serial_sequence(%s, 'id'), COALESCE((SELECT MAX(id) FROM " + table + "), 1), true)",
+                    sql.SQL(
+                        "SELECT setval(pg_get_serial_sequence(%s, 'id'), "
+                        "COALESCE((SELECT MAX(id) FROM {}), 1), true)"
+                    ).format(sql.Identifier(table)),
                     (table,),
                 )
 
@@ -173,3 +130,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

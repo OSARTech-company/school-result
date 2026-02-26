@@ -101,10 +101,6 @@
                             <label class="mini-label" for="new_optional_subjects">Add new optional subjects (comma separated)</label>
                             <input class="mini-input" type="text" id="new_optional_subjects" name="new_optional_subjects" placeholder="e.g. Music, Animal Husbandry">
                         </div>
-                        <div class="form-group" id="optionalLimitSection">
-                            <label for="optional_subject_limit">Max Optional Subjects per Student</label>
-                            <input type="number" id="optional_subject_limit" name="optional_subject_limit" min="0" value="0">
-                        </div>
                     </div>
                     <div id="ssStreamSection">
                         <div class="form-group ss-only">
@@ -142,7 +138,6 @@
                         <th>Art</th>
                         <th>Commercial</th>
                         <th>Optional Pool</th>
-                        <th>Optional Limit</th>
                         <th>Action</th>
                     </tr>
                 </thead>
@@ -155,7 +150,6 @@
                         <td>{{ cfg.art_subjects|join(', ') }}</td>
                         <td>{{ cfg.commercial_subjects|join(', ') }}</td>
                         <td>{{ cfg.optional_subjects|join(', ') }}</td>
-                        <td>{{ cfg.optional_subject_limit }}</td>
                         <td>
                             <form method="post" action="{{ url_for('school_admin_delete_class_subject_config') }}" onsubmit="return confirm('Delete subject configuration for {{ class_name }}?');">
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
@@ -166,7 +160,7 @@
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="8">No class subject config yet.</td>
+                        <td colspan="7">No class subject config yet.</td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -177,9 +171,7 @@
         const classNameInput = document.getElementById('classname');
         const ssSection = document.getElementById('ssStreamSection');
         const optionalSection = document.getElementById('optionalSection');
-        const optionalLimitSection = document.getElementById('optionalLimitSection');
         const coreLabel = document.getElementById('coreLabel');
-        const optionalLimitEl = document.getElementById('optional_subject_limit');
         const ss1StreamMode = "{{ (school.ss1_stream_mode if school else 'separate')|lower }}";
         const catalogMap = {{ (subject_catalog_map or {})|tojson }};
 
@@ -247,14 +239,12 @@
             }
             ssSection.style.display = useSs ? 'block' : 'none';
             optionalSection.style.display = useSs ? 'block' : 'none';
-            optionalLimitSection.style.display = useSs ? 'block' : 'none';
             coreLabel.textContent = useSs ? 'Core Subjects (all students)' : (ss1Combined ? 'Subjects Offered (SS1 Combined)' : 'Subjects Offered');
             if (!useSs) {
                 uncheckGroup('science_subjects_group');
                 uncheckGroup('art_subjects_group');
                 uncheckGroup('commercial_subjects_group');
                 uncheckGroup('optional_subjects_group');
-                optionalLimitEl.value = '0';
             }
         }
 

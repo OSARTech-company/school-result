@@ -38,10 +38,10 @@
                 </div>
                 {% if config.optional_subjects %}
                 <div class="form-group">
-                    <label>Optional Subjects (max {{ config.optional_subject_limit }})</label>
+                    <label>Optional Subjects</label>
                     <div class="checkbox-list">
                         {% for subj in config.optional_subjects %}
-                        <label><input type="checkbox" name="optional_subjects" value="{{ subj }}"> {{ subj }}</label>
+                        <label><input type="checkbox" name="optional_subjects" value="{{ subj }}" {% if subj in selected_optional_subjects %}checked{% endif %}> {{ subj }}</label>
                         {% endfor %}
                     </div>
                 </div>

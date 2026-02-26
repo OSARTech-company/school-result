@@ -193,7 +193,7 @@
         </div>
 
         <div class="card">
-            <h2><i class="fas fa-ranking-star"></i> Rank And Publish Results</h2>
+            <h2><i class="fas fa-ranking-star"></i> Submit Results For Approval</h2>
             <table>
                 <thead>
                     <tr>
@@ -216,6 +216,10 @@
                             <td>
                                 {% if s.published %}
                                     <span style="color:#27ae60; font-weight:700;">Published</span>
+                                {% elif s.approval_status == 'pending' %}
+                                    <span style="color:#8e44ad; font-weight:700;">Pending admin review</span>
+                                {% elif s.approval_status == 'rejected' %}
+                                    <span style="color:#e74c3c; font-weight:700;">Rejected{% if s.review_note %}: {{ s.review_note }}{% endif %}</span>
                                 {% elif s.ready %}
                                     <span style="color:#2980b9; font-weight:700;">Ready</span>
                                 {% else %}
@@ -226,8 +230,8 @@
                                 <form method="POST" action="{{ url_for('teacher_publish_results') }}" style="display:inline;">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                     <input type="hidden" name="classname" value="{{ classname }}"/>
-                                    <button type="submit" class="btn btn-success" style="padding: 6px 12px; font-size: 0.9rem;" {% if not s.ready or s.published %}disabled{% endif %}>
-                                        Rank/Publish
+                                    <button type="submit" class="btn btn-success" style="padding: 6px 12px; font-size: 0.9rem;" {% if not s.ready or s.published or s.approval_status == 'pending' %}disabled{% endif %}>
+                                        Submit
                                     </button>
                                 </form>
                             </td>
