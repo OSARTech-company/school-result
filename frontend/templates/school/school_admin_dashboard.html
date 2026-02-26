@@ -341,7 +341,7 @@
         <h2><i class="fas fa-signature"></i> Principal Signature</h2>
         <p>
           Status:
-          <strong style="color: {{ '#27ae60' if has_principal_signature else '#e67e22' }};">
+          <strong class="{{ 'op-on' if has_principal_signature else 'op-off' }}">
             {{ 'Uploaded' if has_principal_signature else 'Not Uploaded' }}
           </strong>
         </p>
