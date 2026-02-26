@@ -17334,3 +17334,159 @@ with app.app_context(). See the documentation for more information.
  * Running on http://127.0.0.1:5000
  * Running on http://192.168.1.112:5000
 2026-02-26 22:57:05,917 - INFO - [33mPress CTRL+C to quit[0m
+2026-02-26 23:13:27,778 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-02-26 23:13:27,779 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-02-26 23:13:27,779 - INFO - Database schema is managed via Flask-Migrate. Run 'flask db upgrade' to apply migrations.
+2026-02-26 23:13:27,779 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-02-26 23:13:53,461 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-02-26 23:13:53,461 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-02-26 23:13:53,461 - INFO - Database schema is managed via Flask-Migrate. Run 'flask db upgrade' to apply migrations.
+2026-02-26 23:13:53,462 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-02-26 23:13:53,535 - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.1.112:5000
+2026-02-26 23:13:53,536 - INFO - [33mPress CTRL+C to quit[0m
+2026-02-26 23:14:36,111 - INFO - 127.0.0.1 - - [26/Feb/2026 23:14:36] "GET / HTTP/1.1" 200 -
+2026-02-26 23:14:36,504 - INFO - 127.0.0.1 - - [26/Feb/2026 23:14:36] "GET /static/css/style.css HTTP/1.1" 200 -
+2026-02-26 23:14:38,344 - INFO - 127.0.0.1 - - [26/Feb/2026 23:14:38] "[33mGET /favicon.ico HTTP/1.1[0m" 404 -
+2026-02-26 23:14:38,677 - INFO - 127.0.0.1 - - [26/Feb/2026 23:14:38] "GET /sw.js HTTP/1.1" 200 -
+2026-02-26 23:14:38,940 - INFO - 127.0.0.1 - - [26/Feb/2026 23:14:38] "GET /login HTTP/1.1" 200 -
+2026-02-26 23:14:39,036 - INFO - 127.0.0.1 - - [26/Feb/2026 23:14:39] "GET / HTTP/1.1" 200 -
+2026-02-26 23:14:39,044 - INFO - 127.0.0.1 - - [26/Feb/2026 23:14:39] "GET /terms-privacy HTTP/1.1" 200 -
+2026-02-26 23:14:39,045 - INFO - 127.0.0.1 - - [26/Feb/2026 23:14:39] "GET /static/offline.html HTTP/1.1" 200 -
+2026-02-26 23:15:24,186 - INFO - 127.0.0.1 - - [26/Feb/2026 23:15:24] "[32mPOST /login HTTP/1.1[0m" 302 -
+2026-02-26 23:15:24,678 - INFO - 127.0.0.1 - - [26/Feb/2026 23:15:24] "GET /school-admin HTTP/1.1" 200 -
+2026-02-26 23:15:24,763 - INFO - 127.0.0.1 - - [26/Feb/2026 23:15:24] "[36mGET /static/css/style.css HTTP/1.1[0m" 304 -
+2026-02-26 23:15:26,720 - INFO - 127.0.0.1 - - [26/Feb/2026 23:15:26] "[36mGET /sw.js HTTP/1.1[0m" 304 -
+2026-02-26 23:15:31,807 - INFO - 127.0.0.1 - - [26/Feb/2026 23:15:31] "GET /school-admin/add-students-by-class HTTP/1.1" 200 -
+2026-02-26 23:15:33,492 - INFO - 127.0.0.1 - - [26/Feb/2026 23:15:33] "[36mGET /sw.js HTTP/1.1[0m" 304 -
+2026-02-26 23:15:56,617 - INFO - 127.0.0.1 - - [26/Feb/2026 23:15:56] "[32mPOST /school-admin/add-students-by-class HTTP/1.1[0m" 302 -
+2026-02-26 23:15:56,862 - INFO - 127.0.0.1 - - [26/Feb/2026 23:15:56] "GET /school-admin/add-students-by-class HTTP/1.1" 200 -
+2026-02-26 23:15:58,511 - INFO - 127.0.0.1 - - [26/Feb/2026 23:15:58] "[36mGET /sw.js HTTP/1.1[0m" 304 -
+2026-02-26 23:16:08,350 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-02-26 23:16:08,351 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-02-26 23:16:08,351 - INFO - Database schema is managed via Flask-Migrate. Run 'flask db upgrade' to apply migrations.
+2026-02-26 23:16:08,351 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-02-26 23:16:09,836 - INFO - 127.0.0.1 - - [26/Feb/2026 23:16:09] "GET /school-admin HTTP/1.1" 200 -
+2026-02-26 23:16:11,459 - INFO - 127.0.0.1 - - [26/Feb/2026 23:16:11] "[36mGET /sw.js HTTP/1.1[0m" 304 -
+2026-02-26 23:16:22,355 - INFO - 127.0.0.1 - - [26/Feb/2026 23:16:22] "GET /school-admin/class-subjects HTTP/1.1" 200 -
+2026-02-26 23:16:24,079 - INFO - 127.0.0.1 - - [26/Feb/2026 23:16:24] "[36mGET /sw.js HTTP/1.1[0m" 304 -
+2026-02-26 23:16:38,868 - INFO - 127.0.0.1 - - [26/Feb/2026 23:16:38] "[32mPOST /school-admin/class-subjects HTTP/1.1[0m" 302 -
+2026-02-26 23:16:39,137 - INFO - 127.0.0.1 - - [26/Feb/2026 23:16:39] "GET /school-admin/class-subjects HTTP/1.1" 200 -
+2026-02-26 23:16:40,727 - INFO - 127.0.0.1 - - [26/Feb/2026 23:16:40] "[36mGET /sw.js HTTP/1.1[0m" 304 -
+2026-02-26 23:16:50,631 - INFO - 127.0.0.1 - - [26/Feb/2026 23:16:50] "GET /school-admin HTTP/1.1" 200 -
+2026-02-26 23:16:52,288 - INFO - 127.0.0.1 - - [26/Feb/2026 23:16:52] "[36mGET /sw.js HTTP/1.1[0m" 304 -
+2026-02-26 23:17:00,177 - INFO - 127.0.0.1 - - [26/Feb/2026 23:17:00] "GET /school-admin/add-students-by-class HTTP/1.1" 200 -
+2026-02-26 23:17:01,760 - INFO - 127.0.0.1 - - [26/Feb/2026 23:17:01] "[36mGET /sw.js HTTP/1.1[0m" 304 -
+2026-02-26 23:17:17,213 - ERROR - Database Error: tuple index out of range
+2026-02-26 23:17:17,215 - ERROR - Exception on /school-admin/add-students-by-class [POST]
+Traceback (most recent call last):
+  File "C:\Aka\School_Result\.venv\Lib\site-packages\flask\app.py", line 2190, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Aka\School_Result\.venv\Lib\site-packages\flask\app.py", line 1486, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Aka\School_Result\.venv\Lib\site-packages\flask\app.py", line 1484, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Aka\School_Result\.venv\Lib\site-packages\flask\app.py", line 1469, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "c:\Aka\School_Result\student_scor.py", line 5368, in school_admin_add_students_by_class
+    next_index = get_next_student_index_for_class(school_id, classname)
+  File "c:\Aka\School_Result\student_scor.py", line 3954, in get_next_student_index_for_class
+    db_execute(c, '''SELECT COALESCE(
+    ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+                       MAX(CAST(SPLIT_PART(student_id, '/', 3) AS INTEGER)), 0
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+                     AND student_id LIKE '%/%/%/%' ''',
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+               (school_id, classname))
+               ^^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Aka\School_Result\student_scor.py", line 142, in db_execute
+    cursor.execute(_adapt_query(query), params)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Aka\School_Result\.venv\Lib\site-packages\psycopg2\extras.py", line 146, in execute
+    return super().execute(query, vars)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+IndexError: tuple index out of range
+2026-02-26 23:17:17,341 - INFO - 127.0.0.1 - - [26/Feb/2026 23:17:17] "[35m[1mPOST /school-admin/add-students-by-class HTTP/1.1[0m" 500 -
+2026-02-26 23:17:18,947 - INFO - 127.0.0.1 - - [26/Feb/2026 23:17:18] "[36mGET /sw.js HTTP/1.1[0m" 304 -
+2026-02-26 23:18:18,982 - INFO - 127.0.0.1 - - [26/Feb/2026 23:18:18] "GET /school-admin/add-students-by-class HTTP/1.1" 200 -
+2026-02-26 23:18:20,779 - INFO - 127.0.0.1 - - [26/Feb/2026 23:18:20] "[36mGET /sw.js HTTP/1.1[0m" 304 -
+2026-02-26 23:20:52,231 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-02-26 23:20:52,232 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-02-26 23:20:52,232 - INFO - Database schema is managed via Flask-Migrate. Run 'flask db upgrade' to apply migrations.
+2026-02-26 23:20:52,232 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-02-26 23:20:52,310 - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.1.112:5000
+2026-02-26 23:20:52,310 - INFO - [33mPress CTRL+C to quit[0m
+2026-02-26 23:23:38,946 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-02-26 23:23:38,947 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-02-26 23:23:38,947 - INFO - Database schema is managed via Flask-Migrate. Run 'flask db upgrade' to apply migrations.
+2026-02-26 23:23:38,947 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-02-26 23:23:39,104 - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.1.112:5000
+2026-02-26 23:23:39,105 - INFO - [33mPress CTRL+C to quit[0m
+2026-02-26 23:25:31,757 - ERROR - Database Error: tuple index out of range
+2026-02-26 23:25:31,758 - ERROR - Exception on /school-admin/add-students-by-class [POST]
+Traceback (most recent call last):
+  File "C:\Aka\School_Result\.venv\Lib\site-packages\flask\app.py", line 2190, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Aka\School_Result\.venv\Lib\site-packages\flask\app.py", line 1486, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Aka\School_Result\.venv\Lib\site-packages\flask\app.py", line 1484, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Aka\School_Result\.venv\Lib\site-packages\flask\app.py", line 1469, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "c:\Aka\School_Result\student_scor.py", line 5368, in school_admin_add_students_by_class
+  File "c:\Aka\School_Result\student_scor.py", line 3954, in get_next_student_index_for_class
+    c = conn.cursor()
+    ^^^^^^^^^^^^^^^^^
+    ...<6 lines>...
+                     AND LOWER(classname) = LOWER(%s)
+                     ^^^^^^^^^^^^^^^^^
+  File "c:\Aka\School_Result\student_scor.py", line 142, in db_execute
+    try:
+    
+  File "C:\Aka\School_Result\.venv\Lib\site-packages\psycopg2\extras.py", line 146, in execute
+    return super().execute(query, vars)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+IndexError: tuple index out of range
+2026-02-26 23:25:31,764 - INFO - 127.0.0.1 - - [26/Feb/2026 23:25:31] "[35m[1mPOST /school-admin/add-students-by-class HTTP/1.1[0m" 500 -
+2026-02-26 23:25:33,353 - INFO - 127.0.0.1 - - [26/Feb/2026 23:25:33] "[36mGET /sw.js HTTP/1.1[0m" 304 -
+2026-02-26 23:25:42,042 - INFO - 127.0.0.1 - - [26/Feb/2026 23:25:42] "GET /school-admin/add-students-by-class HTTP/1.1" 200 -
+2026-02-26 23:25:44,008 - INFO - 127.0.0.1 - - [26/Feb/2026 23:25:44] "[36mGET /sw.js HTTP/1.1[0m" 304 -
+2026-02-26 23:25:44,422 - ERROR - Database Error: tuple index out of range
+2026-02-26 23:25:44,423 - ERROR - Exception on /school-admin/add-students-by-class [POST]
+Traceback (most recent call last):
+  File "C:\Aka\School_Result\.venv\Lib\site-packages\flask\app.py", line 2190, in wsgi_app
+    response = self.full_dispatch_request()
+  File "C:\Aka\School_Result\.venv\Lib\site-packages\flask\app.py", line 1486, in full_dispatch_request
+    rv = self.handle_user_exception(e)
+  File "C:\Aka\School_Result\.venv\Lib\site-packages\flask\app.py", line 1484, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Aka\School_Result\.venv\Lib\site-packages\flask\app.py", line 1469, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "c:\Aka\School_Result\student_scor.py", line 5368, in school_admin_add_students_by_class
+  File "c:\Aka\School_Result\student_scor.py", line 3954, in get_next_student_index_for_class
+    c = conn.cursor()
+    ^^^^^^^^^^^^^^^^^
+    ...<6 lines>...
+                     AND LOWER(classname) = LOWER(%s)
+                     ^^^^^^^^^^^^^^^^^
+  File "c:\Aka\School_Result\student_scor.py", line 142, in db_execute
+    try:
+    
+  File "C:\Aka\School_Result\.venv\Lib\site-packages\psycopg2\extras.py", line 146, in execute
+    return super().execute(query, vars)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+IndexError: tuple index out of range
+2026-02-26 23:25:44,426 - INFO - 127.0.0.1 - - [26/Feb/2026 23:25:44] "[35m[1mPOST /school-admin/add-students-by-class HTTP/1.1[0m" 500 -
+2026-02-26 23:25:46,036 - INFO - 127.0.0.1 - - [26/Feb/2026 23:25:46] "[36mGET /sw.js HTTP/1.1[0m" 304 -

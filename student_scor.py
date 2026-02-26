@@ -15,6 +15,7 @@ import csv
 import re
 import math
 import base64
+import urllib.parse
 from io import StringIO, BytesIO
 from datetime import datetime, timedelta
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -302,6 +303,7 @@ def students_has_user_id_column():
                      AND table_name = 'students'
                      AND column_name = 'user_id'
                    LIMIT 1''',
+                None,
             )
             _STUDENTS_HAS_USER_ID = bool(c.fetchone())
     except Exception:
@@ -3955,10 +3957,10 @@ def get_next_student_index_for_class(school_id, classname):
                            MAX(CAST(SPLIT_PART(student_id, '/', 3) AS INTEGER)), 0
                          )
                        FROM students
-                       WHERE school_id = ? 
-                         AND LOWER(classname) = LOWER(?)
-                         AND student_id LIKE '%/%/%/%' ''',
-                   (school_id, classname))
+                       WHERE school_id = %s 
+                         AND LOWER(classname) = LOWER(%s)
+                         AND student_id LIKE %s''',
+                   (school_id, classname, '%/%/%/%'))
         row = c.fetchone()
         max_index = int(row[0] or 0) if row else 0
         return max_index + 1
@@ -5439,7 +5441,7 @@ def school_admin_add_students_by_class():
         if added_students:
             flash(f'Successfully added {len(added_students)} students to {classname}!', 'success')
             # Redirect to GET to prevent accidental form resubmission on refresh
-            return redirect(url_for('school_admin_add_students_by_class', **{'class': classname}))
+            return redirect(f'{url_for("school_admin_add_students_by_class")}?class={urllib.parse.quote(classname)}')
 
     # Always build listing from fresh DB state so ordering and new additions are correct.
     all_students = load_students(school_id)
