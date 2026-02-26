@@ -1,20 +1,28 @@
 """Alembic environment script for raw SQL migrations."""
 
 from logging.config import fileConfig
+from sqlalchemy import engine_from_config
+from sqlalchemy import pool
 from alembic import context
 import os
+import logging
 
 config = context.config
 
-# read the .ini file
+# Interpret the config file for Python logging.
+# This line sets up loggers basically.
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# add your model's MetaData object here for 'autogenerate' support
+logger = logging.getLogger('alembic.env')
+
+# add your model's MetaData object here
+# for 'autogenerate' support (we're not using it for raw SQL)
 target_metadata = None
 
+
 def run_migrations_offline() -> None:
-    """Run migrations in 'offline' mode (no engine needed, just SQL script output)."""
+    """Run migrations in 'offline' mode (no engine needed)."""
     url = os.environ.get('DATABASE_URL')
     if not url:
         raise RuntimeError('DATABASE_URL environment variable not set')
@@ -32,28 +40,31 @@ def run_migrations_offline() -> None:
 
 def run_migrations_online() -> None:
     """Run migrations in 'online' mode (with engine)."""
-    import psycopg2
-    
     url = os.environ.get('DATABASE_URL')
     if not url:
         raise RuntimeError('DATABASE_URL environment variable not set')
-    
-    # use psycopg2 directly for raw SQL migration execution
-    conn = psycopg2.connect(url)
-    
-    try:
+
+    configuration = config.get_section(config.config_ini_section)
+    configuration["sqlalchemy.url"] = url
+
+    connectable = engine_from_config(
+        configuration,
+        prefix="sqlalchemy.",
+        poolclass=pool.NullPool,
+    )
+
+    with connectable.connect() as connection:
         context.configure(
-            connection=conn,
-            target_metadata=target_metadata,
+            connection=connection, target_metadata=target_metadata
         )
 
         with context.begin_transaction():
             context.run_migrations()
-    finally:
-        conn.close()
 
 
 if context.is_offline_mode():
+    logger.info("Running migrations in offline mode")
     run_migrations_offline()
 else:
+    logger.info("Running migrations in online mode")
     run_migrations_online()
