@@ -4,7 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Allocate Stream</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260303c') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f5f7fa; }
         .container { max-width: 760px; margin: 0 auto; padding: 20px; }
@@ -16,24 +18,51 @@
         .btn-primary { background: #3498db; color: #fff; }
         .btn-secondary { background: #6c757d; color: #fff; margin-left: 8px; }
         .checkbox-list label { display: block; font-weight: 500; margin-bottom: 8px; }
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.5);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            padding: 16px;
+        }
+        .modal-overlay.show { display: flex; }
+        .modal-card {
+            width: min(520px, 100%);
+            background: #fff;
+            border-radius: 12px;
+            border: 1px solid #e2e8f0;
+            padding: 18px;
+            box-shadow: 0 16px 36px rgba(2, 6, 23, 0.22);
+        }
+        .modal-title { margin: 0 0 10px; font-size: 1.1rem; color: #0f172a; }
+        .modal-text { margin: 0 0 16px; color: #334155; }
+        .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
     </style>
 </head>
 <body>
+    <div class="app-shell topbar-layout">
+    {% set active_page = 'dashboard' %}
+    {% include 'teacher/_teacher_sidebar.html' %}
+    <div class="main-content">
     <div class="container">
         <div class="card">
-            <h2>Allocate Stream</h2>
+            <h2>Allocate/Change Stream</h2>
             <p><strong>Student:</strong> {{ student.firstname }} ({{ student.student_id }})</p>
             <p><strong>Class:</strong> {{ student.classname }}</p>
-            <form method="post">
+            <p><strong>Current Stream:</strong> {{ student.stream if student.stream else 'N/A' }}</p>
+            <form method="post" id="streamForm">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                 <input type="hidden" name="student_id" value="{{ student.student_id }}">
                 <div class="form-group">
                     <label for="stream">Stream</label>
                     <select id="stream" name="stream" required>
                         <option value="">Select Stream...</option>
-                        <option value="Science">Science</option>
-                        <option value="Art">Art</option>
-                        <option value="Commercial">Commercial</option>
+                        <option value="Science" {% if (student.stream or '')|lower == 'science' %}selected{% endif %}>Science</option>
+                        <option value="Art" {% if (student.stream or '')|lower == 'art' %}selected{% endif %}>Art</option>
+                        <option value="Commercial" {% if (student.stream or '')|lower == 'commercial' %}selected{% endif %}>Commercial</option>
                     </select>
                 </div>
                 {% if config.optional_subjects %}
@@ -47,9 +76,76 @@
                 </div>
                 {% endif %}
                 <button type="submit" class="btn btn-primary">Save Allocation</button>
-                <a href="{{ url_for('teacher_dashboard') }}" class="btn btn-secondary">Cancel</a>
+                <a href="{{ url_for('teacher_dashboard', tab='score') }}" class="btn btn-secondary">Cancel</a>
             </form>
         </div>
     </div>
+    </div>
+    </div>
+    <div class="modal-overlay" id="confirmModal" aria-hidden="true">
+        <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+            <h3 class="modal-title" id="confirmTitle">Confirm Stream Change</h3>
+            <p class="modal-text" id="confirmText">
+                Changing stream may remove scores for subjects not available in the new stream. Continue?
+            </p>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" id="cancelConfirm">Cancel</button>
+                <button type="button" class="btn btn-primary" id="acceptConfirm">Continue</button>
+            </div>
+        </div>
+    </div>
+    <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260303c') }}"></script>
+    <script>
+        (function () {
+            var form = document.getElementById('streamForm');
+            var streamSelect = document.getElementById('stream');
+            var overlay = document.getElementById('confirmModal');
+            var cancelBtn = document.getElementById('cancelConfirm');
+            var acceptBtn = document.getElementById('acceptConfirm');
+            var text = document.getElementById('confirmText');
+            if (!form || !streamSelect || !overlay || !cancelBtn || !acceptBtn || !text) return;
+
+            var currentStream = "{{ (student.stream or 'N/A')|e }}";
+            var allowSubmit = false;
+
+            function openModal(message) {
+                text.textContent = message;
+                overlay.classList.add('show');
+                overlay.setAttribute('aria-hidden', 'false');
+            }
+
+            function closeModal() {
+                overlay.classList.remove('show');
+                overlay.setAttribute('aria-hidden', 'true');
+            }
+
+            form.addEventListener('submit', function (event) {
+                if (allowSubmit) return;
+                event.preventDefault();
+                var targetStream = (streamSelect.value || '').trim();
+                if (!targetStream) return;
+                if (!currentStream || currentStream === 'N/A') {
+                    openModal('Allocate this student to ' + targetStream + ' stream?');
+                } else if (targetStream.toLowerCase() === String(currentStream).toLowerCase()) {
+                    openModal('Save optional-subject updates for ' + targetStream + ' stream?');
+                } else {
+                    openModal('Change stream from ' + currentStream + ' to ' + targetStream + '? This may remove scores for dropped subjects.');
+                }
+            });
+
+            cancelBtn.addEventListener('click', function () {
+                closeModal();
+            });
+            acceptBtn.addEventListener('click', function () {
+                allowSubmit = true;
+                closeModal();
+                form.submit();
+            });
+            overlay.addEventListener('click', function (event) {
+                if (event.target === overlay) closeModal();
+            });
+        })();
+    </script>
 </body>
 </html>
+

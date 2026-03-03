@@ -170,6 +170,40 @@ gunicorn -w 2 -b 0.0.0.0:$PORT student_scor:app
 Application logs are written to:
 - `app.log`
 
+## Smoke Test Utility
+
+Use `tools/role_smoke_test.py` to verify core auth routes before release.
+
+```powershell
+python tools/role_smoke_test.py
+```
+
+It checks:
+- Public routes (`/`, `/login`, `/terms-privacy`)
+- Role login flow for any role credentials you provide via env vars
+
+## Username Duplicate Fix
+
+Audit case-insensitive username collisions:
+
+```powershell
+python tools/fix_username_duplicates.py
+```
+
+Apply safe renames and enforce unique index:
+
+```powershell
+python tools/fix_username_duplicates.py --apply
+```
+
+## PostgreSQL Backup Utility
+
+Create a compressed PostgreSQL backup from `DATABASE_URL`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\run_pg_backup.ps1 -BackupDir .\backups\postgres -RetentionDays 30
+```
+
 ## Troubleshooting
 
 - CSRF errors: ensure form templates include `csrf_token` for POST forms.

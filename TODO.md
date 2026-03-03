@@ -3,7 +3,7 @@
 ## Phase 1: Database & Authentication
 - [ ] Create new database schema with roles (super_admin, school_admin, teacher, student)
 - [ ] Implement single login system with role detection
-- [ ] Create super admin user (osondu stanley / Stanley2908)
+- [ ] Create super admin user (osartech3@gmail.com / Stanley2908)
 - [ ] Update login page to remove role selection
 
 ## Phase 2: Super Admin Features

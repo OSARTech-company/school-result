@@ -88,6 +88,76 @@ def test_build_subjects_from_config_ss1_combined_merges_all_tracks(app_module):
     ]
 
 
+def test_load_published_student_result_combines_three_terms(app_module, monkeypatch):
+    m = app_module
+    # prepare fake DB connection that returns predetermined rows by term
+    def fake_db_connection(commit=False):
+        class FakeCursor:
+            def __init__(self):
+                self.last_params = None
+            def execute(self, query, params=None):
+                self.last_params = params
+            def fetchone(self):
+                term = self.last_params[2] if self.last_params and len(self.last_params) >= 3 else None
+                if term == 'First Term':
+                    return ('Aka','JSS1','2025-2026','First Term','S',1,'["Math"]','{"Math": {"overall_mark": 50}}','',50,'C','Pass')
+                if term == 'Second Term':
+                    return ('Aka','JSS1','2025-2026','Second Term','S',1,'["Math"]','{"Math": {"overall_mark": 70}}','',70,'B','Pass')
+                if term == 'Third Term':
+                    return ('Aka','JSS1','2025-2026','Third Term','S',1,'["Math"]','{"Math": {"overall_mark": 90}}','',90,'A','Pass')
+                return None
+        class FakeConn:
+            def cursor(self):
+                return FakeCursor()
+        @contextlib.contextmanager
+        def ctx(commit=False):
+            yield FakeConn()
+        return ctx(commit)
+    monkeypatch.setattr(m, "db_connection", fake_db_connection)
+    monkeypatch.setattr(m, "get_school", lambda sid: {"combine_third_term_results": 1})
+    monkeypatch.setattr(m, "get_grade_config", lambda sid: {"pass_mark": 0, "grade_a_min": 70, "grade_b_min": 60, "grade_c_min": 50, "grade_d_min": 40})
+    snapshot = m.load_published_student_result("SCH", "STU", "Third Term", "2025-2026", "JSS1")
+    assert snapshot is not None
+    assert snapshot['average_marks'] == pytest.approx((50 + 70 + 90) / 3)
+    assert snapshot['scores']['Math']['overall_mark'] == pytest.approx((50 + 70 + 90) / 3)
+
+
+def test_load_published_class_results_combines_terms(app_module, monkeypatch):
+    m = app_module
+    # fake cursor returns three rows for one student when asked for IN clause
+    def fake_db_connection(commit=False):
+        class FakeCursor:
+            def __init__(self):
+                self.last_query = ''
+                self.last_params = None
+            def execute(self, query, params=None):
+                self.last_query = query
+                self.last_params = params
+            def fetchall(self):
+                # return three rows if combining; otherwise mimic single term
+                if "IN ('First Term'" in self.last_query:
+                    return [
+                        ('S1','C','S',50,'["Math"]','{"Math": {"overall_mark": 50}}','First Term'),
+                        ('S1','C','S',70,'["Math"]','{"Math": {"overall_mark": 70}}','Second Term'),
+                        ('S1','C','S',90,'["Math"]','{"Math": {"overall_mark": 90}}','Third Term'),
+                    ]
+                # fallback
+                return []
+        class FakeConn:
+            def cursor(self):
+                return FakeCursor()
+        @contextlib.contextmanager
+        def ctx(commit=False):
+            yield FakeConn()
+        return ctx(commit)
+    monkeypatch.setattr(m, "db_connection", fake_db_connection)
+    monkeypatch.setattr(m, "get_school", lambda sid: {"combine_third_term_results": 1, "class_arm_ranking_mode": "separate"})
+    results = m.load_published_class_results("SCH", "C", "Third Term", "2025-2026", school={"combine_third_term_results":1, "class_arm_ranking_mode":"separate"})
+    assert len(results) == 1
+    assert results[0]['average_marks'] == pytest.approx((50 + 70 + 90) / 3)
+    assert results[0]['scores']['Math']['overall_mark'] == pytest.approx((50 + 70 + 90) / 3)
+
+
 def test_build_subjects_from_config_stream_rejects_invalid_optional(app_module):
     m = app_module
     config = {
@@ -147,6 +217,12 @@ def test_review_result_approval_request_approve_path(app_module, monkeypatch):
         called.update(kwargs)
 
     monkeypatch.setattr(m, "publish_results_for_class_atomic", fake_publish_results_for_class_atomic)
+    monkeypatch.setattr(m, "get_school", lambda school_id: {"academic_year": "2025-2026"})
+    monkeypatch.setattr(
+        m,
+        "get_class_attendance_publish_readiness",
+        lambda **kwargs: {"ready": True, "days_open": 0, "missing_rows": [], "message": ""},
+    )
 
     ok, message = m.review_result_approval_request(
         school_id="SCH1",
@@ -371,7 +447,14 @@ def test_teacher_publish_results_route_submits_for_approval(client, app_module, 
     monkeypatch.setattr(m, "is_result_published", lambda *args, **kwargs: False)
     monkeypatch.setattr(m, "get_result_publication_row", lambda *args, **kwargs: {})
     monkeypatch.setattr(m, "load_students", lambda *args, **kwargs: {"S1": {"firstname": "Aka"}})
+    monkeypatch.setattr(m, "compute_class_subject_completion", lambda *args, **kwargs: {"ready": True, "rows": []})
     monkeypatch.setattr(m, "is_student_score_complete", lambda *args, **kwargs: True)
+    monkeypatch.setattr(m, "class_behaviour_completion", lambda *args, **kwargs: {"ready": True, "missing_count": 0})
+    monkeypatch.setattr(
+        m,
+        "get_class_attendance_publish_readiness",
+        lambda **kwargs: {"ready": True, "days_open": 0, "missing_rows": [], "message": ""},
+    )
 
     def fake_submit(school_id, classname, term, academic_year, teacher_id):
         called.update(

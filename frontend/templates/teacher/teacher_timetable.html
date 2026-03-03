@@ -1,0 +1,44 @@
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Teacher Timetable</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260303c') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+<div class="app-shell topbar-layout">
+    {% set active_page = 'timetable' %}
+    {% include 'teacher/_teacher_sidebar.html' %}
+    <div class="main-content">
+<div class="container">
+    <div class="header">
+        <h1>My Timetable</h1>
+        <p><a class="btn" href="{{ url_for('teacher_dashboard') }}">Back to Dashboard</a></p>
+    </div>
+    <div class="card">
+        <table>
+            <thead><tr><th>Day</th><th>Class</th><th>Period</th><th>Subject</th><th>Time</th><th>Room</th></tr></thead>
+            <tbody>
+            {% for row in rows %}
+                <tr>
+                    <td>{{ row.day_name }}</td>
+                    <td>{{ row.classname }}</td>
+                    <td>{{ row.period_label }}</td>
+                    <td>{{ row.subject }}</td>
+                    <td>{{ row.start_time or '-' }} - {{ row.end_time or '-' }}</td>
+                    <td>{{ row.room or '-' }}</td>
+                </tr>
+            {% else %}
+                <tr><td colspan="6">No timetable rows assigned yet.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+    </div>
+</div>
+<script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260303c') }}"></script>
+</body>
+</html>

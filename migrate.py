@@ -25,24 +25,24 @@ def main():
 
     try:
         print("Applying database migrations...")
-        
+        database_url = (os.environ.get('DATABASE_URL', '') or '').strip()
+        if not database_url:
+            raise RuntimeError("DATABASE_URL is required before running migrations.")
+
         # Get the migrations directory
         migrations_dir = os.path.join(os.path.dirname(__file__), 'migrations')
-        
+
         # Create Alembic config
         alembic_cfg = Config(os.path.join(migrations_dir, 'alembic.ini'))
         alembic_cfg.set_main_option('script_location', migrations_dir)
-        alembic_cfg.set_main_option(
-            'sqlalchemy.url',
-            os.environ.get('DATABASE_URL', '')
-        )
-        
+        alembic_cfg.set_main_option('sqlalchemy.url', database_url)
+
         # Apply all pending migrations
         command.upgrade(alembic_cfg, 'head')
-        print("✓ Migrations completed successfully.")
-        
+        print("[OK] Migrations completed successfully.")
+
     except Exception as e:
-        print(f"✗ Migration failed: {e}", file=sys.stderr)
+        print(f"[ERROR] Migration failed: {e}", file=sys.stderr)
         import traceback
         traceback.print_exc()
         sys.exit(1)

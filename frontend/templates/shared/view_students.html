@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>View Students - Student Score Management System</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         body {
@@ -559,13 +559,33 @@
                             <td>
                                 <div class="action-buttons">
                                     {% if session.get('role') == 'teacher' %}
+                                    {% set can_view_teacher_published_result = ((student.class_name or '')|trim|lower) in (teacher_result_classes_lower or []) %}
+                                    <span class="status-badge {{ 'status-pass' if can_view_teacher_published_result else 'status-fail' }}" title="Published result access for this class">
+                                        {{ 'Result Access: Yes' if can_view_teacher_published_result else 'Result Access: No' }}
+                                    </span>
+                                    {% if can_view_teacher_published_result %}
+                                    <a href="{{ url_for('teacher_student_result', student_id=student.student_id) }}" class="action-btn view" title="View Published Result">
+                                        <i class="fas fa-file-alt"></i> Result
+                                    </a>
+                                    {% endif %}
+                                    {% if student.can_edit_full %}
                                     <a href="{{ url_for('teacher_enter_scores', student_id=student.student_id) }}" class="action-btn edit" title="Edit Scores" style="background: #9b59b6;">
                                         <i class="fas fa-chart-bar"></i> Scores
                                     </a>
+                                    {% elif student.subject_actions %}
+                                        {% for subject in student.subject_actions %}
+                                        <a href="{{ url_for('teacher_enter_subject_scores', student_id=student.student_id, subject=subject) }}" class="action-btn edit" title="Edit {{ subject }} Score" style="background: #9b59b6;">
+                                            <i class="fas fa-chart-bar"></i> {{ subject }}
+                                        </a>
+                                        {% endfor %}
+                                    {% endif %}
                                     {% endif %}
                                     {% if session.get('role') == 'school_admin' %}
                                     <a href="{{ url_for('school_admin_student_result', student_id=student.student_id) }}" class="action-btn view" title="View Published Result">
                                         <i class="fas fa-file-alt"></i> Result
+                                    </a>
+                                    <a href="{{ url_for('school_admin_correct_result', student_id=student.student_id) }}" class="action-btn edit" title="Correct & Republish">
+                                        <i class="fas fa-pen"></i> Correct
                                     </a>
                                     {% endif %}
                                 </div>
@@ -693,3 +713,4 @@
     </script>
 </body>
 </html>
+

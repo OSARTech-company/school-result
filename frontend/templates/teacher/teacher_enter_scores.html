@@ -4,7 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Enter Scores - Teacher Dashboard</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260303c') }}">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f5f7fa; }
@@ -34,6 +35,10 @@
     </style>
 </head>
 <body>
+    <div class="app-shell topbar-layout">
+    {% set active_page = 'dashboard' %}
+    {% include 'teacher/_teacher_sidebar.html' %}
+    <div class="main-content">
     <div class="container">
         <div class="header">
             <h1><i class="fas fa-calculator"></i> Enter Scores</h1>
@@ -88,14 +93,24 @@
                                 {% endif %}
                                 <th>Total Score (Auto)</th>
                                 <th>Grade (Auto by Admin Config)</th>
+                                <th>Subject Teacher Comment</th>
+                                <th>Last Edited</th>
                             </tr>
                         </thead>
                         <tbody>
                             {% for subject in subjects %}
                                 {% set subj_key = subject_key_map.get(subject, subject) %}
                                 {% set s = student.scores.get(subject, {}) if student.scores else {} %}
+                                {% set row_editable = subject in editable_subjects %}
+                                {% set row_locked_by_submission = (locked_subjects_for_class is defined and subject in locked_subjects_for_class) %}
+                                {% set last_edit = subject_last_edits.get(subject, {}) %}
                                 <tr class="subject-row" data-subj-key="{{ subj_key }}">
-                                    <th>{{ subject }}</th>
+                                    <th>
+                                        {{ subject }}
+                                        {% if row_locked_by_submission %}
+                                        <br><small style="color:#b36b00; font-weight:600;">Locked: waiting for subject teacher submission</small>
+                                        {% endif %}
+                                    </th>
                                     {% if school.test_enabled %}
                                         {% for i in range(1, school.max_tests + 1) %}
                                         <td>
@@ -108,7 +123,7 @@
                                                    min="0"
                                                    max="{{ school.test_score_max }}"
                                                    value="{{ s.get('test_' ~ i, 0) }}"
-                                                   {% if is_locked %}disabled{% endif %}>
+                                                   {% if is_locked or not row_editable %}disabled{% endif %}>
                                         </td>
                                         {% endfor %}
                                         <td class="readonly-cell">
@@ -129,7 +144,7 @@
                                                    min="0"
                                                    max="{{ exam_config.exam_score_max }}"
                                                    value="{{ s.get('exam_score', s.get('total_exam', 0)) }}"
-                                                   {% if is_locked %}disabled{% endif %}>
+                                                   {% if is_locked or not row_editable %}disabled{% endif %}>
                                         </td>
                                         {% else %}
                                         <td>
@@ -142,7 +157,7 @@
                                                    min="0"
                                                    max="{{ exam_config.objective_max }}"
                                                    value="{{ s.get('objective', 0) }}"
-                                                   {% if is_locked %}disabled{% endif %}>
+                                                   {% if is_locked or not row_editable %}disabled{% endif %}>
                                         </td>
                                         <td>
                                             <input type="number"
@@ -154,7 +169,7 @@
                                                    min="0"
                                                    max="{{ exam_config.theory_max }}"
                                                    value="{{ s.get('theory', 0) }}"
-                                                   {% if is_locked %}disabled{% endif %}>
+                                                   {% if is_locked or not row_editable %}disabled{% endif %}>
                                         </td>
                                         <td class="readonly-cell">
                                             <input type="number" step="0.01" readonly class="total-exam"
@@ -171,22 +186,56 @@
                                     <td class="readonly-cell">
                                         <span class="grade-chip auto-grade" data-subj-key="{{ subj_key }}">{{ s.get('grade', '-') }}</span>
                                     </td>
+                                    <td>
+                                        <input type="text"
+                                               name="subject_comment_{{ subj_key }}"
+                                               maxlength="300"
+                                               placeholder="Comment for parent"
+                                               value="{{ s.get('subject_teacher_comment', '') }}"
+                                               {% if is_locked or not row_editable %}disabled{% endif %}>
+                                    </td>
+                                    <td class="readonly-cell" style="text-align:left;">
+                                        {% if last_edit %}
+                                            {% set editor_id = last_edit.get('changed_by', '') %}
+                                            <div><strong>{{ teacher_name_map.get(editor_id, editor_id or '-') }}</strong></div>
+                                            <div style="font-size:0.85rem; color:#5c6b7a;">{{ last_edit.get('changed_at', '-') }}</div>
+                                            <div style="font-size:0.8rem; color:#7a8794;">{{ last_edit.get('change_source', '') }}</div>
+                                        {% else %}
+                                            <span style="color:#7a8794;">No edits yet</span>
+                                        {% endif %}
+                                    </td>
                                 </tr>
                             {% endfor %}
                         </tbody>
                     </table>
                 </div>
                 <p class="hint">Totals and grade are generated automatically per subject using the configured grading rules.</p>
+                <p class="hint">Only your assigned subject(s) are editable on this page; other subjects are read-only.</p>
+                {% if locked_subjects_for_class %}
+                <p class="hint" style="color:#b36b00;">
+                    Locked subject(s) pending subject-teacher submission: {{ locked_subjects_for_class|join(', ') }}.
+                </p>
+                {% endif %}
+                {% if can_edit_teacher_comment %}
                 <div style="margin-top:14px;">
                     <label for="teacher_comment" style="display:block; margin-bottom:6px; font-weight:600; color:#2c3e50;">Teacher Comment</label>
                     <textarea id="teacher_comment" name="teacher_comment" rows="4" style="width:100%; border:1px solid #ccd3db; border-radius:6px; padding:10px;" placeholder="Enter comment for this student's report" {% if is_locked %}disabled{% endif %}>{{ student.teacher_comment or '' }}</textarea>
                 </div>
+                <div style="margin-top:14px;">
+                    <label for="score_override_reason" style="display:block; margin-bottom:6px; font-weight:600; color:#2c3e50;">Reason For Score Change</label>
+                    <textarea id="score_override_reason" name="score_override_reason" rows="3" style="width:100%; border:1px solid #ccd3db; border-radius:6px; padding:10px;" placeholder="Required when class teacher changes score entered by subject teacher." {% if is_locked %}disabled{% endif %}></textarea>
+                    <p class="hint">Class teacher must provide this reason when overriding score values entered by another teacher.</p>
+                </div>
+                {% endif %}
                 
                 <button type="submit" class="btn btn-primary" {% if is_locked %}disabled{% endif %}><i class="fas fa-save"></i> Save Scores</button>
                 <a href="{{ url_for('teacher_dashboard') }}" class="btn btn-secondary" style="margin-left: 10px;">Cancel</a>
             </form>
         </div>
     </div>
+    </div>
+    </div>
+    <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260303c') }}"></script>
     <script>
         (function () {
             const table = document.getElementById('score-entry-table');
@@ -262,3 +311,4 @@
     </script>
 </body>
 </html>
+

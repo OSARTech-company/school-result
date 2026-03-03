@@ -1,0 +1,83 @@
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bulk Tools</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260303c') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+<div class="app-shell topbar-layout">
+    {% set active_page = 'bulk' %}
+    {% include 'school/_school_admin_sidebar.html' %}
+    <div class="main-content">
+<div class="container">
+    <div class="header">
+        <h1>Bulk Import / Export / Backup</h1>
+        <p><a class="btn" href="{{ url_for('school_admin_dashboard') }}">Back to Dashboard</a></p>
+    </div>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        {% for category, message in messages %}
+        <div class="flash {{ category }}">{{ message }}</div>
+        {% endfor %}
+    {% endif %}
+    {% endwith %}
+    {% if error_token %}
+    <div class="card">
+        <p><strong>Import Error Report:</strong> Some rows failed validation.</p>
+        <a class="btn btn-danger" href="{{ url_for('school_admin_import_csv_error_rows', token=error_token) }}">Download Error Rows CSV</a>
+    </div>
+    {% endif %}
+
+    <div class="card">
+        <h2>Export CSV</h2>
+        <a class="btn" href="{{ url_for('school_admin_export_target', target='students') }}">Export Students</a>
+        <a class="btn ml-10" href="{{ url_for('school_admin_export_target', target='teachers') }}">Export Teachers</a>
+        <a class="btn ml-10" href="{{ url_for('school_admin_export_target', target='class_assignments') }}">Export Class Assignments</a>
+    </div>
+
+    <div class="card">
+        <h2>Import CSV</h2>
+        <p class="note">Students columns: student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects, promoted, parent_phone</p>
+        <form method="post" action="{{ url_for('school_admin_import_target', target='students') }}" enctype="multipart/form-data">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="file" name="file" accept=".csv" required>
+            <button class="btn btn-primary" type="submit">Import Students CSV</button>
+        </form>
+        <hr>
+        <p class="note">Teachers columns: user_id, firstname, lastname, phone, gender, assigned_classes, subjects_taught</p>
+        <form method="post" action="{{ url_for('school_admin_import_target', target='teachers') }}" enctype="multipart/form-data">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="file" name="file" accept=".csv" required>
+            <button class="btn btn-primary" type="submit">Import Teachers CSV</button>
+        </form>
+        <hr>
+        <p class="note">Class assignments columns: teacher_id, classname, term, academic_year</p>
+        <form method="post" action="{{ url_for('school_admin_import_target', target='class_assignments') }}" enctype="multipart/form-data">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="file" name="file" accept=".csv" required>
+            <button class="btn btn-primary" type="submit">Import Class Assignments CSV</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h2>Backup / Restore</h2>
+        <a class="btn btn-secondary" href="{{ url_for('school_admin_backup') }}">Download Full JSON Backup</a>
+        <form method="post" action="{{ url_for('school_admin_restore') }}" enctype="multipart/form-data" class="mt-12">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="file" name="backup_file" accept=".json,application/json" required>
+            <select name="mode">
+                <option value="merge">Merge</option>
+                <option value="replace">Replace Existing</option>
+            </select>
+            <button class="btn btn-danger" type="submit">Restore Backup</button>
+        </form>
+    </div>
+</div>
+    </div>
+</div>
+<script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260303c') }}"></script>
+</body>
+</html>

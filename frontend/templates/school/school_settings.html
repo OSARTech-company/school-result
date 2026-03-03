@@ -4,33 +4,32 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>School Settings - Student Score Management System</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260303c') }}">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f5f7fa; }
-        .container { max-width: 800px; margin: 0 auto; padding: 20px; }
-        .header { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); color: white; padding: 20px; border-radius: 10px; margin-bottom: 30px; }
+        body { min-height: 100vh; }
+        .container { width: min(980px, 100%); margin: 0 auto; padding: 24px; }
+        .header { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
         .header h1 { margin: 0; font-size: 1.8rem; }
-        .header .back { float: right; color: white; text-decoration: none; }
-        .card { background: white; border-radius: 10px; padding: 25px; margin-bottom: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        .card h2 { margin-top: 0; color: #2c3e50; font-size: 1.4rem; border-bottom: 2px solid #3498db; padding-bottom: 10px; }
-        .form-group { margin-bottom: 20px; }
-        .form-group label { display: block; margin-bottom: 8px; color: #555; font-weight: 500; }
-        .form-group input, .form-group select { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 5px; font-size: 1rem; }
+        .header .back { color: white; text-decoration: none; font-weight: 700; }
+        .form-group { margin-bottom: 18px; }
         .form-group input[type="checkbox"] { width: auto; }
+        .form-group input[type="color"] { width: 110px; padding: 4px; min-height: 42px; }
         .checkbox-group { display: flex; align-items: center; gap: 10px; }
-        .btn { padding: 12px 24px; border: none; border-radius: 5px; cursor: pointer; font-size: 1rem; font-weight: 500; }
-        .btn-primary { background: #3498db; color: white; }
-        .btn-primary:hover { background: #2980b9; }
-        .btn-secondary { background: #6c757d; color: white; }
-        .btn-secondary:hover { background: #5a6268; }
-        .flash { padding: 15px; margin-bottom: 20px; border-radius: 5px; }
-        .flash.success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-        .flash.error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
-        .section-title { font-weight: 600; color: #2c3e50; margin: 25px 0 15px; padding-bottom: 5px; border-bottom: 1px solid #eee; }
+        .section-title { font-weight: 700; color: #1e3653; margin: 26px 0 14px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+        .settings-row { border: 1px solid var(--line); border-radius: 10px; background: #f8fbff; padding: 14px; margin-bottom: 14px; }
+        .table-wrap { width: 100%; overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
+        .table-wrap table { width: 100%; border-collapse: collapse; min-width: 760px; }
+        .table-wrap th, .table-wrap td { padding: 10px; border-bottom: 1px solid var(--line); text-align: left; }
+        .table-wrap th { background: #eff5fb; }
     </style>
 </head>
 <body>
+    <div class="app-shell topbar-layout">
+    {% set active_page = 'settings' %}
+    {% include 'school/_school_admin_sidebar.html' %}
+    <div class="main-content">
     <div class="container">
         <div class="header">
             <h1><i class="fas fa-cogs"></i> School Settings</h1>
@@ -58,6 +57,20 @@
                     <label for="school_logo">School Logo URL:</label>
                     <input type="text" id="school_logo" name="school_logo" value="{{ school.school_logo if school else '' }}" placeholder="https://example.com/logo.png">
                 </div>
+
+                <div class="section-title"><i class="fas fa-palette"></i> Theme Colors</div>
+                <div class="form-group">
+                    <label for="theme_primary_color">Primary Color:</label>
+                    <input type="color" id="theme_primary_color" name="theme_primary_color" value="{{ school.theme_primary_color if school and school.theme_primary_color else '#1E3C72' }}">
+                </div>
+                <div class="form-group">
+                    <label for="theme_secondary_color">Secondary Color:</label>
+                    <input type="color" id="theme_secondary_color" name="theme_secondary_color" value="{{ school.theme_secondary_color if school and school.theme_secondary_color else '#2A5298' }}">
+                </div>
+                <div class="form-group">
+                    <label for="theme_accent_color">Accent Color:</label>
+                    <input type="color" id="theme_accent_color" name="theme_accent_color" value="{{ school.theme_accent_color if school and school.theme_accent_color else '#1F7A8C' }}">
+                </div>
                 
                 <div class="form-group">
                     <label for="academic_year">Academic Year:</label>
@@ -72,19 +85,60 @@
                         <option value="Third Term" {% if school and school.current_term == 'Third Term' %}selected{% endif %}>Third Term</option>
                     </select>
                 </div>
+                <div class="form-group">
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="confirm_term_rollover" name="confirm_term_rollover" value="1">
+                        <label for="confirm_term_rollover">I confirm that changing term/year will reset working scores for active students.</label>
+                    </div>
+                </div>
+
+                <div class="section-title"><i class="fas fa-calendar-alt"></i> Term Calendar</div>
+                <div class="form-group">
+                    <label for="calendar_academic_year">Calendar Academic Year:</label>
+                    <input type="text" id="calendar_academic_year" name="calendar_academic_year" value="{{ selected_calendar_year or (school.academic_year if school else '') }}" placeholder="e.g., 2026-2027">
+                </div>
+                <div class="form-group">
+                    <label for="calendar_term">Calendar Term:</label>
+                    <select id="calendar_term" name="calendar_term">
+                        <option value="First Term" {% if selected_calendar_term == 'First Term' %}selected{% endif %}>First Term</option>
+                        <option value="Second Term" {% if selected_calendar_term == 'Second Term' %}selected{% endif %}>Second Term</option>
+                        <option value="Third Term" {% if selected_calendar_term == 'Third Term' %}selected{% endif %}>Third Term</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="term_open_date">Term Open Date:</label>
+                    <input type="date" id="term_open_date" name="term_open_date" value="{{ calendar.open_date if calendar else '' }}">
+                </div>
+                <div class="form-group">
+                    <label for="term_close_date">Term Close Date:</label>
+                    <input type="date" id="term_close_date" name="term_close_date" value="{{ calendar.close_date if calendar else '' }}">
+                </div>
+                <div class="form-group">
+                    <label for="next_term_begin_date">Next Term Begins:</label>
+                    <input type="date" id="next_term_begin_date" name="next_term_begin_date" value="{{ calendar.next_term_begin_date if calendar else '' }}">
+                </div>
+                <div class="form-group">
+                    <label for="days_open_preview">Days Open (auto, excludes Saturday and Sunday):</label>
+                    <input type="text" id="days_open_preview" value="{{ calendar.days_open if calendar else 0 }}" readonly>
+                </div>
+                <div class="form-group">
+                    <small style="color:#5a6c7d;">
+                        Days Open is calculated from open/close dates minus Saturday/Sunday and minus Mid-term Break from School Programs.
+                    </small>
+                </div>
                 
                 <div class="section-title"><i class="fas fa-clipboard-check"></i> Score Entry Settings</div>
                 
                 <div class="form-group">
                     <div class="checkbox-group">
-                        <input type="checkbox" id="test_enabled" name="test_enabled" {% if school and school.test_enabled %}checked{% else %}checked{% endif %}>
+                        <input type="checkbox" id="test_enabled" name="test_enabled" {% if school %}{% if school.test_enabled %}checked{% endif %}{% else %}checked{% endif %}>
                         <label for="test_enabled">Enable Test Score Entry</label>
                     </div>
                 </div>
                 
                 <div class="form-group">
                     <div class="checkbox-group">
-                        <input type="checkbox" id="exam_enabled" name="exam_enabled" {% if school and school.exam_enabled %}checked{% else %}checked{% endif %}>
+                        <input type="checkbox" id="exam_enabled" name="exam_enabled" {% if school %}{% if school.exam_enabled %}checked{% endif %}{% else %}checked{% endif %}>
                         <label for="exam_enabled">Enable Exam Score Entry</label>
                     </div>
                 </div>
@@ -92,8 +146,8 @@
                 <div class="section-title"><i class="fas fa-calculator"></i> Score Configuration</div>
                 
                 <div class="form-group">
-                    <label for="max_tests">Maximum Number of Tests (1-5):</label>
-                    <input type="number" id="max_tests" name="max_tests" value="{{ school.max_tests if school else 3 }}" min="1" max="5">
+                    <label for="max_tests">Maximum Number of Tests (1-10):</label>
+                    <input type="number" id="max_tests" name="max_tests" value="{{ school.max_tests if school else 3 }}" min="1" max="10">
                 </div>
                 
                 <div class="form-group">
@@ -104,8 +158,8 @@
                 <div class="section-title"><i class="fas fa-file-alt"></i> Exam Structure</div>
                 {% for level in ['primary', 'jss', 'ss'] %}
                 {% set cfg = assessment_configs[level] %}
-                <div style="border:1px solid #e5e5e5; border-radius:8px; padding:14px; margin-bottom:14px;">
-                    <div style="font-weight:600; margin-bottom:10px; text-transform: uppercase;">{{ level }}</div>
+                <div class="settings-row">
+                    <div style="font-weight:700; margin-bottom:10px; text-transform: uppercase;">{{ level }}</div>
                     <div class="form-group">
                         <label for="exam_mode_{{ level }}">Exam Mode</label>
                         <select id="exam_mode_{{ level }}" name="exam_mode_{{ level }}">
@@ -176,13 +230,125 @@
                         </option>
                     </select>
                 </div>
+                <div class="form-group">
+                    <label for="class_arm_ranking_mode">Class Arm Ranking Mode (e.g., JSS1A/JSS1S)</label>
+                    <select id="class_arm_ranking_mode" name="class_arm_ranking_mode">
+                        <option value="separate" {% if not school or school.class_arm_ranking_mode != 'together' %}selected{% endif %}>
+                            Rank each arm separately (JSS1A separate from JSS1S)
+                        </option>
+                        <option value="together" {% if school and school.class_arm_ranking_mode == 'together' %}selected{% endif %}>
+                            Rank all arms together (merge by base class like JSS1)
+                        </option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="show_positions">Show Positions In Result</label>
+                    <select id="show_positions" name="show_positions">
+                        <option value="1" {% if not school or school.show_positions %}selected{% endif %}>
+                            Yes - show class and subject positions (e.g., 1st of 10)
+                        </option>
+                        <option value="0" {% if school and not school.show_positions %}selected{% endif %}>
+                            No - hide all positions in result
+                        </option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="combine_third_term_results">Third Term Result Behaviour</label>
+                    <select id="combine_third_term_results" name="combine_third_term_results">
+                        <option value="0" {% if not school or not school.combine_third_term_results %}selected{% endif %}>
+                            Standard - show only third term scores
+                        </option>
+                        <option value="1" {% if school and school.combine_third_term_results %}selected{% endif %}>
+                            Combined - aggregate first, second and third term scores when viewing Third Term
+                        </option>
+                    </select>
+                </div>
                 
                 <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Save Settings</button>
                 <a href="{{ url_for('school_admin_dashboard') }}" class="btn btn-secondary" style="margin-left: 10px;">Cancel</a>
             </form>
         </div>
+
+        <div class="card">
+            <h2><i class="fas fa-calendar-check"></i> Saved Term Calendars</h2>
+            {% if calendar_rows %}
+            <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Academic Year</th>
+                        <th>Term</th>
+                        <th>Open</th>
+                        <th>Close</th>
+                        <th>Next Term Begins</th>
+                        <th>Midterm Break</th>
+                        <th>Days Open</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in calendar_rows %}
+                    <tr>
+                        <td>{{ row.academic_year or '-' }}</td>
+                        <td>{{ row.term }}</td>
+                        <td>{{ row.open_date or '-' }}</td>
+                        <td>{{ row.close_date or '-' }}</td>
+                        <td>{{ row.next_term_begin_date or '-' }}</td>
+                        <td>
+                            {% if row.midterm_break_start and row.midterm_break_end %}
+                                {{ row.midterm_break_start }} to {{ row.midterm_break_end }}
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                        <td>{{ row.days_open }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            </div>
+            {% else %}
+            <p>No term calendar saved yet.</p>
+            {% endif %}
+        </div>
     </div>
+    </div>
+    </div>
+    <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260303c') }}"></script>
     <script>
+        function parseDateLocal(value) {
+            if (!value) return null;
+            const parts = value.split('-');
+            if (parts.length !== 3) return null;
+            const y = Number(parts[0]);
+            const m = Number(parts[1]) - 1;
+            const d = Number(parts[2]);
+            if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null;
+            const dt = new Date(y, m, d);
+            if (dt.getFullYear() !== y || dt.getMonth() !== m || dt.getDate() !== d) return null;
+            return dt;
+        }
+
+        function calcDaysOpenPreview() {
+            const openVal = document.getElementById('term_open_date').value;
+            const closeVal = document.getElementById('term_close_date').value;
+            const out = document.getElementById('days_open_preview');
+            const openDt = parseDateLocal(openVal);
+            const closeDt = parseDateLocal(closeVal);
+            if (!openDt || !closeDt || closeDt < openDt) {
+                out.value = '0';
+                return;
+            }
+
+            let total = 0;
+            for (let day = new Date(openDt); day <= closeDt; day.setDate(day.getDate() + 1)) {
+                const weekday = day.getDay(); // 0=Sunday, 6=Saturday
+                if (weekday === 0 || weekday === 6) continue;
+                total += 1;
+            }
+            out.value = String(total);
+        }
+
         function refreshExamMode(level) {
             const modeEl = document.getElementById(`exam_mode_${level}`);
             const separateEls = document.querySelectorAll(`.mode-separate.mode-${level}`);
@@ -197,6 +363,13 @@
             modeEl.addEventListener('change', () => refreshExamMode(level));
             refreshExamMode(level);
         });
+
+        ['term_open_date', 'term_close_date'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('change', calcDaysOpenPreview);
+        });
+        calcDaysOpenPreview();
     </script>
 </body>
 </html>
+

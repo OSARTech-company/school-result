@@ -1,0 +1,37 @@
+<div class="side-taskbar">
+    <div class="side-brand">
+        <i class="fas fa-graduation-cap"></i>
+        <span>Parent</span>
+    </div>
+    <div class="side-links">
+        <a href="{{ url_for('parent_dashboard') }}" class="side-link{% if active_page == 'dashboard' %} active{% endif %}">
+            <i class="fas fa-home"></i>
+            <span>Dashboard</span>
+        </a>
+        {% for child in (children or []) %}
+        <a href="{{ url_for('parent_view_result', student_key=child.key) }}" class="side-link">
+            <i class="fas fa-user-graduate"></i>
+            <span>{{ child.firstname }} Results</span>
+        </a>
+        <a href="{{ url_for('parent_submit_dispute', student_key=child.key) }}" class="side-link">
+            <i class="fas fa-balance-scale"></i>
+            <span>{{ child.firstname }} Dispute</span>
+        </a>
+        {% endfor %}
+        <a href="#parent-password-card" class="side-link">
+            <i class="fas fa-key"></i>
+            <span>Change Password</span>
+        </a>
+        <a href="{{ url_for('help', role='parent') }}" class="side-link">
+            <i class="fas fa-question-circle"></i>
+            <span>Help</span>
+        </a>
+        <form method="post" action="{{ url_for('logout') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="side-link side-link-logout">
+                <i class="fas fa-sign-out-alt"></i>
+                <span>Logout</span>
+            </button>
+        </form>
+    </div>
+</div>

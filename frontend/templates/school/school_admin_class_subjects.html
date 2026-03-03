@@ -4,34 +4,28 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Class Subjects - School Admin</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260303c') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f5f7fa; }
-        .container { max-width: 1100px; margin: 0 auto; padding: 20px; }
-        .header { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); color: white; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
-        .card { background: white; border-radius: 10px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        body { min-height: 100vh; }
+        .container { width: min(1240px, 100%); margin: 0 auto; padding: 24px; }
+        .header { display: flex; justify-content: space-between; align-items: center; gap: 14px; flex-wrap: wrap; }
+        .header h1 { margin: 0; }
         .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-        .form-group { margin-bottom: 14px; }
-        label { display: block; font-weight: 600; margin-bottom: 6px; }
-        input { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; }
-        .flash { padding: 10px; border-radius: 6px; margin-bottom: 10px; }
-        .flash.success { background: #d4edda; color: #155724; }
-        .flash.error { background: #f8d7da; color: #721c24; }
-        .btn { border: none; border-radius: 6px; padding: 10px 14px; cursor: pointer; text-decoration: none; display: inline-block; }
-        .btn-primary { background: #3498db; color: white; }
-        .btn-secondary { background: #6c757d; color: white; }
-        table { width: 100%; border-collapse: collapse; }
-        th, td { border-bottom: 1px solid #eee; padding: 10px; text-align: left; vertical-align: top; }
-        th { background: #f8f9fa; }
+        .table-wrap { width: 100%; overflow-x: auto; border-radius: 10px; border: 1px solid var(--line); }
+        table { width: 100%; border-collapse: collapse; min-width: 960px; }
+        th, td { border-bottom: 1px solid var(--line); padding: 10px; text-align: left; vertical-align: top; }
+        th { background: #eff5fb; }
         .hint { font-size: 0.9rem; color: #666; }
         .subject-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
             gap: 8px;
-            border: 1px solid #ddd;
-            border-radius: 6px;
+            border: 1px solid var(--line);
+            border-radius: 10px;
             padding: 10px;
-            background: #fafafa;
+            background: #f8fbff;
             max-height: 210px;
             overflow-y: auto;
         }
@@ -55,10 +49,18 @@
             margin-top: 8px;
             display: block;
         }
+        .btn-danger {
+            background: linear-gradient(135deg, #b42318, #d92d20);
+            color: white;
+        }
         @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
     </style>
 </head>
 <body>
+    <div class="app-shell topbar-layout">
+    {% set active_page = 'class_subjects' %}
+    {% include 'school/_school_admin_sidebar.html' %}
+    <div class="main-content">
     <div class="container">
         <div class="header">
             <h1>Class Subject Configuration</h1>
@@ -129,6 +131,7 @@
 
         <div class="card">
             <h2>Existing Class Configurations</h2>
+            <div class="table-wrap">
             <table>
                 <thead>
                     <tr>
@@ -154,7 +157,7 @@
                             <form method="post" action="{{ url_for('school_admin_delete_class_subject_config') }}" onsubmit="return confirm('Delete subject configuration for {{ class_name }}?');">
                                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                 <input type="hidden" name="classname" value="{{ class_name }}"/>
-                                <button type="submit" class="btn btn-secondary" style="background:#e74c3c; color:white;">Delete</button>
+                                <button type="submit" class="btn btn-danger">Delete</button>
                             </form>
                         </td>
                     </tr>
@@ -165,8 +168,12 @@
                     {% endfor %}
                 </tbody>
             </table>
+            </div>
         </div>
     </div>
+    </div>
+    </div>
+    <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260303c') }}"></script>
     <script>
         const classNameInput = document.getElementById('classname');
         const ssSection = document.getElementById('ssStreamSection');
@@ -205,20 +212,27 @@
         function normalizeClassName(v) {
             return (v || '').replace(/[^a-z0-9]/gi, '').toUpperCase();
         }
+        function classParts(v) {
+            const n = normalizeClassName(v);
+            const m = n.match(/^(NURSERY|PRIMARY|JSS|SSS|SS)(\d+)([A-Z]+)?$/);
+            if (!m) return { level: '', num: '', arm: '', key: n };
+            const level = (m[1] === 'SSS') ? 'SS' : m[1];
+            return { level: level, num: m[2], arm: m[3] || '', key: `${level}${m[2]}` };
+        }
 
         function classUsesStream(v) {
-            const n = normalizeClassName(v);
-            return ['SS1', 'SS2', 'SS3', 'SSS1', 'SSS2', 'SSS3'].includes(n);
+            const p = classParts(v);
+            return p.level === 'SS' && ['1', '2', '3'].includes(p.num);
         }
         function isSs1(v) {
-            const n = normalizeClassName(v);
-            return ['SS1', 'SSS1'].includes(n);
+            const p = classParts(v);
+            return p.level === 'SS' && p.num === '1';
         }
 
         function refreshSsFields() {
             const classVal = classNameInput.value;
-            const classKey = normalizeClassName(classVal);
-            const classCatalog = catalogMap[classKey] || {core: [], science: [], art: [], commercial: [], optional: []};
+            const parsed = classParts(classVal);
+            const classCatalog = catalogMap[parsed.key] || catalogMap[parsed.key + parsed.arm] || {core: [], science: [], art: [], commercial: [], optional: []};
             const ss1Combined = isSs1(classVal) && ss1StreamMode === 'combined';
             const mergedOffered = Array.from(new Set([]
                 .concat(classCatalog.core || [])
@@ -253,3 +267,4 @@
     </script>
 </body>
 </html>
+

@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>School Parents - Student Score Management System</title>
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='css/style.css', v='20260228b') }}"
+    />
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260303c') }}"
+    />
+    <link
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
+      rel="stylesheet"
+    />
+    <style>
+      body.rail-expanded .topbar-layout .side-link span { display: inline !important; }
+      body.rail-expanded .topbar-layout .side-brand span { display: inline !important; }
+    </style>
+  </head>
+  <body>
+    <div class="app-shell topbar-layout">
+      <div class="side-taskbar">
+        <div class="side-brand">
+            <i class="fas fa-graduation-cap"></i>
+            <span>School Admin</span>
+        </div>
+        <div class="side-links">
+            <a href="{{ url_for('school_admin_dashboard') }}" class="side-link">
+                <i class="fas fa-home"></i>
+                <span>Dashboard</span>
+            </a>
+            <a href="{{ url_for('view_students') }}" class="side-link">
+                <i class="fas fa-users"></i>
+                <span>View Students</span>
+            </a>
+            <a href="{{ url_for('school_admin_view_parents') }}" class="side-link active">
+                <i class="fas fa-user-friends"></i>
+                <span>View Parents</span>
+            </a>
+            <a href="{{ url_for('school_admin_add_students_by_class') }}" class="side-link">
+                <i class="fas fa-user-plus"></i>
+                <span>Add Students</span>
+            </a>
+            <a href="{{ url_for('school_admin_settings') }}" class="side-link">
+                <i class="fas fa-cogs"></i>
+                <span>School Settings</span>
+            </a>
+            <a href="{{ url_for('school_admin_class_subjects') }}" class="side-link">
+                <i class="fas fa-book-open"></i>
+                <span>Class Subjects</span>
+            </a>
+            <a href="{{ url_for('school_admin_promote') }}" class="side-link">
+                <i class="fas fa-arrow-up"></i>
+                <span>Promote Students</span>
+            </a>
+            <a href="{{ url_for('school_admin_score_audit') }}" class="side-link">
+                <i class="fas fa-clipboard-list"></i>
+                <span>Score Audit Log</span>
+            </a>
+            <a href="{{ url_for('report_issue') }}" class="side-link">
+                <i class="fas fa-bug"></i>
+                <span>Report Issue</span>
+            </a>
+            <a href="{{ url_for('school_admin_change_password') }}" class="side-link">
+                <i class="fas fa-key"></i>
+                <span>Change Password</span>
+            </a>
+            <a href="{{ url_for('help', role='school_admin') }}" class="side-link">
+                <i class="fas fa-question-circle"></i>
+                <span>Help</span>
+            </a>
+            <form method="post" action="{{ url_for('logout') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="side-link side-link-logout">
+                    <i class="fas fa-sign-out-alt"></i>
+                    <span>Logout</span>
+                </button>
+            </form>
+        </div>
+      </div>
+
+      <div class="main-content">
+        <div class="container">
+          <div class="header">
+            <h1><i class="fas fa-user-friends"></i> Parent Links</h1>
+            <p class="meta-line">
+              <strong>School:</strong> {{ school.school_name if school and school.school_name else '-' }} |
+              <strong>Location:</strong> {{ school.location if school and school.location else '-' }} |
+              <strong>Last Login:</strong> {{ last_login_at }}
+            </p>
+          </div>
+
+          {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+          {% for category, message in messages %}
+          <div class="flash {{ category }}">{{ message }}</div>
+          {% endfor %}
+          {% endif %}
+          {% endwith %}
+
+          <div class="stats-grid">
+            <div class="stat-card">
+              <h3>{{ parent_count }}</h3>
+              <p>Unique Parents</p>
+            </div>
+            <div class="stat-card">
+              <h3>{{ linked_students }}</h3>
+              <p>Students Linked</p>
+            </div>
+          </div>
+
+          <div class="card">
+            <h2><i class="fas fa-list"></i> Parents Linked By Students</h2>
+            {% if parent_links %}
+            <table>
+              <thead>
+                <tr>
+                  <th>Parent Phone</th>
+                  <th>Student ID</th>
+                  <th>Student Name</th>
+                  <th>Class</th>
+                  <th>Term</th>
+                  <th>Stream</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in parent_links %}
+                <tr>
+                  <td>{{ row.parent_phone }}</td>
+                  <td>{{ row.student_id }}</td>
+                  <td>{{ row.firstname }}</td>
+                  <td>{{ row.classname }}</td>
+                  <td>{{ row.term }}</td>
+                  <td>{{ row.stream or '-' }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+            {% else %}
+            <p class="note">No parent accounts linked yet. Students must add parent access from student dashboard.</p>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+    <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260303c') }}"></script>
+    <script>
+      (function () {
+        var body = document.body;
+        if (window.innerWidth > 600) {
+          body.classList.add('rail-expanded');
+        }
+      })();
+    </script>
+  </body>
+</html>
+

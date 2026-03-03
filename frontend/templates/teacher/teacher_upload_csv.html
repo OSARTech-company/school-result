@@ -4,7 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Upload CSV Scores - Teacher Dashboard</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260303c') }}">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f5f7fa; }
@@ -29,6 +30,10 @@
     </style>
 </head>
 <body>
+    <div class="app-shell topbar-layout">
+    {% set active_page = 'upload_csv' %}
+    {% include 'teacher/_teacher_sidebar.html' %}
+    <div class="main-content">
     <div class="container">
         <div class="header">
             <h1><i class="fas fa-file-csv"></i> Upload Student Scores via CSV</h1>
@@ -126,5 +131,9 @@
             </form>
         </div>
     </div>
+    </div>
+    </div>
+    <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260303c') }}"></script>
 </body>
 </html>
+

@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>View Schools - Super Admin</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260303c') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="app-shell topbar-layout">
+        <div class="side-taskbar">
+            <div class="side-brand">
+                <i class="fas fa-graduation-cap"></i>
+                <span>Super Admin</span>
+            </div>
+            <div class="side-links">
+                <a href="{{ url_for('super_admin_dashboard') }}" class="side-link">
+                    <i class="fas fa-chart-line"></i>
+                    <span>Dashboard</span>
+                </a>
+                <a href="{{ url_for('super_admin_add_school_page') }}" class="side-link">
+                    <i class="fas fa-plus-circle"></i>
+                    <span>Add School</span>
+                </a>
+                <a href="{{ url_for('super_admin_view_schools') }}" class="side-link active">
+                    <i class="fas fa-school"></i>
+                    <span>View Schools</span>
+                </a>
+                <a href="{{ url_for('view_reports') }}" class="side-link">
+                    <i class="fas fa-clipboard-list"></i>
+                    <span>Reported Issues</span>
+                </a>
+                <form method="post" action="{{ url_for('logout') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="side-link side-link-logout">
+                        <i class="fas fa-sign-out-alt"></i>
+                        <span>Logout</span>
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <div class="container">
+                <div class="header">
+                    <h1><i class="fas fa-school"></i> Osartech</h1>
+                    <p class="meta-line">
+                        <strong>Last Login:</strong> {{ last_login_at }} |
+                        <strong>Total Schools:</strong> {{ overview.total_schools }}
+                    </p>
+                </div>
+
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        {% for category, message in messages %}
+                            <div class="flash {{ category }}">{{ message }}</div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
+
+                {% if schools %}
+                    {% for school in schools %}
+                        <div class="school-card">
+                            <div style="flex: 1;">
+                                <div class="school-name">{{ school.school_name }}</div>
+                                <div class="school-id">ID: {{ school.id }}</div>
+                                <div class="school-meta">
+                                    Location: {{ school.location or 'Not set' }} |
+                                    Phone: {{ school.phone or 'Not set' }} |
+                                    Email: {{ school.email or 'Not set' }} |
+                                    Admin: {{ school.admin_username or 'Not set' }} |
+                                    Arm Ranking: <strong>{{ 'Together' if school.class_arm_ranking_mode == 'together' else 'Separate' }}</strong> |
+                                    Operations: <strong class="{{ 'op-on' if school.operations_enabled else 'op-off' }}">{{ 'ON' if school.operations_enabled else 'OFF' }}</strong>
+                                </div>
+                                <form action="{{ url_for('super_admin_update_school') }}" method="POST" class="inline-form">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                    <input type="hidden" name="school_id" value="{{ school.school_id }}"/>
+                                    <input type="text" name="school_name" value="{{ school.school_name }}" placeholder="School name" required>
+                                    <input type="text" name="location" value="{{ school.location or '' }}" placeholder="Location">
+                                    <input type="text" name="phone" value="{{ school.phone or '' }}" placeholder="Phone">
+                                    <input type="email" name="school_email" value="{{ school.email or '' }}" placeholder="Contact email">
+                                    <input type="text" name="principal_name" value="{{ school.principal_name or '' }}" placeholder="Principal name">
+                                    <input type="text" name="motto" value="{{ school.motto or '' }}" placeholder="Motto">
+                                    <select name="class_arm_ranking_mode" title="Class arm ranking mode">
+                                        <option value="separate" {% if school.class_arm_ranking_mode != 'together' %}selected{% endif %}>Arms Separate</option>
+                                        <option value="together" {% if school.class_arm_ranking_mode == 'together' %}selected{% endif %}>Arms Together</option>
+                                    </select>
+                                    <button type="submit" class="btn btn-primary"><i class="fas fa-pen"></i> Update School</button>
+                                </form>
+                                <form action="{{ url_for('super_admin_update_school_admin') }}" method="POST" class="inline-form">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                    <input type="hidden" name="school_id" value="{{ school.school_id }}"/>
+                                    <input type="email" name="admin_username" value="{{ school.admin_username or '' }}" placeholder="School admin email" required>
+                                    <input type="password" name="admin_password" placeholder="New password (optional)" autocomplete="new-password">
+                                    <button type="submit" class="btn btn-primary"><i class="fas fa-user-edit"></i> Update Admin</button>
+                                </form>
+                            </div>
+                            <div style="display:flex; flex-direction:column; gap:8px; align-items:flex-end;">
+                                <form action="{{ url_for('super_admin_toggle_school_operations') }}" method="POST">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                    <input type="hidden" name="school_id" value="{{ school.school_id }}"/>
+                                    {% if school.operations_enabled %}
+                                        <input type="hidden" name="operations_enabled" value="0"/>
+                                        <button type="submit" class="btn btn-warning"><i class="fas fa-power-off"></i> Turn OFF</button>
+                                    {% else %}
+                                        <input type="hidden" name="operations_enabled" value="1"/>
+                                        <button type="submit" class="btn btn-success"><i class="fas fa-power-off"></i> Turn ON</button>
+                                    {% endif %}
+                                </form>
+                                <form action="{{ url_for('super_admin_delete_school') }}" method="POST" onsubmit="return confirm('Are you sure you want to delete this school? This will delete all students, teachers, and data associated with this school.');">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                    <input type="hidden" name="school_id" value="{{ school.school_id }}"/>
+                                    <button type="submit" class="btn btn-danger"><i class="fas fa-trash"></i> Delete</button>
+                                </form>
+                            </div>
+                        </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="card">
+                        <p class="no-margin">No schools created yet. Use Add School to create your first school.</p>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260303c') }}"></script>
+</body>
+</html>
+

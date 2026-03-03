@@ -6,6 +6,12 @@ from sqlalchemy import pool
 from alembic import context
 import os
 import logging
+from pathlib import Path
+
+try:
+    from dotenv import load_dotenv
+except Exception:  # pragma: no cover
+    load_dotenv = None
 
 config = context.config
 
@@ -20,12 +26,34 @@ logger = logging.getLogger('alembic.env')
 # for 'autogenerate' support (we're not using it for raw SQL)
 target_metadata = None
 
+def _resolve_database_url() -> str:
+    """Resolve DATABASE_URL from environment, .env, or alembic config."""
+    env_url = (os.environ.get('DATABASE_URL') or '').strip()
+    if env_url:
+        return env_url
+
+    # Try loading project .env when running via `python migrate.py`.
+    if load_dotenv is not None:
+        try:
+            project_root = Path(__file__).resolve().parent.parent
+            load_dotenv(project_root / '.env', override=False)
+        except Exception:
+            pass
+        env_url = (os.environ.get('DATABASE_URL') or '').strip()
+        if env_url:
+            return env_url
+
+    cfg_url = (config.get_main_option('sqlalchemy.url') or '').strip()
+    if cfg_url:
+        return cfg_url
+    raise RuntimeError(
+        'DATABASE_URL environment variable not set (and no sqlalchemy.url configured).'
+    )
+
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode (no engine needed)."""
-    url = os.environ.get('DATABASE_URL')
-    if not url:
-        raise RuntimeError('DATABASE_URL environment variable not set')
+    url = _resolve_database_url()
     
     context.configure(
         url=url,
@@ -40,9 +68,7 @@ def run_migrations_offline() -> None:
 
 def run_migrations_online() -> None:
     """Run migrations in 'online' mode (with engine)."""
-    url = os.environ.get('DATABASE_URL')
-    if not url:
-        raise RuntimeError('DATABASE_URL environment variable not set')
+    url = _resolve_database_url()
 
     configuration = config.get_section(config.config_ini_section)
     configuration["sqlalchemy.url"] = url

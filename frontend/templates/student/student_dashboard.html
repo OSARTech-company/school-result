@@ -4,29 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Student Dashboard - Student Score Management System</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260303c') }}">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f5f7fa; }
-        .container { max-width: 900px; margin: 0 auto; padding: 20px; }
-        .header { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); color: white; padding: 20px; border-radius: 10px; margin-bottom: 30px; }
-        .header h1 { margin: 0; font-size: 1.8rem; }
-        .header .logout { float: right; color: white; text-decoration: none; }
-        .card { background: white; border-radius: 10px; padding: 25px; margin-bottom: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        .card h2 { margin-top: 0; color: #2c3e50; font-size: 1.4rem; border-bottom: 2px solid #3498db; padding-bottom: 10px; }
-        .btn { padding: 12px 24px; border: none; border-radius: 5px; cursor: pointer; font-size: 1rem; font-weight: 500; display: inline-block; text-decoration: none; }
-        .btn-primary { background: #3498db; color: white; }
-        .btn-primary:hover { background: #2980b9; }
-        .flash { padding: 15px; margin-bottom: 20px; border-radius: 5px; }
-        .flash.success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-        .flash.error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
-        .student-info { background: #e7f3ff; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
-        .student-info h2 { margin: 0 0 10px; color: #2c3e50; }
-        .student-info p { margin: 5px 0; color: #555; }
-        .result-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 20px; }
-        .summary-card { background: #f8f9fa; padding: 15px; border-radius: 8px; text-align: center; }
-        .summary-card h3 { margin: 0; font-size: 2rem; color: #3498db; }
-        .summary-card p { margin: 5px 0 0; color: #7f8c8d; font-size: 0.9rem; }
+        .container { max-width: 960px; }
         .grade-a { color: #27ae60; }
         .grade-b { color: #3498db; }
         .grade-c { color: #f39c12; }
@@ -76,121 +58,295 @@
             margin-top: 14px;
             height: 230px;
         }
+        .student-message-card { border: 1px solid #dbe4ef; border-radius: 10px; padding: 12px; background: #f8fbff; margin-bottom: 10px; }
+        .student-message-card.is-unread { border-left: 4px solid #0F4C81; background: #eef6ff; }
+        .student-message-card h4 { margin: 0 0 6px; font-size: 1rem; color: #1e3a5f; }
+        .student-message-meta { color: #5b6475; font-size: 0.86rem; margin-bottom: 6px; }
+        .student-message-actions { margin-top: 10px; display: flex; gap: 8px; }
+        .notif-badge {
+            display: inline-block;
+            min-width: 22px;
+            padding: 2px 8px;
+            border-radius: 999px;
+            font-size: 0.78rem;
+            text-align: center;
+            color: #fff;
+            background: #c0392b;
+            margin-left: 6px;
+        }
+        .welcome-modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.55);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1200;
+        }
+        .welcome-modal-card {
+            width: min(680px, 94vw);
+            background: #fff;
+            border-radius: 14px;
+            padding: 18px;
+            box-shadow: 0 18px 40px rgba(2, 6, 23, 0.35);
+        }
+        .welcome-modal-card h3 { margin: 0 0 10px; color: #0f172a; }
+        .welcome-modal-card ol { margin: 8px 0 14px 18px; color: #334155; }
     </style>
 </head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1><i class="fas fa-user-graduate"></i> Student Dashboard</h1>
-            <a href="{{ url_for('logout') }}" class="logout"><i class="fas fa-sign-out-alt"></i> Logout</a>
+<body style="--brand: {{ school.theme_primary_color if school and school.theme_primary_color else '#0F4C81' }}; --brand-2: {{ school.theme_secondary_color if school and school.theme_secondary_color else '#1F7A8C' }}; --accent: {{ school.theme_accent_color if school and school.theme_accent_color else '#1F7A8C' }};">
+    <div class="app-shell topbar-layout">
+        <div class="side-taskbar">
+            <div class="side-brand">
+                <i class="fas fa-graduation-cap"></i>
+                <span>Student</span>
+            </div>
+            <div class="side-links">
+                <a href="{{ url_for('student_dashboard') }}" class="side-link active">
+                    <i class="fas fa-home"></i>
+                    <span>Dashboard</span>
+                    {% if unread_student_messages %}
+                    <span class="notif-badge">{{ unread_student_messages }}</span>
+                    {% endif %}
+                </a>
+                <a href="{{ url_for('student_view_result') }}" class="side-link">
+                    <i class="fas fa-chart-bar"></i>
+                    <span>View Results</span>
+                </a>
+                <a href="{{ url_for('parent_portal') }}" class="side-link">
+                    <i class="fas fa-user-friends"></i>
+                    <span>Parent Access</span>
+                </a>
+                <a href="{{ url_for('student_change_password') }}" class="side-link">
+                    <i class="fas fa-key"></i>
+                    <span>Change Password</span>
+                </a>
+                <a href="{{ url_for('help', role='student') }}" class="side-link">
+                    <i class="fas fa-question-circle"></i>
+                    <span>Help</span>
+                </a>
+                <form method="post" action="{{ url_for('logout') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="side-link side-link-logout">
+                        <i class="fas fa-sign-out-alt"></i>
+                        <span>Logout</span>
+                    </button>
+                </form>
+            </div>
         </div>
         
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                {% for category, message in messages %}
-                    <div class="flash {{ category }}">{{ message }}</div>
-                {% endfor %}
-            {% endif %}
-        {% endwith %}
+        <div class="main-content">
+            <div class="container">
+                <div class="header">
+                    <h1><i class="fas fa-user-graduate"></i> Osartech</h1>
+                </div>
         
-        {% if student %}
-        <div class="student-info">
-            <h2>Welcome, {{ student.firstname }}!</h2>
-            <p><strong>Student ID:</strong> {{ student.student_id }}</p>
-            <p><strong>Class:</strong> {{ student.classname }} | <strong>Term:</strong> {{ student.term }} | <strong>Stream:</strong> {{ student.stream }}</p>
-        </div>
-        {% if dashboard_notice %}
-        <div class="flash error">{{ dashboard_notice }}</div>
-        {% endif %}
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        {% for category, message in messages %}
+                            <div class="flash {{ category }}">{{ message }}</div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
         
-        <div class="card">
-            <h2><i class="fas fa-chart-bar"></i> Your Results</h2>
-            
-            <a href="{{ url_for('student_view_result') }}" class="btn btn-primary"><i class="fas fa-eye"></i> View Full Result</a>
-            <a href="{{ url_for('student_view_result', term='First Term') }}" class="btn btn-primary" style="margin-left: 10px;">First Term</a>
-            <a href="{{ url_for('student_view_result', term='Second Term') }}" class="btn btn-primary" style="margin-left: 10px;">Second Term</a>
-            <a href="{{ url_for('student_view_result', term='Third Term') }}" class="btn btn-primary" style="margin-left: 10px;">Third Term</a>
+                {% if student %}
+                <div class="student-info">
+                    <h2>Welcome, {{ student.firstname }}!</h2>
+                    <p><strong>Student ID:</strong> {{ student.student_id }}</p>
+                    <p><strong>Class:</strong> {{ student.classname }} | <strong>Term:</strong> {{ student.term }} | <strong>Stream:</strong> {{ student.stream }}</p>
+                </div>
+                {% if dashboard_notice %}
+                <div class="flash error">{{ dashboard_notice }}</div>
+                {% endif %}
 
-            {% if student.scores %}
-            {% set totals = [] %}
-            {% for _subject, sc in student.scores.items() %}
-                {% set total = sc.get('overall_mark', sc.get('total_score', 0)) %}
-                {% set _ = totals.append(total|float) %}
-            {% endfor %}
-            {% set avg = (totals|sum / (totals|length)) if totals else 0 %}
-            {% if avg >= 70 %}
-                {% set avg_grade = 'A' %}
-            {% elif avg >= 60 %}
-                {% set avg_grade = 'B' %}
-            {% elif avg >= 50 %}
-                {% set avg_grade = 'C' %}
-            {% elif avg >= 40 %}
-                {% set avg_grade = 'D' %}
-            {% else %}
-                {% set avg_grade = 'F' %}
-            {% endif %}
-            <div class="insight-card">
-                <p style="margin:0 0 10px; color:#666; font-size:0.9rem; text-transform:uppercase; letter-spacing:0.5px; text-align:center;">Overall Average</p>
-                <div class="ring-wrap">
-                    <div
-                        class="avg-ring"
-                        data-target="{{ '%.1f'|format(avg) }}"
-                        style="--pct: 0; --ring:
-                        {% if avg >= 70 %}#27ae60{% elif avg >= 60 %}#3498db{% elif avg >= 50 %}#f39c12{% elif avg >= 40 %}#e67e22{% else %}#e74c3c{% endif %};"
-                    >
-                        <div class="avg-ring-content">
-                            <div class="avg-ring-value">0.0%</div>
-                            <div class="avg-ring-label">Grade {{ avg_grade }}</div>
+                <div class="layout-main">
+                <div class="layout-side">
+                <div class="card">
+                    <h2><i class="fas fa-bullhorn"></i> School Messages & Deadlines</h2>
+                    {% if unread_student_messages %}
+                    <div class="student-message-actions">
+                        <span class="chip chip-warning">Unread: {{ unread_student_messages }}</span>
+                        <form method="post" action="{{ url_for('student_mark_all_messages_read') }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-check-double"></i> Mark All Read
+                            </button>
+                        </form>
+                    </div>
+                    {% endif %}
+                    {% if student_messages %}
+                        {% for msg in student_messages %}
+                        <div class="student-message-card {% if not msg.is_read %}is-unread{% endif %}">
+                            <h4>{{ msg.title }}</h4>
+                            <div class="student-message-meta">
+                                Deadline: {{ msg.deadline_date if msg.deadline_date else 'None' }}
+                                {% if msg.is_expired %}
+                                    | <span class="chip chip-danger">Expired</span>
+                                {% elif msg.is_due_soon %}
+                                    | <span class="chip chip-warning">Due Soon</span>
+                                {% endif %}
+                                {% if msg.is_read %}
+                                    | <span class="chip chip-success">Read</span>
+                                {% else %}
+                                    | <span class="chip chip-warning">Unread</span>
+                                {% endif %}
+                                | Sent: {{ msg.created_at }}
+                            </div>
+                            <div>{{ msg.message }}</div>
+                            {% if not msg.is_read %}
+                            <div class="student-message-actions">
+                                <form method="post" action="{{ url_for('student_mark_message_read') }}">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <input type="hidden" name="message_id" value="{{ msg.id }}">
+                                    <button type="submit" class="btn btn-primary">
+                                        <i class="fas fa-check"></i> Mark as Read
+                                    </button>
+                                </form>
+                            </div>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                    <p class="note">No messages from school admin yet.</p>
+                    {% endif %}
+                </div>
+
+                <div class="card">
+                    <h2><i class="fas fa-users"></i> Parent Access (Optional)</h2>
+                    <p class="note no-margin">
+                        Add your parent/guardian phone number and password so they can login from the parent portal.
+                    </p>
+                    {% if has_parent_access %}
+                    <p class="chip chip-success"><strong>Active:</strong> {{ parent_phone }}</p>
+                    {% endif %}
+                    <form method="post" action="{{ url_for('student_update_parent_access') }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <div class="grid">
+                            <input type="text" name="parent_phone" value="{{ parent_phone or '' }}" placeholder="Parent phone number">
+                            <input type="password" name="parent_password" placeholder="Parent password (min 6 chars)" autocomplete="new-password">
+                            <input type="password" name="confirm_parent_password" placeholder="Confirm parent password" autocomplete="new-password">
+                        </div>
+                        <p class="note mt-10">
+                            Once added, parent access cannot be removed. You can only update phone/password.
+                        </p>
+                        <div class="mt-12">
+                            <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Save Parent Access</button>
+                            <a href="{{ url_for('parent_portal') }}" class="btn btn-primary ml-10"><i class="fas fa-external-link-alt"></i> Open Parent Portal</a>
+                        </div>
+                    </form>
+                </div>
+
+                </div>
+                <div class="layout-primary">
+                <div class="card">
+                    <h2><i class="fas fa-chart-bar"></i> Your Results</h2>
+                    
+                    <a href="{{ url_for('student_view_result') }}" class="btn btn-primary"><i class="fas fa-eye"></i> View Full Result</a>
+                    <a href="{{ url_for('student_view_result', term='First Term') }}" class="btn btn-primary ml-10">First Term</a>
+                    <a href="{{ url_for('student_view_result', term='Second Term') }}" class="btn btn-primary ml-10">Second Term</a>
+                    <a href="{{ url_for('student_view_result', term='Third Term') }}" class="btn btn-primary ml-10">Third Term</a>
+
+                    {% if student.scores %}
+                    {% set totals = [] %}
+                    {% for _subject, sc in student.scores.items() %}
+                        {% set total = sc.get('overall_mark', sc.get('total_score', 0)) %}
+                        {% set _ = totals.append(total|float) %}
+                    {% endfor %}
+                    {% set avg = (totals|sum / (totals|length)) if totals else 0 %}
+                    {% if avg >= 70 %}
+                        {% set avg_grade = 'A' %}
+                    {% elif avg >= 60 %}
+                        {% set avg_grade = 'B' %}
+                    {% elif avg >= 50 %}
+                        {% set avg_grade = 'C' %}
+                    {% elif avg >= 40 %}
+                        {% set avg_grade = 'D' %}
+                    {% else %}
+                        {% set avg_grade = 'F' %}
+                    {% endif %}
+                    <div class="insight-card">
+                        <p class="note text-center no-margin">Overall Average</p>
+                        <div class="ring-wrap">
+                            <div
+                                class="avg-ring"
+                                data-target="{{ '%.1f'|format(avg) }}"
+                                style="--pct: 0; --ring:
+                                {% if avg >= 70 %}#27ae60{% elif avg >= 60 %}#3498db{% elif avg >= 50 %}#f39c12{% elif avg >= 40 %}#e67e22{% else %}#e74c3c{% endif %};"
+                            >
+                                <div class="avg-ring-content">
+                                    <div class="avg-ring-value">0.0%</div>
+                                    <div class="avg-ring-label">Grade {{ avg_grade }}</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="under-graph">
+                            <canvas id="dashboardSubjectChart"></canvas>
                         </div>
                     </div>
+                    {% endif %}
                 </div>
-                <div class="under-graph">
-                    <canvas id="dashboardSubjectChart"></canvas>
+        
+                {% if student.scores %}
+                <div class="card">
+                    <h2><i class="fas fa-list"></i> Subject Scores</h2>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Subject</th>
+                                <th class="text-center">Test</th>
+                                <th class="text-center">Exam</th>
+                                <th class="text-center">Total</th>
+                                <th class="text-center">Grade</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for subject, scores in student.scores.items() %}
+                            <tr>
+                                <td>{{ subject }}</td>
+                                <td class="text-center">{{ scores.get('total_test', 0) }}</td>
+                                <td class="text-center">{{ scores.get('total_exam', 0) }}</td>
+                                <td class="text-center"><strong>{{ scores.get('overall_mark', 0) }}</strong></td>
+                                <td class="text-center">
+                                    <span class="grade-{{ scores.get('grade', 'F').lower() }}"><strong>{{ scores.get('grade', '-') }}</strong></span>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
                 </div>
+                {% else %}
+                <div class="card">
+                    <p>No published result available yet.</p>
+                </div>
+                {% endif %}
+
+                </div>
+                </div>
+                {% else %}
+                <div class="card">
+                    <p>Student data not found. Please contact your school administrator.</p>
+                </div>
+                {% endif %}
             </div>
-            {% endif %}
         </div>
-        
-        {% if student.scores %}
-        <div class="card">
-            <h2><i class="fas fa-list"></i> Subject Scores</h2>
-            <table style="width: 100%; border-collapse: collapse;">
-                <thead>
-                    <tr style="background: #f8f9fa;">
-                        <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">Subject</th>
-                        <th style="padding: 12px; text-align: center; border-bottom: 2px solid #ddd;">Test</th>
-                        <th style="padding: 12px; text-align: center; border-bottom: 2px solid #ddd;">Exam</th>
-                        <th style="padding: 12px; text-align: center; border-bottom: 2px solid #ddd;">Total</th>
-                        <th style="padding: 12px; text-align: center; border-bottom: 2px solid #ddd;">Grade</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for subject, scores in student.scores.items() %}
-                    <tr style="border-bottom: 1px solid #eee;">
-                        <td style="padding: 12px;">{{ subject }}</td>
-                        <td style="padding: 12px; text-align: center;">{{ scores.get('total_test', 0) }}</td>
-                        <td style="padding: 12px; text-align: center;">{{ scores.get('total_exam', 0) }}</td>
-                        <td style="padding: 12px; text-align: center;"><strong>{{ scores.get('overall_mark', 0) }}</strong></td>
-                        <td style="padding: 12px; text-align: center;">
-                            <span class="grade-{{ scores.get('grade', 'F').lower() }}"><strong>{{ scores.get('grade', '-') }}</strong></span>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {% else %}
-        <div class="card">
-            <p>No published result available yet.</p>
-        </div>
-        {% endif %}
-        
-        {% else %}
-        <div class="card">
-            <p>Student data not found. Please contact your school administrator.</p>
-        </div>
-        {% endif %}
     </div>
+    {% if show_first_login_tutorial %}
+    <div class="welcome-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="welcome-tutorial-title">
+        <div class="welcome-modal-card">
+            <h3 id="welcome-tutorial-title">{{ first_login_tutorial.title }}</h3>
+            <p class="note">Quick start checklist for your first login:</p>
+            <ol>
+                {% for step in first_login_tutorial.steps %}
+                <li>{{ step }}</li>
+                {% endfor %}
+            </ol>
+            <form method="post" action="{{ url_for('complete_first_login_tutorial') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-primary"><i class="fas fa-check"></i> Got It, Continue</button>
+            </form>
+        </div>
+    </div>
+    {% endif %}
     {% if student and student.scores %}
     <script id="dashboard-scores-json" type="application/json">{{ (student.scores or {})|tojson }}</script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -280,5 +436,34 @@
         })();
     </script>
     {% endif %}
+    <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260303c') }}"></script>
+    {% if unread_student_messages %}
+    <script>
+        (function () {
+            if (!('Notification' in window)) return;
+            const unread = Number({{ unread_student_messages|int }});
+            if (!Number.isFinite(unread) || unread <= 0) return;
+            const key = 'studentUnreadNotifyShown';
+            const marker = String(unread);
+            if (localStorage.getItem(key) === marker) return;
+            if (Notification.permission === 'default') {
+                Notification.requestPermission().then(function (perm) {
+                    if (perm === 'granted') {
+                        new Notification('School Notifications', {
+                            body: 'You have ' + unread + ' unread school message(s).'
+                        });
+                        localStorage.setItem(key, marker);
+                    }
+                });
+            } else if (Notification.permission === 'granted') {
+                new Notification('School Notifications', {
+                    body: 'You have ' + unread + ' unread school message(s).'
+                });
+                localStorage.setItem(key, marker);
+            }
+        })();
+    </script>
+    {% endif %}
 </body>
 </html>
+

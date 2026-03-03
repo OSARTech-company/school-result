@@ -91,8 +91,11 @@ def upgrade() -> None:
                     school_id TEXT NOT NULL,
                     firstname TEXT NOT NULL,
                     lastname TEXT NOT NULL,
+                    phone TEXT,
+                    gender TEXT,
                     signature_image TEXT,
                     assigned_classes TEXT,
+                    subjects_taught TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )''')
     
@@ -261,15 +264,72 @@ def upgrade() -> None:
     op.execute('CREATE UNIQUE INDEX IF NOT EXISTS uq_class_term_assignment ON class_assignments(school_id, classname, term, academic_year)')
     op.execute('CREATE UNIQUE INDEX IF NOT EXISTS uq_result_publications ON result_publications(school_id, classname, term, academic_year)')
 
-    # Add foreign key constraints for multi-school isolation
-    op.execute('''ALTER TABLE students ADD CONSTRAINT fk_students_school 
-                  FOREIGN KEY (school_id) REFERENCES schools(school_id) ON DELETE CASCADE NOT VALID''')
-    op.execute('''ALTER TABLE teachers ADD CONSTRAINT fk_teachers_school 
-                  FOREIGN KEY (school_id) REFERENCES schools(school_id) ON DELETE CASCADE NOT VALID''')
-    op.execute('''ALTER TABLE class_assignments ADD CONSTRAINT fk_class_assignments_school 
-                  FOREIGN KEY (school_id) REFERENCES schools(school_id) ON DELETE CASCADE NOT VALID''')
-    op.execute('''ALTER TABLE class_assignments ADD CONSTRAINT fk_class_assignments_teacher 
-                  FOREIGN KEY (school_id, teacher_id) REFERENCES teachers(school_id, user_id) ON DELETE CASCADE NOT VALID''')
+    # Ensure schools.school_id has a unique index for FK references on legacy DBs.
+    op.execute('CREATE UNIQUE INDEX IF NOT EXISTS uq_schools_school_id ON schools(school_id)')
+
+    # Add foreign key constraints for multi-school isolation.
+    # Keep this migration resilient on existing/legacy databases: if FK creation
+    # is not possible (dirty data or missing uniqueness), continue migration.
+    op.execute('''
+        DO $$
+        BEGIN
+            BEGIN
+                ALTER TABLE students
+                ADD CONSTRAINT fk_students_school
+                FOREIGN KEY (school_id) REFERENCES schools(school_id)
+                ON DELETE CASCADE NOT VALID;
+            EXCEPTION
+                WHEN duplicate_object THEN NULL;
+                WHEN invalid_foreign_key THEN
+                    RAISE NOTICE 'Skipping fk_students_school due to missing/invalid referenced uniqueness';
+            END;
+        END $$;
+    ''')
+    op.execute('''
+        DO $$
+        BEGIN
+            BEGIN
+                ALTER TABLE teachers
+                ADD CONSTRAINT fk_teachers_school
+                FOREIGN KEY (school_id) REFERENCES schools(school_id)
+                ON DELETE CASCADE NOT VALID;
+            EXCEPTION
+                WHEN duplicate_object THEN NULL;
+                WHEN invalid_foreign_key THEN
+                    RAISE NOTICE 'Skipping fk_teachers_school due to missing/invalid referenced uniqueness';
+            END;
+        END $$;
+    ''')
+    op.execute('''
+        DO $$
+        BEGIN
+            BEGIN
+                ALTER TABLE class_assignments
+                ADD CONSTRAINT fk_class_assignments_school
+                FOREIGN KEY (school_id) REFERENCES schools(school_id)
+                ON DELETE CASCADE NOT VALID;
+            EXCEPTION
+                WHEN duplicate_object THEN NULL;
+                WHEN invalid_foreign_key THEN
+                    RAISE NOTICE 'Skipping fk_class_assignments_school due to missing/invalid referenced uniqueness';
+            END;
+        END $$;
+    ''')
+    op.execute('''
+        DO $$
+        BEGIN
+            BEGIN
+                ALTER TABLE class_assignments
+                ADD CONSTRAINT fk_class_assignments_teacher
+                FOREIGN KEY (school_id, teacher_id) REFERENCES teachers(school_id, user_id)
+                ON DELETE CASCADE NOT VALID;
+            EXCEPTION
+                WHEN duplicate_object THEN NULL;
+                WHEN invalid_foreign_key THEN
+                    RAISE NOTICE 'Skipping fk_class_assignments_teacher due to missing/invalid referenced uniqueness';
+            END;
+        END $$;
+    ''')
 
 
 def downgrade() -> None:

@@ -1,0 +1,80 @@
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>School Analytics</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260303c') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+<div class="app-shell topbar-layout">
+    {% set active_page = 'analytics' %}
+    {% include 'school/_school_admin_sidebar.html' %}
+    <div class="main-content">
+<div class="container">
+    <div class="header">
+        <h1>Analytics</h1>
+        <p><a class="btn" href="{{ url_for('school_admin_dashboard') }}">Back to Dashboard</a></p>
+    </div>
+    <div class="card">
+        <form method="get" class="toolbar">
+            <div><label>Term</label>
+                <select name="term">
+                    {% for t in ['First Term','Second Term','Third Term'] %}
+                    <option value="{{ t }}" {% if selected_term == t %}selected{% endif %}>{{ t }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div><label>Academic Year</label><input name="academic_year" value="{{ selected_year }}"></div>
+            <button class="btn btn-secondary" type="submit">Load</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h2>Pass Rate by Class (Published Results)</h2>
+        <table>
+            <thead><tr><th>Class</th><th>Total</th><th>Passed</th><th>Pass Rate %</th><th>Avg Marks</th></tr></thead>
+            <tbody>
+            {% for row in class_pass_rows %}
+            <tr><td>{{ row.classname }}</td><td>{{ row.total_count }}</td><td>{{ row.pass_count }}</td><td>{{ row.pass_rate }}</td><td>{{ row.avg_marks }}</td></tr>
+            {% else %}
+            <tr><td colspan="5">No published result analytics for this term/year.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="card">
+        <h2>Subject Performance (Current Working Scores)</h2>
+        <table>
+            <thead><tr><th>Subject</th><th>Students</th><th>Average Score</th></tr></thead>
+            <tbody>
+            {% for row in subject_rows %}
+            <tr><td>{{ row.subject }}</td><td>{{ row.count }}</td><td>{{ row.avg_score }}</td></tr>
+            {% else %}
+            <tr><td colspan="3">No subject score records for this term.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="card">
+        <h2>Attendance Impact</h2>
+        <table>
+            <thead><tr><th>Absent Bucket</th><th>Students</th><th>Average Score</th></tr></thead>
+            <tbody>
+            {% for row in attendance_impact_rows %}
+            <tr><td>{{ row.label }}</td><td>{{ row.student_count }}</td><td>{{ row.avg_score }}</td></tr>
+            {% else %}
+            <tr><td colspan="3">No attendance impact data yet.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+    </div>
+</div>
+<script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260303c') }}"></script>
+</body>
+</html>

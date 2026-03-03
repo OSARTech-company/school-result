@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Parent Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260303c') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .container { max-width: 1100px; }
+        .parent-message-card { border: 1px solid #dbe4ef; border-radius: 10px; padding: 12px; background: #f8fbff; margin-bottom: 10px; }
+        .parent-message-card.is-unread { border-left: 4px solid #0F4C81; background: #eef6ff; }
+        .parent-message-card h4 { margin: 0 0 6px; font-size: 1rem; color: #1e3a5f; }
+        .parent-message-meta { color: #5b6475; font-size: 0.86rem; margin-bottom: 6px; }
+        .parent-message-actions { margin-top: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        .welcome-modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.55);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1200;
+        }
+        .welcome-modal-card {
+            width: min(700px, 94vw);
+            background: #fff;
+            border-radius: 14px;
+            padding: 18px;
+            box-shadow: 0 18px 40px rgba(2, 6, 23, 0.35);
+        }
+        .welcome-modal-card h3 { margin: 0 0 10px; color: #0f172a; }
+        .welcome-modal-card ol { margin: 8px 0 14px 18px; color: #334155; }
+    </style>
+</head>
+<body>
+    <div class="app-shell topbar-layout">
+        <div class="side-taskbar">
+            <div class="side-brand">
+                <i class="fas fa-graduation-cap"></i>
+                <span>Parent</span>
+            </div>
+            <div class="side-links">
+                <a href="{{ url_for('parent_dashboard') }}" class="side-link active">
+                    <i class="fas fa-home"></i>
+                    <span>Dashboard</span>
+                    {% if unread_parent_messages %}
+                    <span class="notif-badge">{{ unread_parent_messages }}</span>
+                    {% endif %}
+                </a>
+                {% for child in children %}
+                <a href="{{ url_for('parent_view_result', student_key=child.key) }}" class="side-link">
+                    <i class="fas fa-user-graduate"></i>
+                    <span>{{ child.firstname }} Results</span>
+                </a>
+                <a href="{{ url_for('parent_submit_dispute', student_key=child.key) }}" class="side-link">
+                    <i class="fas fa-balance-scale"></i>
+                    <span>{{ child.firstname }} Dispute</span>
+                </a>
+                {% endfor %}
+                <a href="#parent-password-card" class="side-link">
+                    <i class="fas fa-key"></i>
+                    <span>Change Password</span>
+                </a>
+                <a href="{{ url_for('help', role='parent') }}" class="side-link">
+                    <i class="fas fa-question-circle"></i>
+                    <span>Help</span>
+                </a>
+                <form method="post" action="{{ url_for('logout') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="side-link side-link-logout">
+                        <i class="fas fa-sign-out-alt"></i>
+                        <span>Logout</span>
+                    </button>
+                </form>
+            </div>
+        </div>
+        
+        <div class="main-content">
+            <div class="container">
+                <div class="header">
+                    <div class="stack-head">
+                        <h2 class="no-margin"><i class="fas fa-users"></i> Osartech</h2>
+                    </div>
+                    <div class="muted mt-10">Phone: {{ parent_phone }}</div>
+                </div>
+
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        {% for category, message in messages %}
+                            <div class="flash {{ category }}">{{ message }}</div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
+
+                <div class="layout-main">
+                <div class="layout-side">
+                <div class="card">
+                    <h3 class="no-margin"><i class="fas fa-bell"></i> School Notifications</h3>
+                    {% if unread_parent_messages %}
+                    <div class="parent-message-actions">
+                        <span class="chip chip-warning">Unread: {{ unread_parent_messages }}</span>
+                        <form method="post" action="{{ url_for('parent_mark_all_messages_read') }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-primary btn-xs">
+                                <i class="fas fa-check-double"></i> Mark All Read
+                            </button>
+                        </form>
+                    </div>
+                    {% endif %}
+                    {% if parent_messages %}
+                        {% for msg in parent_messages %}
+                        <div class="parent-message-card {% if not msg.is_read %}is-unread{% endif %}">
+                            <h4>{{ msg.title }}</h4>
+                            <div class="parent-message-meta">
+                                School: {{ msg.school_name }}
+                                |
+                                Target:
+                                {% if msg.target_classname and msg.target_stream %}
+                                    {{ msg.target_classname }} - {{ msg.target_stream }}
+                                {% elif msg.target_classname %}
+                                    {{ msg.target_classname }} (all streams)
+                                {% else %}
+                                    All students/parents
+                                {% endif %}
+                                | Deadline: {{ msg.deadline_date if msg.deadline_date else 'None' }}
+                                {% if msg.is_expired %}
+                                    | <span class="chip chip-danger">Expired</span>
+                                {% elif msg.is_due_soon %}
+                                    | <span class="chip chip-warning">Due Soon</span>
+                                {% endif %}
+                                {% if msg.is_read %}
+                                    | <span class="chip chip-success">Read</span>
+                                {% else %}
+                                    | <span class="chip chip-warning">Unread</span>
+                                {% endif %}
+                                | Sent: {{ msg.created_at }}
+                            </div>
+                            <div>{{ msg.message }}</div>
+                            {% if not msg.is_read %}
+                            <div class="parent-message-actions">
+                                <form method="post" action="{{ url_for('parent_mark_message_read') }}">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <input type="hidden" name="school_id" value="{{ msg.school_id }}">
+                                    <input type="hidden" name="message_id" value="{{ msg.id }}">
+                                    <button type="submit" class="btn btn-primary btn-xs">
+                                        <i class="fas fa-check"></i> Mark as Read
+                                    </button>
+                                </form>
+                            </div>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                    <p class="muted mt-10">No notifications yet.</p>
+                    {% endif %}
+                </div>
+
+                <div class="card" id="parent-password-card">
+                    <h3 class="no-margin">Change Parent Password</h3>
+                    <p class="muted">For security, change the password after login.</p>
+                    <form method="post" action="{{ url_for('parent_change_password') }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <div class="grid">
+                            <div>
+                                <label>Current Password</label>
+                                <input type="password" name="current_password" autocomplete="current-password" required>
+                            </div>
+                            <div>
+                                <label>New Password</label>
+                                <input type="password" name="new_password" autocomplete="new-password" required>
+                            </div>
+                            <div>
+                                <label>Confirm New Password</label>
+                                <input type="password" name="confirm_password" autocomplete="new-password" required>
+                            </div>
+                        </div>
+                        <div class="mt-10">
+                            <button type="submit" class="btn">Update Password</button>
+                        </div>
+                    </form>
+                </div>
+                </div>
+                <div class="layout-primary">
+                <div class="card">
+                    <h3 class="no-margin"><i class="fas fa-calendar-alt"></i> School Programs (Visible to Parents)</h3>
+                    {% if parent_term_events %}
+                    <table class="mt-10">
+                        <thead>
+                            <tr>
+                                <th>School</th>
+                                <th>Event</th>
+                                <th>Date</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for event in parent_term_events %}
+                            <tr>
+                                <td>{{ event.school_name }}</td>
+                                <td>{{ event.label }}</td>
+                                <td>{{ event.date }}</td>
+                                <td>{{ event.status|title }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                    {% else %}
+                    <p class="muted mt-10">No term program event is currently visible to parents.</p>
+                    {% endif %}
+                </div>
+
+                {% if children %}
+                <div class="grid">
+                    {% for child in children %}
+                    <div class="card">
+                        <h3 class="no-margin">{{ child.firstname }}</h3>
+                        <div class="muted"><strong>ID:</strong> {{ child.student_id }}</div>
+                        <div class="muted"><strong>School:</strong> {{ child.school_name }}</div>
+                        <div class="muted"><strong>Class:</strong> {{ child.classname }}{% if child.stream %} ({{ child.stream }}){% endif %}</div>
+                        {% if child.has_result %}
+                        <div class="muted mt-10">
+                            <strong>Latest:</strong> {{ child.latest_term }}{% if child.latest_year %} ({{ child.latest_year }}){% endif %}
+                            <br><strong>Grade:</strong> {{ child.grade }} | <strong>Status:</strong> {{ child.status }} | <strong>Avg:</strong> {{ '%.1f'|format(child.average_marks|float) }}%
+                        </div>
+                        <div class="mt-12">
+                            <strong>Breaking Point:</strong>
+                            {% if child.breakpoint and child.breakpoint.drop and child.breakpoint.drop > 0 %}
+                                Drop of {{ child.breakpoint.drop }} from {{ child.breakpoint.from }} to {{ child.breakpoint.to }}.
+                            {% else %}
+                                No major drop detected yet.
+                            {% endif %}
+                        </div>
+                        <div class="mt-10" style="height:180px;">
+                            <canvas class="child-trend-chart" id="childChart{{ loop.index }}" data-points='{{ child.trend_points|tojson|safe }}'></canvas>
+                        </div>
+                        {% else %}
+                        <div class="muted mt-10">No published result yet.</div>
+                        {% endif %}
+                        <div class="mt-12">
+                            <a class="btn" href="{{ url_for('parent_view_result', student_key=child.key) }}">View Results</a>
+                            <a class="btn ml-10" href="{{ url_for('parent_submit_dispute', student_key=child.key) }}">Report Dispute</a>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="card">No linked students found for this parent account.</div>
+                {% endif %}
+                </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% if show_first_login_tutorial %}
+    <div class="welcome-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="welcome-tutorial-title">
+        <div class="welcome-modal-card">
+            <h3 id="welcome-tutorial-title">{{ first_login_tutorial.title }}</h3>
+            <p class="note">Quick start checklist for your first login:</p>
+            <ol>
+                {% for step in first_login_tutorial.steps %}
+                <li>{{ step }}</li>
+                {% endfor %}
+            </ol>
+            <form method="post" action="{{ url_for('complete_first_login_tutorial') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-primary"><i class="fas fa-check"></i> Got It, Continue</button>
+            </form>
+        </div>
+    </div>
+    {% endif %}
+    <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260303c') }}"></script>
+    {% if unread_parent_messages %}
+    <script>
+        (function () {
+            if (!('Notification' in window)) return;
+            const unread = Number({{ unread_parent_messages|int }});
+            if (!Number.isFinite(unread) || unread <= 0) return;
+            const key = 'parentUnreadNotifyShown';
+            const marker = String(unread);
+            if (localStorage.getItem(key) === marker) return;
+            if (Notification.permission === 'default') {
+                Notification.requestPermission().then(function (perm) {
+                    if (perm === 'granted') {
+                        new Notification('School Notifications', {
+                            body: 'You have ' + unread + ' unread message(s).'
+                        });
+                        localStorage.setItem(key, marker);
+                    }
+                });
+            } else if (Notification.permission === 'granted') {
+                new Notification('School Notifications', {
+                    body: 'You have ' + unread + ' unread message(s).'
+                });
+                localStorage.setItem(key, marker);
+            }
+        })();
+    </script>
+    {% endif %}
+    <script>
+        document.querySelectorAll('.child-trend-chart').forEach(function (canvas) {
+            const rows = JSON.parse(canvas.getAttribute('data-points') || '[]');
+            if (!rows.length) return;
+            new Chart(canvas, {
+                type: 'line',
+                data: {
+                    labels: rows.map(r => r.label),
+                    datasets: [{
+                        label: 'Average Score Trend',
+                        data: rows.map(r => r.average),
+                        borderColor: '#16a34a',
+                        backgroundColor: 'rgba(22, 163, 74, 0.18)',
+                        fill: true,
+                        tension: 0.25
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: { y: { min: 0, max: 100 } }
+                }
+            });
+        });
+    </script>
+</body>
+</html>
+

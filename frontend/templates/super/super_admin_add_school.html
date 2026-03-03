@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Add School - Super Admin</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260303c') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="app-shell topbar-layout">
+        <div class="side-taskbar">
+            <div class="side-brand">
+                <i class="fas fa-graduation-cap"></i>
+                <span>Super Admin</span>
+            </div>
+            <div class="side-links">
+                <a href="{{ url_for('super_admin_dashboard') }}" class="side-link">
+                    <i class="fas fa-chart-line"></i>
+                    <span>Dashboard</span>
+                </a>
+                <a href="{{ url_for('super_admin_add_school_page') }}" class="side-link active">
+                    <i class="fas fa-plus-circle"></i>
+                    <span>Add School</span>
+                </a>
+                <a href="{{ url_for('super_admin_view_schools') }}" class="side-link">
+                    <i class="fas fa-school"></i>
+                    <span>View Schools</span>
+                </a>
+                <a href="{{ url_for('view_reports') }}" class="side-link">
+                    <i class="fas fa-clipboard-list"></i>
+                    <span>Reported Issues</span>
+                </a>
+                <form method="post" action="{{ url_for('logout') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="side-link side-link-logout">
+                        <i class="fas fa-sign-out-alt"></i>
+                        <span>Logout</span>
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <div class="container">
+                <div class="header">
+                    <h1><i class="fas fa-plus-circle"></i> Osartech</h1>
+                    <p class="meta-line">
+                        <strong>Last Login:</strong> {{ last_login_at }} |
+                        <strong>Total Schools:</strong> {{ overview.total_schools }}
+                    </p>
+                </div>
+
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        {% for category, message in messages %}
+                            <div class="flash {{ category }}">{{ message }}</div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
+
+                <div class="card">
+                    <h2><i class="fas fa-school"></i> Create School and Admin Account</h2>
+                    <p class="note">School ID is auto-generated. Admin username must be an email.</p>
+                    <form action="{{ url_for('super_admin_add_school') }}" method="POST">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                        <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));">
+                            <div class="form-group">
+                                <label for="school_name">School Name:</label>
+                                <input type="text" id="school_name" name="school_name" placeholder="e.g., King College" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="location">School Location:</label>
+                                <input type="text" id="location" name="location" placeholder="e.g., Lagos, Nigeria">
+                            </div>
+                            <div class="form-group">
+                                <label for="phone">School Phone:</label>
+                                <input type="text" id="phone" name="phone" placeholder="e.g., +2348012345678">
+                            </div>
+                            <div class="form-group">
+                                <label for="school_email">School Contact Email:</label>
+                                <input type="email" id="school_email" name="school_email" placeholder="e.g., info@school.com">
+                            </div>
+                            <div class="form-group">
+                                <label for="principal_name">Principal Name:</label>
+                                <input type="text" id="principal_name" name="principal_name" placeholder="e.g., Rev. John Doe">
+                            </div>
+                            <div class="form-group">
+                                <label for="motto">School Motto:</label>
+                                <input type="text" id="motto" name="motto" placeholder="e.g., Excellence and Discipline">
+                            </div>
+                            <div class="form-group">
+                                <label for="class_arm_ranking_mode">Class Arm Ranking:</label>
+                                <select id="class_arm_ranking_mode" name="class_arm_ranking_mode">
+                                    <option value="separate" selected>Arms Separate</option>
+                                    <option value="together">Arms Together</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="admin_username">School Admin Email (Username):</label>
+                                <input type="email" id="admin_username" name="admin_username" placeholder="e.g., admin@school.com" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="admin_password">School Admin Password:</label>
+                                <input type="password" id="admin_password" name="admin_password" placeholder="Enter password for school admin" autocomplete="new-password" required>
+                            </div>
+                        </div>
+                        <div class="mt-12">
+                            <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Create School</button>
+                            <a href="{{ url_for('super_admin_view_schools') }}" class="btn btn-primary ml-10"><i class="fas fa-school"></i> View Schools</a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260303c') }}"></script>
+</body>
+</html>
+

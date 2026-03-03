@@ -4,10 +4,27 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Academic Report Card - {{ student.first_name }} ({{ student.student_id }})</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
+        :root {
+            --school-primary: #1e3c72;
+            --school-secondary: #2a5298;
+            --school-ink: #1f2937;
+            --school-muted: #5b6470;
+            --school-bg: #f4f7fb;
+            --school-card: #ffffff;
+            --school-border: #d7e0ea;
+            --school-border-soft: #e7edf4;
+            --school-header-bg: #edf3fb;
+            --font-xs: 12px;
+            --font-sm: 13px;
+            --font-md: 14px;
+            --font-lg: 16px;
+            --font-xl: 24px;
+        }
+
         * {
             margin: 0;
             padding: 0;
@@ -15,20 +32,25 @@
         }
 
         body {
-            font-family: 'Times New Roman', serif;
+            font-family: "Trebuchet MS", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
             margin: 0;
-            padding: 20px;
-            color: #333;
-            background: #f9f9f9;
+            padding: 16px;
+            color: var(--school-ink);
+            background:
+                radial-gradient(circle at 15% 10%, rgba(42, 82, 152, 0.12), transparent 42%),
+                radial-gradient(circle at 85% 0%, rgba(30, 60, 114, 0.10), transparent 36%),
+                var(--school-bg);
             min-height: 100vh;
+            font-size: var(--font-md);
+            line-height: 1.45;
         }
 
         .portal-header {
-            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            background: linear-gradient(135deg, var(--school-primary) 0%, var(--school-secondary) 100%);
             color: white;
-            padding: 20px;
+            padding: 16px 20px;
             text-align: center;
-            border-radius: 15px 15px 0 0;
+            border-radius: 12px 12px 0 0;
             margin-bottom: 0;
         }
 
@@ -43,21 +65,29 @@
         }
 
         .report-card {
-            max-width: 900px;
+            max-width: 1040px;
             margin: 0 auto;
-            background: white;
-            border: 2px solid #333;
-            box-shadow: 0 0 20px rgba(0,0,0,0.1);
-            border-radius: 0 0 15px 15px;
+            background: var(--school-card);
+            border: 1px solid var(--school-border);
+            box-shadow: 0 24px 60px rgba(30, 60, 114, 0.18);
+            border-radius: 0 0 12px 12px;
+            overflow: hidden;
         }
 
         .header {
-            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            background: linear-gradient(135deg, var(--school-primary) 0%, var(--school-secondary) 100%);
             color: white;
-            padding: 25px;
+            padding: 22px;
             text-align: center;
             position: relative;
-            border-bottom: 3px solid #333;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.32);
+        }
+        .header::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(120deg, rgba(255, 255, 255, 0.08), transparent 45%);
+            pointer-events: none;
         }
 
         .school-logo {
@@ -85,51 +115,105 @@
             display: flex;
             align-items: center;
             justify-content: center;
+            gap: 6px;
             font-weight: 700;
-            font-size: 28px;
+            font-size: 24px;
             border: 1px solid rgba(255, 255, 255, 0.6);
         }
 
+        .school-logo-fallback i {
+            font-size: 18px;
+        }
+
+        .school-logo-fallback span {
+            line-height: 1;
+        }
+
+        .is-hidden {
+            display: none;
+        }
+
         .school-name {
-            font-size: 24px;
+            font-size: var(--font-xl);
             font-weight: bold;
-            margin-bottom: 10px;
+            margin-bottom: 8px;
             text-transform: uppercase;
         }
 
         .report-title {
-            font-size: 18px;
-            margin-bottom: 20px;
+            font-size: var(--font-lg);
+            margin-bottom: 14px;
         }
 
         .student-info {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 20px;
-            padding: 25px;
-            background: #f8f9fa;
-            border-bottom: 1px solid #dee2e6;
+            gap: 16px;
+            padding: 20px;
+            background: #f8fbff;
+            border-bottom: 1px solid var(--school-border-soft);
         }
 
         .info-group {
             display: flex;
             flex-direction: column;
             gap: 8px;
+            background: #fff;
+            border: 1px solid var(--school-border-soft);
+            border-radius: 10px;
+            padding: 12px;
+            box-shadow: 0 8px 20px rgba(30, 60, 114, 0.06);
         }
 
         .info-label {
             font-weight: bold;
-            font-size: 12px;
+            font-size: var(--font-xs);
             text-transform: uppercase;
-            color: #666;
+            color: var(--school-muted);
             letter-spacing: 1px;
         }
 
         .info-value {
-            font-size: 14px;
-            padding: 5px 0;
-            border-bottom: 1px solid #dee2e6;
+            font-size: var(--font-md);
+            padding: 6px 0;
+            border-bottom: 1px solid var(--school-border-soft);
             font-weight: 500;
+        }
+        .info-group .info-value:last-child {
+            border-bottom: 0;
+            padding-bottom: 0;
+        }
+
+        .kpi-strip {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 12px;
+            padding: 14px 20px;
+            border-bottom: 1px solid var(--school-border-soft);
+            background: linear-gradient(180deg, #f4f8ff 0%, #eff5ff 100%);
+        }
+        .kpi-card {
+            background: #fff;
+            border: 1px solid var(--school-border-soft);
+            border-radius: 10px;
+            padding: 12px;
+            text-align: center;
+            box-shadow: 0 10px 20px rgba(30, 60, 114, 0.08);
+            border-top: 3px solid rgba(42, 82, 152, 0.45);
+        }
+        .kpi-label {
+            font-size: 11px;
+            color: var(--school-muted);
+            text-transform: uppercase;
+            letter-spacing: .7px;
+            margin-bottom: 4px;
+            font-weight: 700;
+        }
+        .kpi-value {
+            font-size: 18px;
+            font-weight: 800;
+            color: var(--school-primary);
+            line-height: 1.2;
         }
 
         .grade-a { color: #28a745; }
@@ -141,63 +225,87 @@
         .status-fail { color: #dc3545; }
 
         .subjects-table {
-            margin: 25px;
+            margin: 20px;
+            padding: 14px;
+            background: #fff;
+            border: 1px solid var(--school-border-soft);
+            border-radius: 12px;
+            box-shadow: 0 12px 24px rgba(17, 24, 39, 0.06);
         }
 
         .table-title {
-            font-size: 16px;
+            font-size: var(--font-lg);
             font-weight: bold;
             text-align: center;
-            margin-bottom: 15px;
-            text-decoration: underline;
+            margin-bottom: 12px;
+            color: var(--school-primary);
         }
 
         table {
             width: 100%;
             border-collapse: collapse;
-            margin-bottom: 20px;
+            margin-bottom: 14px;
+        }
+        .table-wrap {
+            width: 100%;
+            overflow-x: auto;
+            border: 1px solid var(--school-border-soft);
+            border-radius: 10px;
+            background: #fff;
         }
 
         th, td {
-            border: 1px solid #333;
+            border: 0;
+            border-bottom: 1px solid var(--school-border-soft);
             padding: 10px 8px;
             text-align: center;
-            font-size: 12px;
+            font-size: var(--font-xs);
         }
 
         th {
-            background: #e9ecef;
+            background: var(--school-header-bg);
             font-weight: bold;
             text-transform: uppercase;
-            font-size: 11px;
+            font-size: var(--font-xs);
+            color: var(--school-primary);
+            border-bottom: 1px solid var(--school-border);
+        }
+        tbody tr:nth-child(even) {
+            background: #fbfdff;
+        }
+        tbody tr:hover {
+            background: #f1f7ff;
         }
 
         .summary-row {
-            background: #fff3cd;
+            background: #f6f9ff;
             font-weight: bold;
         }
 
         .teacher-comment {
-            margin: 25px;
-            padding: 20px;
-            border: 1px solid #333;
+            margin: 20px;
+            padding: 16px;
+            border: 1px solid var(--school-border);
             min-height: 80px;
+            border-radius: 12px;
+            background: #fcfdff;
+            box-shadow: 0 12px 24px rgba(17, 24, 39, 0.05);
         }
 
         .comment-title {
             font-weight: bold;
-            font-size: 14px;
-            margin-bottom: 10px;
-            text-decoration: underline;
+            font-size: var(--font-md);
+            margin-bottom: 8px;
+            color: var(--school-primary);
         }
 
         .signatures {
             display: grid;
             grid-template-columns: 1fr 1fr 1fr;
-            gap: 20px;
-            margin: 25px;
-            padding-top: 20px;
-            border-top: 1px solid #333;
+            gap: 16px;
+            margin: 20px;
+            padding: 16px 0 0;
+            border-top: 1px solid var(--school-border-soft);
         }
 
         .signature-box {
@@ -213,37 +321,38 @@
         }
 
         .signature-line {
-            border-bottom: 1px solid #333;
+            border-bottom: 1px solid var(--school-border);
             margin-top: 12px;
             margin-bottom: 5px;
         }
 
         .signature-title {
-            font-size: 12px;
+            font-size: var(--font-xs);
             font-weight: bold;
             text-transform: uppercase;
         }
 
         .signature-name {
-            font-size: 12px;
+            font-size: var(--font-xs);
             margin-bottom: 4px;
             min-height: 16px;
         }
 
         .action-buttons {
             display: flex;
-            gap: 15px;
+            gap: 10px;
             justify-content: center;
-            padding: 20px;
-            background: #f8f9fa;
-            border-top: 1px solid #dee2e6;
+            padding: 14px 20px 20px;
+            background: linear-gradient(180deg, #f8fbff 0%, #eef4ff 100%);
+            border-top: 1px solid var(--school-border-soft);
+            flex-wrap: wrap;
         }
 
         .btn {
-            padding: 12px 25px;
+            padding: 10px 16px;
             border-radius: 8px;
             text-decoration: none;
-            font-size: 14px;
+            font-size: var(--font-sm);
             font-weight: 600;
             display: inline-flex;
             align-items: center;
@@ -251,24 +360,76 @@
             transition: all 0.3s ease;
             cursor: pointer;
             border: none;
+            box-shadow: 0 6px 14px rgba(17, 24, 39, 0.12);
         }
 
         .btn-print {
-            background: #28a745;
+            background: var(--school-primary);
             color: white;
         }
 
         .btn-print:hover {
-            background: #218838;
+            background: #15315f;
+            transform: translateY(-1px);
         }
 
         .btn-back {
-            background: #6c757d;
+            background: #5f6f86;
             color: white;
         }
 
         .btn-back:hover {
-            background: #5a6268;
+            background: #4f5d71;
+            transform: translateY(-1px);
+        }
+        .center-modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.45);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1200;
+            padding: 16px;
+        }
+        .center-modal-card {
+            width: 100%;
+            max-width: 430px;
+            background: #fff;
+            border: 1px solid var(--school-border-soft);
+            border-radius: 12px;
+            box-shadow: 0 20px 40px rgba(15, 23, 42, 0.26);
+            padding: 18px;
+        }
+        .center-modal-title {
+            margin-bottom: 8px;
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--school-primary);
+        }
+        .center-modal-text {
+            color: var(--school-muted);
+            font-size: var(--font-sm);
+            margin-bottom: 12px;
+        }
+        .center-modal-input {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            margin-bottom: 12px;
+        }
+        .center-modal-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+            flex-wrap: wrap;
+        }
+        .center-modal-error {
+            color: #b42318;
+            font-size: 12px;
+            margin: -4px 0 10px;
+            min-height: 16px;
         }
 
         .back-link {
@@ -304,29 +465,108 @@
 
         .position-badge {
             display: inline-block;
-            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            background: linear-gradient(135deg, var(--school-secondary) 0%, #3c6bc1 100%);
             color: white;
             padding: 8px 16px;
             border-radius: 20px;
             font-weight: bold;
-            font-size: 14px;
+            font-size: var(--font-sm);
             margin-top: 10px;
         }
 
         .chart-container {
-            margin: 25px;
-            padding: 20px;
+            margin: 18px 20px;
+            padding: 14px;
             background: white;
-            border: 1px solid #dee2e6;
+            border: 1px solid var(--school-border);
             border-radius: 10px;
         }
 
         .chart-title {
-            font-size: 16px;
+            font-size: var(--font-lg);
             font-weight: bold;
             text-align: center;
-            margin-bottom: 15px;
-            color: #1e3c72;
+            margin-bottom: 10px;
+            color: var(--school-primary);
+        }
+
+        .header-band {
+            padding: 12px 20px;
+            border-bottom: 1px solid var(--school-border-soft);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+            background: #fbfdff;
+            font-size: var(--font-sm);
+        }
+
+        .notice-band {
+            padding: 10px 20px;
+            border-bottom: 1px solid var(--school-border-soft);
+            background: #fff8dc;
+            color: #6d5204;
+            font-size: var(--font-sm);
+        }
+
+        .position-band {
+            padding: 12px 20px;
+            background: linear-gradient(180deg, #eef4ff 0%, #e9f1ff 100%);
+            border-bottom: 1px solid var(--school-border-soft);
+            text-align: center;
+            font-size: var(--font-sm);
+        }
+
+        .comment-body {
+            min-height: 60px;
+            line-height: 1.6;
+            font-size: var(--font-sm);
+        }
+
+        .footer-note {
+            text-align: center;
+            padding: 12px;
+            background: #f8fbff;
+            border-top: 1px solid var(--school-border-soft);
+            font-size: var(--font-xs);
+            color: var(--school-muted);
+        }
+
+        .verification-box {
+            margin: 20px 20px 0;
+            padding: 14px;
+            border: 1px dashed var(--school-border);
+            border-radius: 10px;
+            display: flex;
+            gap: 14px;
+            align-items: center;
+            background: #fbfdff;
+            box-shadow: 0 10px 22px rgba(17, 24, 39, 0.04);
+        }
+
+        .verification-qr {
+            width: 110px;
+            height: 110px;
+            border: 1px solid var(--school-border-soft);
+            border-radius: 8px;
+            object-fit: contain;
+            background: #fff;
+            padding: 4px;
+        }
+
+        .verification-title {
+            font-size: var(--font-sm);
+            font-weight: 700;
+            color: var(--school-primary);
+            margin-bottom: 4px;
+        }
+
+        .verification-text {
+            font-size: var(--font-xs);
+            color: var(--school-muted);
+            line-height: 1.5;
+            word-break: break-all;
         }
 
         .chart-wrapper {
@@ -343,11 +583,93 @@
             body {
                 background: white;
                 padding: 0;
+                color: #000;
+                font-size: 12px;
+                line-height: 1.3;
             }
 
             .report-card {
                 box-shadow: none;
-                border: 1px solid #333;
+                border: 1px solid #c7c7c7;
+                max-width: none;
+                border-radius: 0;
+            }
+            .header,
+            .portal-header {
+                background: #fff !important;
+                color: #000 !important;
+                border-bottom: 1px solid #c7c7c7;
+            }
+            .school-name,
+            .report-title,
+            .table-title,
+            .comment-title,
+            .verification-title {
+                color: #000 !important;
+            }
+            .kpi-strip {
+                grid-template-columns: repeat(4, minmax(0, 1fr));
+                gap: 6px;
+                padding: 8px 12px;
+                page-break-inside: avoid;
+            }
+            .kpi-card {
+                border-color: #cfcfcf;
+                padding: 6px 8px;
+            }
+            .kpi-label {
+                font-size: 10px;
+                color: #333;
+            }
+            .kpi-value {
+                font-size: 14px;
+                color: #000;
+            }
+            .student-info {
+                padding: 10px 12px;
+                gap: 8px;
+                page-break-inside: avoid;
+            }
+            .info-group {
+                padding: 8px;
+                border-color: #d5d5d5;
+            }
+            .subjects-table,
+            .teacher-comment,
+            .signatures,
+            .verification-box {
+                margin: 10px 12px;
+                page-break-inside: avoid;
+            }
+            .table-wrap {
+                border-color: #d5d5d5;
+                overflow: visible;
+            }
+            .table-wrap table {
+                width: 100%;
+                min-width: 0;
+            }
+            th, td {
+                border-color: #bdbdbd;
+                padding: 5px 4px;
+                font-size: 10.5px;
+            }
+            tbody tr:nth-child(even),
+            tbody tr:hover {
+                background: #fff;
+            }
+            tr, td, th {
+                page-break-inside: avoid;
+            }
+            .header-band,
+            .position-band,
+            .notice-band {
+                padding: 8px 12px;
+                page-break-inside: avoid;
+            }
+            .verification-text a {
+                color: #000 !important;
+                text-decoration: none;
             }
         }
 
@@ -355,6 +677,9 @@
             .student-info {
                 grid-template-columns: 1fr;
                 gap: 15px;
+            }
+            .kpi-strip {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
             }
 
             .school-logo,
@@ -370,6 +695,10 @@
                 grid-template-columns: 1fr;
                 gap: 15px;
             }
+            .verification-box {
+                flex-direction: column;
+                text-align: center;
+            }
             .action-buttons {
                 flex-direction: column;
             }
@@ -378,10 +707,13 @@
                 width: 100%;
                 justify-content: center;
             }
+            .table-wrap table {
+                min-width: 760px;
+            }
         }
     </style>
 </head>
-<body>
+<body style="--school-primary: {{ school.theme_primary_color if school and school.theme_primary_color else '#1E3C72' }}; --school-secondary: {{ school.theme_secondary_color if school and school.theme_secondary_color else '#2A5298' }}; --school-accent: {{ school.theme_accent_color if school and school.theme_accent_color else '#1F7A8C' }};">
     <div class="portal-header">
         <h1><i class="fas fa-graduation-cap"></i> Student Result Portal</h1>
         <p>View your academic performance</p>
@@ -391,10 +723,16 @@
         <div class="header">
             {% set school_initial = ((school.school_name if school and school.school_name else 'S')[:1] or 'S')|upper %}
             {% if school and school.school_logo %}
-            <img src="{{ school.school_logo }}" alt="School Logo" class="school-logo" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" />
-            <div class="school-logo-fallback" style="display:none;">{{ school_initial }}</div>
+            <img
+                src="{{ url_for('school_logo_proxy', school_id=school.school_id) }}"
+                alt="School Logo"
+                class="school-logo"
+                onload="var fb=this.nextElementSibling;if(fb){fb.classList.add('is-hidden');fb.style.display='none';}"
+                onerror="this.onerror=null;this.style.display='none';var fb=this.nextElementSibling;if(fb){fb.classList.remove('is-hidden');fb.style.display='flex';}"
+            />
+            <div class="school-logo-fallback is-hidden"><i class="fas fa-school" aria-hidden="true"></i><span>{{ school_initial }}</span></div>
             {% else %}
-            <div class="school-logo-fallback">{{ school_initial }}</div>
+            <div class="school-logo-fallback"><i class="fas fa-school" aria-hidden="true"></i><span>{{ school_initial }}</span></div>
             {% endif %}
             <div class="school-name">{{ school.school_name if school and school.school_name else 'Student Score Management System' }}</div>
             <div class="report-title">Academic Report Card</div>
@@ -409,16 +747,31 @@
                 <div class="info-label">Student ID</div>
                 <div class="info-value">{{ student.student_id }}</div>
 
+                <div class="info-label">Date of Birth</div>
+                <div class="info-value">{{ student.date_of_birth if student.date_of_birth else 'N/A' }}</div>
+
                 <div class="info-label">Class</div>
                 <div class="info-value">{{ student.class_name }}</div>
+
+                <div class="info-label">Students in Class</div>
+                <div class="info-value">{{ student.class_size if student.class_size is not none else 'N/A' }}</div>
+
+                <div class="info-label">Term Begins</div>
+                <div class="info-value">{{ student.term_begin if student.term_begin else 'N/A' }}</div>
+
+                <div class="info-label">Term Ends</div>
+                <div class="info-value">{{ student.term_end if student.term_end else 'N/A' }}</div>
             </div>
 
             <div class="info-group">
+                <div class="info-label">Gender</div>
+                <div class="info-value">{{ student.gender if student.gender else 'N/A' }}</div>
+
                 <div class="info-label">Number of Subjects</div>
                 <div class="info-value">{{ student.number_of_subject }}</div>
 
                 <div class="info-label">Overall Grade</div>
-                <div class="info-value {% if student.Grade == 'A' %}grade-a{% elif student.Grade == 'B' %}grade-b{% elif student.Grade == 'C' %}grade-c{% elif student.Grade == 'D' %}grade-d{% else %}grade-f{% endif %}" style="font-size: 18px; font-weight: bold;">
+                <div class="info-value {% if student.Grade == 'A' %}grade-a{% elif student.Grade == 'B' %}grade-b{% elif student.Grade == 'C' %}grade-c{% elif student.Grade == 'D' %}grade-d{% else %}grade-f{% endif %}" style="font-size: var(--font-lg); font-weight: 700;">
                     {{ student.Grade }}
                 </div>
 
@@ -426,11 +779,41 @@
                 <div class="info-value {% if student.Status == 'Pass' %}status-pass{% else %}status-fail{% endif %}" style="font-weight: bold;">
                     {{ student.Status }}
                 </div>
+
+                <div class="info-label">Days Open</div>
+                <div class="info-value">{{ student.days_open if student.days_open is not none else 0 }}</div>
+
+                <div class="info-label">Days Absent</div>
+                <div class="info-value">{{ student.days_absent if student.days_absent is not none else 0 }}</div>
+
+                <div class="info-label">Days Present</div>
+                <div class="info-value">{{ student.days_present if student.days_present is not none else 0 }}</div>
+
+                <div class="info-label">Next Term Begins</div>
+                <div class="info-value">{{ student.next_term_begin if student.next_term_begin else 'N/A' }}</div>
+            </div>
+        </div>
+        <div class="kpi-strip">
+            <div class="kpi-card">
+                <div class="kpi-label">Average</div>
+                <div class="kpi-value">{{ "%.1f"|format(student.average_marks or 0) }}</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-label">Grade</div>
+                <div class="kpi-value {% if student.Grade == 'A' %}grade-a{% elif student.Grade == 'B' %}grade-b{% elif student.Grade == 'C' %}grade-c{% elif student.Grade == 'D' %}grade-d{% else %}grade-f{% endif %}">{{ student.Grade }}</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-label">Status</div>
+                <div class="kpi-value {% if student.Status == 'Pass' %}status-pass{% else %}status-fail{% endif %}">{{ student.Status }}</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-label">Subjects</div>
+                <div class="kpi-value">{{ student.number_of_subject }}</div>
             </div>
         </div>
 
-        {% if position %}
-        <div style="padding: 15px 25px; background: linear-gradient(135deg, #e7f3ff 0%, #d4ecff 100%); border-bottom: 1px solid #dee2e6; text-align: center;">
+        {% if school and school.show_positions and position %}
+        <div class="position-band">
             <strong>
                 <i class="fas fa-trophy"></i>
                 Class Position:
@@ -444,14 +827,15 @@
         {% endif %}
 
         {% if term_notice %}
-        <div style="padding: 10px 25px; background: #fff3cd; border-bottom: 1px solid #ffe69c; color: #664d03;">
+        <div class="notice-band">
             {{ term_notice }}
         </div>
         {% endif %}
 
         {% if published_terms %}
-        <div style="padding: 12px 25px; border-bottom: 1px solid #dee2e6; display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
+        <div class="header-band">
             {% set term_endpoint = term_view_endpoint or 'student_view_result' %}
+            {% set is_parent_view = (session.get('role') == 'parent') %}
             <div>
                 <strong>Viewing:</strong>
                 {{ student.term }}
@@ -459,7 +843,7 @@
                 - {{ student.class_name }}
             </div>
             {% if available_result_classes %}
-            <form method="get" action="{{ url_for(term_endpoint, student_id=student.student_id) }}" style="display:flex; gap:8px; align-items:center; margin:0;">
+            <form method="get" action="{{ url_for(term_endpoint, student_id=student.student_id, student_key=student_key if is_parent_view else None) }}" style="display:flex; gap:8px; align-items:center; margin:0;">
                 <label for="class_name" style="font-weight:600;">Class:</label>
                 <select id="class_name" name="class_name" class="btn btn-back" style="padding:8px 12px;">
                     <option value="">All Published Classes</option>
@@ -471,20 +855,20 @@
             </form>
             {% endif %}
             <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-                {% if prev_term and (session.get('role') == 'student' or session.get('role') == 'school_admin') %}
-                <a href="{{ url_for(term_endpoint, term=prev_term.token, student_id=student.student_id, class_name=selected_result_class) }}" class="btn btn-back" style="padding:8px 12px;">
+                {% if prev_term and (session.get('role') == 'student' or session.get('role') == 'school_admin' or session.get('role') == 'parent') %}
+                <a href="{{ url_for(term_endpoint, term=prev_term.token, student_id=student.student_id, class_name=selected_result_class, student_key=student_key if is_parent_view else None) }}" class="btn btn-back" style="padding:8px 12px;">
                     <i class="fas fa-arrow-left"></i> {{ prev_term.label }}
                 </a>
                 {% endif %}
                 {% for t in published_terms %}
-                    {% if session.get('role') == 'student' or session.get('role') == 'school_admin' %}
-                        <a href="{{ url_for(term_endpoint, term=t.token, student_id=student.student_id, class_name=selected_result_class) }}" class="btn {% if t.token == current_term_token %}btn-print{% else %}btn-back{% endif %}" style="padding:8px 12px;">
+                    {% if session.get('role') == 'student' or session.get('role') == 'school_admin' or session.get('role') == 'parent' %}
+                        <a href="{{ url_for(term_endpoint, term=t.token, student_id=student.student_id, class_name=selected_result_class, student_key=student_key if is_parent_view else None) }}" class="btn {% if t.token == current_term_token %}btn-print{% else %}btn-back{% endif %}" style="padding:8px 12px;">
                             {{ t.label }}
                         </a>
                     {% endif %}
                 {% endfor %}
-                {% if next_term and (session.get('role') == 'student' or session.get('role') == 'school_admin') %}
-                <a href="{{ url_for(term_endpoint, term=next_term.token, student_id=student.student_id, class_name=selected_result_class) }}" class="btn btn-back" style="padding:8px 12px;">
+                {% if next_term and (session.get('role') == 'student' or session.get('role') == 'school_admin' or session.get('role') == 'parent') %}
+                <a href="{{ url_for(term_endpoint, term=next_term.token, student_id=student.student_id, class_name=selected_result_class, student_key=student_key if is_parent_view else None) }}" class="btn btn-back" style="padding:8px 12px;">
                     {{ next_term.label }} <i class="fas fa-arrow-right"></i>
                 </a>
                 {% endif %}
@@ -496,7 +880,7 @@
         <div class="subjects-table">
             <div class="table-title">Subject Performance Details</div>
             {% set combined_exam = exam_config and exam_config.exam_mode == 'combined' %}
-
+            <div class="table-wrap">
             <table>
                 <thead>
                     <tr>
@@ -561,11 +945,12 @@
                     </tr>
                 </tfoot>
             </table>
+            </div>
         </div>
 
         <div class="teacher-comment">
             <div class="comment-title">Teacher's Comment</div>
-            <div style="min-height: 60px; line-height: 1.6;">
+            <div class="comment-body">
                 {% if (student.teacher_comment or '')|trim %}
                     {{ (student.teacher_comment or '')|trim }}
                 {% elif student.average_marks >= 70 %}
@@ -578,6 +963,81 @@
                     Satisfactory performance. {{ student.first_name }} needs to work harder to improve understanding and performance in all subjects.
                 {% else %}
                     Below average performance. {{ student.first_name }} requires significant improvement and additional support to meet academic standards.
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="subjects-table">
+            <div class="table-title">Behaviour Assessment (Affective Domain)</div>
+            <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Trait</th>
+                        <th>Grade</th>
+                        <th>Meaning</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% set scale_map = {'A':'Excellent','B':'Very Good','C':'Good','D':'Fair','E':'Poor'} %}
+                    {% for trait, grade in (student.behaviour_assessment or {}).items() %}
+                    <tr>
+                        <td style="text-align:left; font-weight:bold;">{{ trait }}</td>
+                        <td>{{ grade or '-' }}</td>
+                        <td>{{ scale_map.get(grade, '-') }}</td>
+                    </tr>
+                    {% endfor %}
+                    {% if not (student.behaviour_assessment or {}) %}
+                    <tr>
+                        <td colspan="3" style="text-align:center;">No behaviour assessment provided.</td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+            </div>
+        </div>
+
+        {% if session.get('role') == 'parent' %}
+        <div class="subjects-table">
+            <div class="table-title">Subject Teacher Comments (Parent View)</div>
+            <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th style="width: 35%;">Subject</th>
+                        <th>Comment</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% set parent_comment_rows = [] %}
+                    {% for subject, s in student.subjects.items() %}
+                        {% if (s.get('subject_teacher_comment', '') or '')|trim %}
+                            {% set _ = parent_comment_rows.append({'subject': subject, 'comment': (s.get('subject_teacher_comment', '') or '')|trim}) %}
+                        {% endif %}
+                    {% endfor %}
+                    {% for row in parent_comment_rows %}
+                    <tr>
+                        <td style="text-align:left; font-weight:bold;">{{ row.subject }}</td>
+                        <td style="text-align:left;">{{ row.comment }}</td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="2" style="text-align:center;">No subject teacher comments available.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="teacher-comment">
+            <div class="comment-title">Principal's Comment</div>
+            <div class="comment-body">
+                {% if (student.principal_comment or '')|trim %}
+                    {{ (student.principal_comment or '')|trim }}
+                {% else %}
+                    {{ school.motto if school and school.motto else 'Keep striving for excellence and discipline in all you do.' }}
                 {% endif %}
             </div>
         </div>
@@ -614,15 +1074,34 @@
             </div>
         </div>
 
-        <div style="text-align: center; padding: 15px; background: #f8f9fa; border-top: 1px solid #dee2e6; font-size: 12px; color: #666;">
+        {% if verification_url %}
+        <div class="verification-box">
+            {% if verification_qr_url %}
+            <img src="{{ verification_qr_url }}" alt="Result Verification QR Code" class="verification-qr">
+            {% endif %}
+            <div>
+                <div class="verification-title"><i class="fas fa-shield-halved"></i> Result Verification</div>
+                <div class="verification-text">
+                    {% if verification_qr_url %}
+                    Scan this QR code or open this link to verify this result:<br>
+                    {% else %}
+                    Open this link to verify this result:<br>
+                    {% endif %}
+                    <a href="{{ verification_url }}" target="_blank" rel="noopener">{{ verification_url }}</a>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="footer-note">
             Report Generated on {{ now.strftime('%B %d, %Y') if now else 'N/A' }}
         </div>
     </div>
 
     <div class="action-buttons">
-        {% if session.get('role') == 'student' or session.get('role') == 'school_admin' %}
+        {% if session.get('role') == 'student' or session.get('role') == 'school_admin' or session.get('role') == 'parent' %}
         <a
-            href="{{ url_for('download_result_pdf', student_id=student.student_id, term=current_term_token, class_name=selected_result_class) }}"
+            href="{{ url_for('download_result_pdf', student_id=student.student_id, term=current_term_token, class_name=selected_result_class, student_key=student_key if session.get('role') == 'parent' else None) }}"
             class="btn btn-back"
         >
             <i class="fas fa-file-pdf"></i>
@@ -634,6 +1113,14 @@
             Print Report Card
         </button>
         {% if session.get('role') == 'school_admin' %}
+        <a href="{{ url_for('school_admin_correct_result', student_id=student.student_id, term=current_term_token) }}" class="btn btn-back">
+            <i class="fas fa-pen"></i>
+            Correct & Republish
+        </a>
+        <button type="button" id="open-unpublish-modal" class="btn btn-back">
+            <i class="fas fa-lock-open"></i>
+            Unpublish Result
+        </button>
         <a href="{{ url_for('view_students') }}" class="btn btn-back">
             <i class="fas fa-arrow-left"></i>
             Back to Students
@@ -654,5 +1141,72 @@
             Back to Home
         </a>
     </div>
+    {% if session.get('role') == 'school_admin' %}
+    <div id="unpublish-modal-overlay" class="center-modal-overlay" aria-hidden="true">
+        <div class="center-modal-card" role="dialog" aria-modal="true" aria-labelledby="unpublish-modal-title">
+            <div id="unpublish-modal-title" class="center-modal-title">Unpublish Class Result</div>
+            <div class="center-modal-text">Enter school admin password to continue. Students will not see this result until republished.</div>
+            <form method="post" action="{{ url_for('school_admin_unpublish_results') }}" id="unpublish-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="student_id" value="{{ student.student_id }}">
+                <input type="hidden" name="classname" value="{{ student.class_name }}">
+                <input type="hidden" name="term_token" value="{{ current_term_token }}">
+                <input id="unpublish-admin-password" class="center-modal-input" type="password" name="admin_password" placeholder="School admin password">
+                <div id="unpublish-modal-error" class="center-modal-error"></div>
+                <div class="center-modal-actions">
+                    <button type="button" id="close-unpublish-modal" class="btn btn-secondary">Cancel</button>
+                    <button type="submit" class="btn btn-back">Confirm Unpublish</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    <script>
+        (function () {
+            const openBtn = document.getElementById('open-unpublish-modal');
+            const closeBtn = document.getElementById('close-unpublish-modal');
+            const overlay = document.getElementById('unpublish-modal-overlay');
+            const passInput = document.getElementById('unpublish-admin-password');
+            const errorBox = document.getElementById('unpublish-modal-error');
+            const form = document.getElementById('unpublish-form');
+            if (!openBtn || !closeBtn || !overlay || !passInput || !errorBox || !form) return;
+
+            function closeModal() {
+                overlay.style.display = 'none';
+                overlay.setAttribute('aria-hidden', 'true');
+                passInput.value = '';
+                errorBox.textContent = '';
+            }
+            openBtn.addEventListener('click', function () {
+                overlay.style.display = 'flex';
+                overlay.setAttribute('aria-hidden', 'false');
+                errorBox.textContent = '';
+                setTimeout(function () { passInput.focus(); }, 20);
+            });
+            closeBtn.addEventListener('click', closeModal);
+            overlay.addEventListener('click', function (e) {
+                if (e.target === overlay) closeModal();
+            });
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape' && overlay.style.display === 'flex') {
+                    closeModal();
+                }
+            });
+            form.addEventListener('submit', function () {
+                const pwd = (passInput.value || '').trim();
+                if (!pwd) {
+                    errorBox.textContent = 'Admin password is required.';
+                    passInput.focus();
+                    return false;
+                }
+                errorBox.textContent = '';
+                if (!window.confirm('Unpublish this class result now?')) {
+                    return false;
+                }
+                return true;
+            });
+        })();
+    </script>
+    {% endif %}
 </body>
 </html>
+

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>How to Use Student Score Management System</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         body {
@@ -229,13 +229,25 @@
 
         <div class="video-tutorial">
             <h2><i class="fas fa-route"></i> Quick Workflow</h2>
-            <p>Super Admin creates schools and school admins.</p>
-            <p>School Admin configures settings/subjects/teachers and adds students.</p>
-            <p>Teacher enters or uploads scores, then publishes class results.</p>
-            <p>Student views only published results in the student portal.</p>
+            <p>Super Admin dashboard shows system overview only (analytics and quick actions).</p>
+            <p>Use <strong>Add School</strong> page to create schools and school-admin accounts.</p>
+            <p>Use <strong>View Schools</strong> page to update schools, update admin accounts, and toggle operations.</p>
+            <p>School Admin configures settings, subjects, teachers, and students.</p>
+            <p>Teacher enters or uploads scores, then submits class results for approval.</p>
+            <p>School Admin approves/rejects submission; students/parents view only approved published results.</p>
         </div>
 
         <div class="help-grid">
+            <div class="help-section">
+                <h2><i class="fas fa-crown"></i> Super Admin Tasks</h2>
+                <ul>
+                    <li><strong>Dashboard:</strong> View school-level usage summary and key system numbers.</li>
+                    <li><strong>Add School:</strong> Create school profile and school-admin login in one flow.</li>
+                    <li><strong>View Schools:</strong> Edit school profile, update admin account, and toggle school operations ON/OFF.</li>
+                    <li><strong>Reports:</strong> Review issue reports from schools and users.</li>
+                </ul>
+            </div>
+
             <div class="help-section">
                 <h2><i class="fas fa-user-plus"></i> Access & Login</h2>
                 <div style="display: flex; flex-direction: column; gap: 20px;">
@@ -263,6 +275,7 @@
                     <li><strong>Configure Subjects:</strong> Set class subjects and optional limits by class/track.</li>
                     <li><strong>Manage Teachers:</strong> Add teacher accounts and assign one teacher per class/term/year.</li>
                     <li><strong>Add Students:</strong> Add class students with generated/manual IDs and subject lists from class config.</li>
+                    <li><strong>Approval Review:</strong> Approve or reject class result submissions from teachers.</li>
                 </ul>
             </div>
 
@@ -272,7 +285,8 @@
                     <li><strong>Allocate Stream:</strong> For stream-based SS classes, assign stream before scoring.</li>
                     <li><strong>Enter Scores:</strong> Use score page per student with strict max validation.</li>
                     <li><strong>Upload CSV:</strong> Upload class score updates using in-app template only.</li>
-                    <li><strong>Publish Results:</strong> Publish class only when all assigned students are complete.</li>
+                    <li><strong>Submit for Approval:</strong> Class teacher submits only when all assigned subjects are complete.</li>
+                    <li><strong>Signature Required:</strong> Only class teacher submission for approval requires teacher signature.</li>
                 </ul>
             </div>
 
@@ -295,7 +309,8 @@
             <div class="help-section">
                 <h2><i class="fas fa-chart-bar"></i> Results & Visibility</h2>
                 <ul>
-                    <li><strong>Publish Gate:</strong> Students can view only published class results.</li>
+                    <li><strong>Publish Gate:</strong> Students/parents can view only approved and published class results.</li>
+                    <li><strong>Approval Stage:</strong> Teacher submission is reviewed by school admin before publication.</li>
                     <li><strong>Term Navigation:</strong> Student and admin views can switch among published terms.</li>
                     <li><strong>Operations Toggle:</strong> School-wide operation switches affect visibility/editing behavior.</li>
                     <li><strong>View Tracking:</strong> Published result views are counted for monitoring.</li>
@@ -424,3 +439,4 @@
     </script>
 </body>
 </html>
+

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Menu - Student Score Management System</title>
     <meta name="description" content="Dashboard for the Student Score Management System. Access all features and manage student records.">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         .hero-section {
@@ -202,9 +202,12 @@
         </div>
 
         <div style="text-align: center; margin-top: 40px;">
-            <a href="{{ url_for('logout') }}" class="btn btn-danger" style="font-size: 1.1rem; padding: 15px 30px;">
-                <i class="fas fa-sign-out-alt"></i> Logout
-            </a>
+            <form method="post" action="{{ url_for('logout') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-danger" style="font-size: 1.1rem; padding: 15px 30px;">
+                    <i class="fas fa-sign-out-alt"></i> Logout
+                </button>
+            </form>
         </div>
     </div>
 
@@ -225,3 +228,4 @@
     </script>
 </body>
 </html>
+

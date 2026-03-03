@@ -1,0 +1,101 @@
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>School Timetable</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260303c') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+<div class="app-shell topbar-layout">
+    {% set active_page = 'timetable' %}
+    {% include 'school/_school_admin_sidebar.html' %}
+    <div class="main-content">
+<div class="container">
+    <div class="header">
+        <h1>Class Timetable</h1>
+        <p><a class="btn" href="{{ url_for('school_admin_dashboard') }}">Back to Dashboard</a></p>
+    </div>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        {% for category, message in messages %}
+        <div class="flash {{ category }}">{{ message }}</div>
+        {% endfor %}
+    {% endif %}
+    {% endwith %}
+
+    <div class="card">
+        <h2>Add / Update Period</h2>
+        <form method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="grid">
+                <div><label>Class</label><input name="classname" required placeholder="e.g. JSS1"></div>
+                <div><label>Day</label>
+                    <select name="day_of_week" required>
+                        {% for d, name in day_options %}<option value="{{ d }}">{{ name }}</option>{% endfor %}
+                    </select>
+                </div>
+                <div><label>Period Label</label><input name="period_label" required placeholder="Period 1"></div>
+                <div><label>Subject</label><input name="subject" required placeholder="Mathematics"></div>
+                <div><label>Teacher</label>
+                    <select name="teacher_id">
+                        <option value="">Unassigned</option>
+                        {% for tid, t in teachers.items() %}
+                        <option value="{{ tid }}">{{ t.firstname }} {{ t.lastname }} ({{ tid }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div><label>Room</label><input name="room" placeholder="Room A1"></div>
+                <div><label>Start</label><input type="time" name="start_time"></div>
+                <div><label>End</label><input type="time" name="end_time"></div>
+            </div>
+            <div class="mt-12"><button class="btn btn-primary" type="submit">Save Timetable Row</button></div>
+        </form>
+    </div>
+
+    <div class="card">
+        <h2>Current Timetable</h2>
+        <form method="get" class="toolbar">
+            <label>Filter Class</label>
+            <select name="classname">
+                <option value="">All</option>
+                {% for c in classes %}
+                <option value="{{ c }}" {% if selected_class == c %}selected{% endif %}>{{ c }}</option>
+                {% endfor %}
+            </select>
+            <button class="btn btn-secondary" type="submit">Filter</button>
+        </form>
+        <table>
+            <thead><tr><th>Class</th><th>Day</th><th>Period</th><th>Subject</th><th>Teacher</th><th>Time</th><th>Room</th><th></th></tr></thead>
+            <tbody>
+            {% for row in rows %}
+                <tr>
+                    <td>{{ row.classname }}</td>
+                    <td>{{ row.day_name }}</td>
+                    <td>{{ row.period_label }}</td>
+                    <td>{{ row.subject }}</td>
+                    <td>{{ row.teacher_id }}</td>
+                    <td>{{ row.start_time or '-' }} - {{ row.end_time or '-' }}</td>
+                    <td>{{ row.room or '-' }}</td>
+                    <td>
+                        <form method="post" style="display:inline">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="hidden" name="action" value="delete">
+                            <input type="hidden" name="row_id" value="{{ row.id }}">
+                            <button class="btn btn-danger" type="submit">Delete</button>
+                        </form>
+                    </td>
+                </tr>
+            {% else %}
+                <tr><td colspan="8">No timetable rows yet.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+    </div>
+</div>
+<script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260303c') }}"></script>
+</body>
+</html>
