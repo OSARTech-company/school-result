@@ -724,7 +724,7 @@
             {% set school_initial = ((school.school_name if school and school.school_name else 'S')[:1] or 'S')|upper %}
             {% if school and school.school_logo %}
             <img
-                src="{{ url_for('school_logo_proxy', school_id=school.school_id) }}"
+                src="{{ url_for('school_logo_proxy', school_id=school.school_id, v=(school.updated_at|string if school and school.updated_at else '1')) }}"
                 alt="School Logo"
                 class="school-logo"
                 onload="var fb=this.nextElementSibling;if(fb){fb.classList.add('is-hidden');fb.style.display='none';}"

@@ -12,6 +12,10 @@
         <a href="{{ url_for('teacher_dashboard') }}" class="side-link{% if active_page == 'dashboard' %} active{% endif %}">
             <i class="fas fa-home"></i>
             <span>Dashboard</span>
+        </a>
+        <a href="{{ url_for('teacher_dashboard', tab='overview') }}#teacher-messages-card" class="side-link">
+            <i class="fas fa-bell"></i>
+            <span>Messages</span>
             {% if teacher_unread_notifications %}
             <span class="notif-badge">{{ teacher_unread_notifications }}</span>
             {% endif %}

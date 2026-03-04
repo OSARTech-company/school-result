@@ -111,6 +111,10 @@
                 <a href="{{ url_for('teacher_dashboard', tab='overview') }}" class="side-link {{ 'active' if active_tab == 'overview' else '' }}">
                     <i class="fas fa-home"></i>
                     <span>Overview</span>
+                </a>
+                <a href="{{ url_for('teacher_dashboard', tab='overview') }}#teacher-messages-card" class="side-link">
+                    <i class="fas fa-bell"></i>
+                    <span>Messages</span>
                     {% if unread_teacher_messages %}
                     <span class="notif-badge">{{ unread_teacher_messages }}</span>
                     {% endif %}
@@ -215,7 +219,7 @@
                     {% set school_initial = ((school.school_name if school and school.school_name else 'S')[:1] or 'S')|upper %}
                     {% if school and school.school_logo %}
                     <img
-                        src="{{ url_for('school_logo_proxy', school_id=school.school_id) }}"
+                        src="{{ url_for('school_logo_proxy', school_id=school.school_id, v=(school.updated_at|string if school and school.updated_at else '1')) }}"
                         alt="School Logo"
                         class="school-logo"
                         onload="var fb=this.nextElementSibling;if(fb){fb.classList.add('is-hidden');fb.style.display='none';}"
@@ -250,7 +254,7 @@
                     </div>
                 </div>
 
-                <div class="card">
+                <div class="card" id="teacher-messages-card">
                     <h2><i class="fas fa-link"></i> Assignment Overview</h2>
                     <div class="assignment-overview">
                         <div class="assignment-box">
@@ -372,6 +376,28 @@
                     <p class="note">No teacher notifications yet.</p>
                     {% endif %}
                 </div>
+                <div class="card">
+                    <h2><i class="fas fa-circle-notch"></i> Term Open-Day Progress</h2>
+                    {% set pct = (term_open_progress.percentage if term_open_progress else 0) %}
+                    {% set circ = 283 %}
+                    {% set off = ((100 - pct) * circ / 100) %}
+                    <div class="term-progress-wrap">
+                        <svg class="term-progress-ring" viewBox="0 0 120 120" role="img" aria-label="Term progress {{ pct }} percent">
+                            <circle cx="60" cy="60" r="45" fill="none" stroke="#dbeafe" stroke-width="12"></circle>
+                            <circle cx="60" cy="60" r="45" fill="none" stroke="#0ea5e9" stroke-width="12"
+                                    stroke-linecap="round" transform="rotate(-90 60 60)"
+                                    stroke-dasharray="{{ circ }}" stroke-dashoffset="{{ off }}"></circle>
+                            <text x="60" y="66" text-anchor="middle" font-size="22" font-weight="700" fill="#0f172a">{{ pct }}%</text>
+                        </svg>
+                        <div class="term-progress-meta">
+                            <div><strong>Status:</strong> {{ term_open_progress.status if term_open_progress else 'Calendar not set' }}</div>
+                            <div><strong>Elapsed:</strong> {{ term_open_progress.elapsed_open_days if term_open_progress else 0 }} / {{ term_open_progress.total_open_days if term_open_progress else 0 }} days</div>
+                            <div><strong>Remaining:</strong> {{ term_open_progress.remaining_open_days if term_open_progress else 0 }} days</div>
+                            <div><strong>Range:</strong> {{ term_open_progress.open_date if term_open_progress and term_open_progress.open_date else '-' }} to {{ term_open_progress.close_date if term_open_progress and term_open_progress.close_date else '-' }}</div>
+                        </div>
+                    </div>
+                    <p class="note">Counts official open days only (excludes Saturday, Sunday, and mid-term break).</p>
+                </div>
                 {% if has_class_assignment %}
                 <div class="card">
                     <h2><i class="fas fa-signature"></i> Teacher Signature</h2>
@@ -425,29 +451,6 @@
                     <p class="workflow-step">2. If you are class teacher, wait until all class subjects are complete.</p>
                     <p class="workflow-step">3. Class teacher submits class result to school admin for approval.</p>
                 </div>
-                <div class="card">
-                    <h2><i class="fas fa-circle-notch"></i> Term Open-Day Progress</h2>
-                    {% set pct = (term_open_progress.percentage if term_open_progress else 0) %}
-                    {% set circ = 283 %}
-                    {% set off = ((100 - pct) * circ / 100) %}
-                    <div class="term-progress-wrap">
-                        <svg class="term-progress-ring" viewBox="0 0 120 120" role="img" aria-label="Term progress {{ pct }} percent">
-                            <circle cx="60" cy="60" r="45" fill="none" stroke="#dbeafe" stroke-width="12"></circle>
-                            <circle cx="60" cy="60" r="45" fill="none" stroke="#0ea5e9" stroke-width="12"
-                                    stroke-linecap="round" transform="rotate(-90 60 60)"
-                                    stroke-dasharray="{{ circ }}" stroke-dashoffset="{{ off }}"></circle>
-                            <text x="60" y="66" text-anchor="middle" font-size="22" font-weight="700" fill="#0f172a">{{ pct }}%</text>
-                        </svg>
-                        <div class="term-progress-meta">
-                            <div><strong>Status:</strong> {{ term_open_progress.status if term_open_progress else 'Calendar not set' }}</div>
-                            <div><strong>Elapsed:</strong> {{ term_open_progress.elapsed_open_days if term_open_progress else 0 }} / {{ term_open_progress.total_open_days if term_open_progress else 0 }} days</div>
-                            <div><strong>Remaining:</strong> {{ term_open_progress.remaining_open_days if term_open_progress else 0 }} days</div>
-                            <div><strong>Range:</strong> {{ term_open_progress.open_date if term_open_progress and term_open_progress.open_date else '-' }} to {{ term_open_progress.close_date if term_open_progress and term_open_progress.close_date else '-' }}</div>
-                        </div>
-                    </div>
-                    <p class="note">Counts official open days only (excludes Saturday, Sunday, and mid-term break).</p>
-                </div>
-
                 <div class="card">
                     <h2><i class="fas fa-calendar-check"></i> Term Programs (Visible to Teachers)</h2>
                     {% if teacher_term_events %}

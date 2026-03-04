@@ -166,6 +166,13 @@
                 <i class="fas fa-home"></i>
                 <span>Dashboard</span>
             </a>
+            <a href="#messages-center" class="side-link">
+                <i class="fas fa-bell"></i>
+                <span>Messages</span>
+                {% if school_message_total %}
+                <span class="notif-badge">{{ school_message_total }}</span>
+                {% endif %}
+            </a>
             <a href="{{ url_for('view_students') }}" class="side-link">
                 <i class="fas fa-users"></i>
                 <span>View Students</span>
@@ -255,7 +262,7 @@
             {% set school_initial = ((school.school_name if school and school.school_name else 'S')[:1] or 'S')|upper %}
             {% if school and school.school_logo %}
             <img
-              src="{{ url_for('school_logo_proxy', school_id=school.school_id) }}"
+              src="{{ url_for('school_logo_proxy', school_id=school.school_id, v=(school.updated_at|string if school and school.updated_at else '1')) }}"
               alt="School Logo"
               class="school-logo"
               onload="var fb=this.nextElementSibling;if(fb){fb.classList.add('is-hidden');fb.style.display='none';}"
@@ -416,7 +423,7 @@
             </a>
           </div>
 
-          <div class="card">
+          <div class="card" id="messages-center">
             <h2><i class="fas fa-bullhorn"></i> Student Message Broadcast</h2>
             <p class="note">Send deadline notices or school messages to all students, one class, or one stream in a class.</p>
             <form action="{{ url_for('school_admin_send_student_message') }}" method="POST">

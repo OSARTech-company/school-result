@@ -1,5 +1,6 @@
 import contextlib
 import importlib
+import json
 from datetime import datetime, timedelta
 
 import pytest
@@ -156,6 +157,44 @@ def test_load_published_class_results_combines_terms(app_module, monkeypatch):
     assert len(results) == 1
     assert results[0]['average_marks'] == pytest.approx((50 + 70 + 90) / 3)
     assert results[0]['scores']['Math']['overall_mark'] == pytest.approx((50 + 70 + 90) / 3)
+
+
+def test_subject_overall_mark_prefers_numeric_components_over_stale_explicit(app_module):
+    m = app_module
+    score_block = {
+        "overall_mark": "0",
+        "test_1": "12",
+        "test_2": "8",
+        "exam_score": "60",
+    }
+    assert m.subject_overall_mark(score_block) == pytest.approx(80.0)
+
+
+def test_compute_average_marks_ignores_stale_non_subject_score_keys(app_module):
+    m = app_module
+    scores = {
+        "Mathematics": {"overall_mark": 80},
+        "Old Subject": {"overall_mark": 20},
+    }
+    avg = m.compute_average_marks_from_scores(scores, subjects=["Mathematics"])
+    assert avg == pytest.approx(80.0)
+
+
+def test_is_score_complete_for_subject_requires_numeric_values(app_module):
+    m = app_module
+    school = {"test_enabled": 1, "exam_enabled": 1}
+    assert m.is_score_complete_for_subject(
+        {"overall_mark": "75", "total_test": "20", "total_exam": "55"},
+        school,
+    ) is True
+    assert m.is_score_complete_for_subject(
+        {"overall_mark": "", "total_test": "20", "total_exam": "55"},
+        school,
+    ) is False
+    assert m.is_score_complete_for_subject(
+        {"overall_mark": "75", "total_test": "", "total_exam": "55"},
+        school,
+    ) is False
 
 
 def test_build_subjects_from_config_stream_rejects_invalid_optional(app_module):
@@ -580,3 +619,143 @@ def test_school_admin_dashboard_passes_assignments_to_publication_statuses(clien
     # since render_template returns "OK" we can't inspect output easily; instead
     # monkeypatch render_template to capture kwargs
     
+
+def test_teacher_enter_scores_does_not_carry_previous_term_scores(client, app_module, monkeypatch):
+    m = app_module
+    saved_rows = []
+
+    monkeypatch.setattr(m, "get_school", lambda school_id: {
+        "academic_year": "2025-2026",
+        "current_term": "First Term",
+        "test_enabled": 1,
+        "exam_enabled": 0,
+        "max_tests": 1,
+        "test_score_max": 10,
+    })
+    monkeypatch.setattr(m, "get_current_term", lambda school: "First Term")
+    monkeypatch.setattr(m, "load_student", lambda school_id, student_id: {
+        "student_id": "ST1",
+        "firstname": "Aka",
+        "classname": "JSS1",
+        "term": "Second Term",
+        "subjects": ["Mathematics"],
+        "scores": {"Old Subject": {"overall_mark": 55}},
+        "teacher_comment": "",
+        "stream": "S",
+        "number_of_subject": 1,
+    })
+    monkeypatch.setattr(m, "teacher_has_class_access", lambda *args, **kwargs: True)
+    monkeypatch.setattr(m, "get_teacher_subjects_for_class_term", lambda *args, **kwargs: ["Mathematics"])
+    monkeypatch.setattr(m, "class_uses_stream_for_school", lambda *args, **kwargs: False)
+    monkeypatch.setattr(m, "sync_student_subjects_to_class_config", lambda *args, **kwargs: (False, None))
+    monkeypatch.setattr(m, "is_result_published", lambda *args, **kwargs: False)
+    monkeypatch.setattr(m, "get_assessment_config_for_class", lambda *args, **kwargs: {"exam_mode": "combined", "exam_score_max": 70})
+    monkeypatch.setattr(m, "get_latest_score_audit_map_for_student", lambda *args, **kwargs: {})
+    monkeypatch.setattr(m, "get_teachers", lambda *args, **kwargs: {})
+    monkeypatch.setattr(m, "get_teacher_subject_assignments", lambda *args, **kwargs: [])
+    monkeypatch.setattr(m, "get_subject_submission_teacher_ids_for_class", lambda *args, **kwargs: set())
+    monkeypatch.setattr(m, "audit_student_score_changes_with_cursor", lambda *args, **kwargs: None)
+    monkeypatch.setattr(m, "set_result_published", lambda *args, **kwargs: None)
+    monkeypatch.setattr(m, "save_student_with_cursor", lambda c, school_id, student_id, student_data: saved_rows.append(json.loads(json.dumps(student_data))))
+
+    def fake_db_connection(commit=False):
+        class FakeCursor:
+            def execute(self, query, params=None):
+                return None
+            def fetchone(self):
+                return ("Second Term", json.dumps({"Old Subject": {"overall_mark": 55}}))
+        class FakeConn:
+            def cursor(self):
+                return FakeCursor()
+        @contextlib.contextmanager
+        def ctx(commit=False):
+            yield FakeConn()
+        return ctx(commit)
+
+    monkeypatch.setattr(m, "db_connection", fake_db_connection)
+
+    with client.session_transaction() as sess:
+        sess["role"] = "teacher"
+        sess["school_id"] = "SCH1"
+        sess["user_id"] = "T1"
+
+    resp = client.post(
+        "/teacher/enter-scores?student_id=ST1",
+        data={"test_1_mathematics": "8", "subject_comment_mathematics": "", "teacher_comment": ""},
+        follow_redirects=False,
+    )
+
+    assert resp.status_code in (302, 303)
+    assert saved_rows, "Expected score save to be called"
+    saved = saved_rows[-1]
+    assert saved.get("term") == "First Term"
+    assert "Mathematics" in (saved.get("scores") or {})
+    assert "Old Subject" not in (saved.get("scores") or {})
+
+
+def test_publish_results_behaviour_uses_publish_year(app_module, monkeypatch):
+    m = app_module
+    captured = {}
+
+    monkeypatch.setattr(m, "ensure_result_publication_approval_columns", lambda: True)
+    monkeypatch.setattr(m, "result_publication_has_approval_columns", lambda: False)
+    monkeypatch.setattr(m, "get_school", lambda school_id: {"academic_year": "2025-2026", "principal_name": "Principal"})
+    monkeypatch.setattr(m, "get_grade_config", lambda school_id: {"pass_mark": 50, "grade_a_min": 70, "grade_b_min": 60, "grade_c_min": 50, "grade_d_min": 40})
+    monkeypatch.setattr(m, "get_teachers", lambda school_id: {"T1": {"firstname": "T", "lastname": "One"}})
+    monkeypatch.setattr(
+        m,
+        "load_students",
+        lambda school_id, class_filter="", term_filter="": {
+            "ST1": {
+                "firstname": "Aka",
+                "classname": "JSS1",
+                "stream": "S",
+                "number_of_subject": 1,
+                "subjects": ["Mathematics"],
+                "scores": {"Mathematics": {"overall_mark": 80}},
+                "teacher_comment": "",
+                "principal_comment": "",
+            }
+        },
+    )
+    monkeypatch.setattr(m, "get_class_attendance_publish_readiness", lambda **kwargs: {"ready": True, "missing_rows": [], "days_open": 0, "message": ""})
+
+    def fake_behaviour(school_id, student_id, term, academic_year=''):
+        captured["year"] = academic_year
+        return {}
+
+    monkeypatch.setattr(m, "get_student_behaviour_assessment", fake_behaviour)
+
+    def fake_db_connection(commit=False):
+        class FakeCursor:
+            def execute(self, query, params=None):
+                return None
+            def fetchall(self):
+                return []
+        class FakeConn:
+            def cursor(self):
+                return FakeCursor()
+        @contextlib.contextmanager
+        def ctx(commit=False):
+            yield FakeConn()
+        return ctx(commit)
+
+    monkeypatch.setattr(m, "db_connection", fake_db_connection)
+
+    m.publish_results_for_class_atomic("SCH1", "JSS1", "First Term", "T1", academic_year="2025-2026")
+    assert captured.get("year") == "2025-2026"
+
+
+def test_filter_visible_terms_for_student_hides_current_term_when_operations_off(app_module):
+    m = app_module
+    school = {"operations_enabled": 0, "current_term": "Second Term", "academic_year": "2025-2026"}
+    terms = [
+        {"term": "First Term", "academic_year": "2025-2026", "token": "2025-2026::First Term"},
+        {"term": "Second Term", "academic_year": "2025-2026", "token": "2025-2026::Second Term"},
+        {"term": "Third Term", "academic_year": "2024-2025", "token": "2024-2025::Third Term"},
+    ]
+    visible = m.filter_visible_terms_for_student(school, terms)
+    visible_tokens = [row.get("token") for row in visible]
+    assert "2025-2026::Second Term" not in visible_tokens
+    assert "2025-2026::First Term" in visible_tokens
+    assert "2024-2025::Third Term" in visible_tokens

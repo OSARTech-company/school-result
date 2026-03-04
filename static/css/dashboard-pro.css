@@ -203,11 +203,26 @@ body {
   padding: 2px 7px;
   margin-left: auto;
   border-radius: 999px;
-  background: #c0392b;
+  background: var(--accent, #c0392b);
   color: #fff;
   font-size: 0.75rem;
   font-weight: 700;
   text-align: center;
+}
+
+/* Keep notification circles pinned to the top-right of nav items across dashboards. */
+.side-link .notif-badge {
+  position: absolute;
+  top: 5px;
+  right: 6px;
+  min-width: 18px;
+  height: 18px;
+  line-height: 18px;
+  padding: 0 5px;
+  margin-left: 0;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  box-shadow: 0 2px 8px rgba(2, 8, 23, 0.35);
+  z-index: 2;
 }
 
 button.side-link {
@@ -373,6 +388,12 @@ button.side-link {
 
 .topbar-layout .side-link span {
   display: none;
+}
+
+.topbar-layout .side-link .notif-badge {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
 }
 
 .topbar-layout .side-link i {
@@ -549,6 +570,11 @@ body.rail-expanded .topbar-layout .side-link span {
   color: #e8eeff;
 }
 
+body.rail-expanded .topbar-layout .side-link .notif-badge {
+  display: inline-flex !important;
+  right: 8px;
+}
+
 body.rail-expanded .topbar-layout .side-link::after {
   display: none;
 }
@@ -595,6 +621,12 @@ body.rail-expanded .topbar-layout .side-link::after {
   .topbar-layout .side-taskbar:focus-within .side-link span {
     display: inline !important;
     color: #e8eeff;
+  }
+
+  .topbar-layout .side-taskbar:hover .side-link .notif-badge,
+  .topbar-layout .side-taskbar:focus-within .side-link .notif-badge {
+    display: inline-flex !important;
+    right: 8px;
   }
 
   .topbar-layout .side-taskbar:hover .side-link::after,
@@ -711,6 +743,12 @@ body.rail-expanded .topbar-layout .side-link::after {
     display: inline;
     font-size: 0.9rem;
     color: #e8eeff;
+  }
+
+  .topbar-layout .side-link .notif-badge {
+    display: inline-flex !important;
+    right: 10px;
+    top: 6px;
   }
 
   .topbar-layout .side-link i {

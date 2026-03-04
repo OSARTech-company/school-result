@@ -25226,3 +25226,341 @@ LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
  * Running on http://127.0.0.1:5000
  * Running on http://192.168.1.112:5000
 2026-03-04 19:08:47,752 - INFO - [33mPress CTRL+C to quit[0m
+2026-03-04 22:12:08,511 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-03-04 22:12:08,511 - WARNING - Startup fallback env vars in use: DEFAULT_TEACHER_PASSWORD
+2026-03-04 22:12:08,511 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-04 22:12:08,511 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-04 22:12:08,511 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-04 22:14:11,693 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-03-04 22:14:11,693 - WARNING - Startup fallback env vars in use: DEFAULT_TEACHER_PASSWORD
+2026-03-04 22:14:11,693 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-04 22:14:11,693 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-04 22:14:11,693 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-04 22:14:12,301 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 22:14:12,650 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 22:14:12,732 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 22:14:12,908 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 22:14:12,927 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 22:14:12,941 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 22:14:12,981 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 22:14:13,030 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 22:14:13,064 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 22:14:13,192 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 22:14:13,227 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 22:14:13,247 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 22:14:13,264 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 22:14:13,277 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 22:14:13,295 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 22:14:13,308 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 22:14:13,321 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 22:51:36,135 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-03-04 22:51:36,136 - WARNING - Startup fallback env vars in use: DEFAULT_TEACHER_PASSWORD
+2026-03-04 22:51:36,136 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-04 22:51:36,136 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-04 22:51:36,136 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-04 22:51:56,136 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-03-04 22:51:56,137 - WARNING - Startup fallback env vars in use: DEFAULT_TEACHER_PASSWORD
+2026-03-04 22:51:56,137 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-04 22:51:56,138 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-04 22:51:56,138 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-04 22:51:56,788 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 22:51:57,100 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 22:51:57,216 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 22:51:57,403 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 22:51:57,425 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 22:51:57,441 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 22:51:57,481 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 22:51:57,530 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 22:51:57,561 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 22:51:57,695 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 22:51:57,728 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 22:51:57,747 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 22:51:57,766 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 22:51:57,778 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 22:51:57,794 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 22:51:57,805 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 22:51:57,815 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 23:00:58,992 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-03-04 23:00:58,992 - WARNING - Startup fallback env vars in use: DEFAULT_TEACHER_PASSWORD
+2026-03-04 23:00:58,992 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-04 23:00:58,992 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-04 23:00:58,992 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-04 23:02:56,533 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-03-04 23:02:56,533 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-04 23:02:56,533 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-04 23:02:56,533 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-04 23:05:04,177 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-03-04 23:05:04,177 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-04 23:05:04,177 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-04 23:05:04,178 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-04 23:05:04,279 - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.1.112:5000
+2026-03-04 23:05:04,279 - INFO - [33mPress CTRL+C to quit[0m
+2026-03-04 23:05:24,251 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-03-04 23:05:24,252 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-04 23:05:24,252 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-04 23:05:24,252 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-04 23:05:39,496 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-03-04 23:05:39,497 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-04 23:05:39,497 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-04 23:05:39,497 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-04 23:05:39,563 - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.1.112:5000
+2026-03-04 23:05:39,563 - INFO - [33mPress CTRL+C to quit[0m
+2026-03-04 23:07:18,279 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-03-04 23:07:18,280 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-04 23:07:18,280 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-04 23:07:18,280 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-04 23:07:18,414 - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.1.112:5000
+2026-03-04 23:07:18,414 - INFO - [33mPress CTRL+C to quit[0m
+2026-03-04 23:07:18,416 - INFO -  * Restarting with stat
+2026-03-04 23:07:19,433 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-03-04 23:07:19,434 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-04 23:07:19,434 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-04 23:07:19,434 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-04 23:07:19,500 - WARNING -  * Debugger is active!
+2026-03-04 23:07:19,502 - INFO -  * Debugger PIN: 541-365-780
+2026-03-04 23:07:37,467 - INFO - 127.0.0.1 - - [04/Mar/2026 23:07:37] "GET / HTTP/1.1" 200 -
+2026-03-04 23:07:37,554 - INFO - 127.0.0.1 - - [04/Mar/2026 23:07:37] "[33mGET /favicon.ico HTTP/1.1[0m" 404 -
+2026-03-04 23:07:54,391 - INFO - 127.0.0.1 - - [04/Mar/2026 23:07:54] "[32mPOST /login HTTP/1.1[0m" 302 -
+2026-03-04 23:07:54,411 - INFO - 127.0.0.1 - - [04/Mar/2026 23:07:54] "GET /super-admin HTTP/1.1" 200 -
+2026-03-04 23:07:54,657 - INFO - 127.0.0.1 - - [04/Mar/2026 23:07:54] "GET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1" 200 -
+2026-03-04 23:07:54,667 - INFO - 127.0.0.1 - - [04/Mar/2026 23:07:54] "GET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1" 200 -
+2026-03-04 23:07:54,671 - INFO - 127.0.0.1 - - [04/Mar/2026 23:07:54] "GET /static/css/style.css?v=20260228b HTTP/1.1" 200 -
+2026-03-04 23:08:10,106 - INFO - 127.0.0.1 - - [04/Mar/2026 23:08:10] "GET /super-admin/schools HTTP/1.1" 200 -
+2026-03-04 23:08:10,130 - INFO - 127.0.0.1 - - [04/Mar/2026 23:08:10] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-04 23:08:10,131 - INFO - 127.0.0.1 - - [04/Mar/2026 23:08:10] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-04 23:08:10,134 - INFO - 127.0.0.1 - - [04/Mar/2026 23:08:10] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-04 23:08:23,036 - INFO - 127.0.0.1 - - [04/Mar/2026 23:08:23] "[32mPOST /super-admin/update-school-admin HTTP/1.1[0m" 302 -
+2026-03-04 23:08:23,044 - INFO - 127.0.0.1 - - [04/Mar/2026 23:08:23] "GET /super-admin/schools HTTP/1.1" 200 -
+2026-03-04 23:08:23,069 - INFO - 127.0.0.1 - - [04/Mar/2026 23:08:23] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-04 23:08:23,075 - INFO - 127.0.0.1 - - [04/Mar/2026 23:08:23] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-04 23:08:23,076 - INFO - 127.0.0.1 - - [04/Mar/2026 23:08:23] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-04 23:08:25,680 - INFO - 127.0.0.1 - - [04/Mar/2026 23:08:25] "[32mPOST /logout HTTP/1.1[0m" 302 -
+2026-03-04 23:08:25,687 - INFO - 127.0.0.1 - - [04/Mar/2026 23:08:25] "GET / HTTP/1.1" 200 -
+2026-03-04 23:08:41,387 - INFO - 127.0.0.1 - - [04/Mar/2026 23:08:41] "[32mPOST /login HTTP/1.1[0m" 302 -
+2026-03-04 23:08:41,410 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 23:08:41,526 - INFO - 127.0.0.1 - - [04/Mar/2026 23:08:41] "GET /school-admin HTTP/1.1" 200 -
+2026-03-04 23:08:41,549 - INFO - 127.0.0.1 - - [04/Mar/2026 23:08:41] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-04 23:08:41,551 - INFO - 127.0.0.1 - - [04/Mar/2026 23:08:41] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-04 23:08:41,553 - INFO - 127.0.0.1 - - [04/Mar/2026 23:08:41] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-04 23:09:08,535 - INFO - 127.0.0.1 - - [04/Mar/2026 23:09:08] "GET /school-admin/settings HTTP/1.1" 200 -
+2026-03-04 23:09:08,555 - INFO - 127.0.0.1 - - [04/Mar/2026 23:09:08] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-04 23:09:08,562 - INFO - 127.0.0.1 - - [04/Mar/2026 23:09:08] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-04 23:09:08,563 - INFO - 127.0.0.1 - - [04/Mar/2026 23:09:08] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-04 23:09:24,523 - INFO - 127.0.0.1 - - [04/Mar/2026 23:09:24] "[32mPOST /school-admin/settings HTTP/1.1[0m" 302 -
+2026-03-04 23:09:24,539 - INFO - 127.0.0.1 - - [04/Mar/2026 23:09:24] "GET /school-admin/settings HTTP/1.1" 200 -
+2026-03-04 23:09:24,564 - INFO - 127.0.0.1 - - [04/Mar/2026 23:09:24] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-04 23:09:24,566 - INFO - 127.0.0.1 - - [04/Mar/2026 23:09:24] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-04 23:09:24,567 - INFO - 127.0.0.1 - - [04/Mar/2026 23:09:24] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-04 23:09:45,863 - INFO - 127.0.0.1 - - [04/Mar/2026 23:09:45] "[32mPOST /school-admin/settings HTTP/1.1[0m" 302 -
+2026-03-04 23:09:45,879 - INFO - 127.0.0.1 - - [04/Mar/2026 23:09:45] "GET /school-admin/settings HTTP/1.1" 200 -
+2026-03-04 23:09:45,901 - INFO - 127.0.0.1 - - [04/Mar/2026 23:09:45] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-04 23:09:45,905 - INFO - 127.0.0.1 - - [04/Mar/2026 23:09:45] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-04 23:09:45,908 - INFO - 127.0.0.1 - - [04/Mar/2026 23:09:45] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-04 23:10:21,003 - INFO - 127.0.0.1 - - [04/Mar/2026 23:10:21] "[32mPOST /school-admin/settings HTTP/1.1[0m" 302 -
+2026-03-04 23:10:21,032 - INFO - 127.0.0.1 - - [04/Mar/2026 23:10:21] "GET /school-admin/settings?calendar_term=First+Term&calendar_year=2026-2027 HTTP/1.1" 200 -
+2026-03-04 23:10:21,076 - INFO - 127.0.0.1 - - [04/Mar/2026 23:10:21] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-04 23:10:21,080 - INFO - 127.0.0.1 - - [04/Mar/2026 23:10:21] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-04 23:10:21,082 - INFO - 127.0.0.1 - - [04/Mar/2026 23:10:21] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-04 23:10:23,387 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 23:10:23,421 - INFO - 127.0.0.1 - - [04/Mar/2026 23:10:23] "GET /school-admin HTTP/1.1" 200 -
+2026-03-04 23:10:23,455 - INFO - 127.0.0.1 - - [04/Mar/2026 23:10:23] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-04 23:10:23,470 - INFO - 127.0.0.1 - - [04/Mar/2026 23:10:23] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-04 23:10:23,472 - INFO - 127.0.0.1 - - [04/Mar/2026 23:10:23] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-04 23:10:27,494 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 23:10:27,530 - INFO - 127.0.0.1 - - [04/Mar/2026 23:10:27] "GET /school-admin HTTP/1.1" 200 -
+2026-03-04 23:10:27,583 - INFO - 127.0.0.1 - - [04/Mar/2026 23:10:27] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-04 23:10:27,587 - INFO - 127.0.0.1 - - [04/Mar/2026 23:10:27] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-04 23:10:27,588 - INFO - 127.0.0.1 - - [04/Mar/2026 23:10:27] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-04 23:10:32,710 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 23:10:32,748 - INFO - 127.0.0.1 - - [04/Mar/2026 23:10:32] "GET /school-admin HTTP/1.1" 200 -
+2026-03-04 23:10:32,788 - INFO - 127.0.0.1 - - [04/Mar/2026 23:10:32] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-04 23:10:32,800 - INFO - 127.0.0.1 - - [04/Mar/2026 23:10:32] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-04 23:10:32,801 - INFO - 127.0.0.1 - - [04/Mar/2026 23:10:32] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-04 23:11:31,659 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-03-04 23:11:31,659 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-04 23:11:31,659 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-04 23:11:31,659 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-04 23:12:27,384 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-03-04 23:12:27,385 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-04 23:12:27,385 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-04 23:12:27,385 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-04 23:16:10,801 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-03-04 23:16:10,801 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-04 23:16:10,801 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-04 23:16:10,801 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-04 23:16:11,059 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 23:20:56,567 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 23:20:56,661 - INFO - 127.0.0.1 - - [04/Mar/2026 23:20:56] "GET /school-admin HTTP/1.1" 200 -
+2026-03-04 23:20:56,686 - INFO - 127.0.0.1 - - [04/Mar/2026 23:20:56] "GET /school-logo/2?v=2026-03-03+18:49:25.651100 HTTP/1.1" 200 -
+2026-03-04 23:20:56,690 - INFO - 127.0.0.1 - - [04/Mar/2026 23:20:56] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-04 23:20:56,692 - INFO - 127.0.0.1 - - [04/Mar/2026 23:20:56] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-04 23:20:56,694 - INFO - 127.0.0.1 - - [04/Mar/2026 23:20:56] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-04 23:21:11,648 - INFO - 127.0.0.1 - - [04/Mar/2026 23:21:11] "GET /school-admin/settings HTTP/1.1" 200 -
+2026-03-04 23:21:11,670 - INFO - 127.0.0.1 - - [04/Mar/2026 23:21:11] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-04 23:21:11,672 - INFO - 127.0.0.1 - - [04/Mar/2026 23:21:11] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-04 23:21:11,674 - INFO - 127.0.0.1 - - [04/Mar/2026 23:21:11] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-04 23:21:24,152 - INFO - 127.0.0.1 - - [04/Mar/2026 23:21:24] "[32mPOST /school-admin/settings HTTP/1.1[0m" 302 -
+2026-03-04 23:21:24,165 - INFO - 127.0.0.1 - - [04/Mar/2026 23:21:24] "GET /school-admin/settings?calendar_term=First+Term&calendar_year=2026-2027 HTTP/1.1" 200 -
+2026-03-04 23:21:24,186 - INFO - 127.0.0.1 - - [04/Mar/2026 23:21:24] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-04 23:21:24,192 - INFO - 127.0.0.1 - - [04/Mar/2026 23:21:24] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-04 23:21:24,193 - INFO - 127.0.0.1 - - [04/Mar/2026 23:21:24] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-04 23:21:26,510 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 23:21:26,525 - INFO - 127.0.0.1 - - [04/Mar/2026 23:21:26] "GET /school-admin HTTP/1.1" 200 -
+2026-03-04 23:21:26,547 - INFO - 127.0.0.1 - - [04/Mar/2026 23:21:26] "GET /school-logo/2?v=2026-03-03+18:49:25.651100 HTTP/1.1" 200 -
+2026-03-04 23:21:26,550 - INFO - 127.0.0.1 - - [04/Mar/2026 23:21:26] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-04 23:21:26,550 - INFO - 127.0.0.1 - - [04/Mar/2026 23:21:26] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-04 23:21:26,557 - INFO - 127.0.0.1 - - [04/Mar/2026 23:21:26] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-04 23:21:37,512 - INFO - 127.0.0.1 - - [04/Mar/2026 23:21:37] "GET /school-admin/settings HTTP/1.1" 200 -
+2026-03-04 23:21:37,532 - INFO - 127.0.0.1 - - [04/Mar/2026 23:21:37] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-04 23:21:37,538 - INFO - 127.0.0.1 - - [04/Mar/2026 23:21:37] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-04 23:21:37,539 - INFO - 127.0.0.1 - - [04/Mar/2026 23:21:37] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-04 23:21:45,577 - INFO - 127.0.0.1 - - [04/Mar/2026 23:21:45] "[32mPOST /school-admin/settings HTTP/1.1[0m" 302 -
+2026-03-04 23:21:45,591 - INFO - 127.0.0.1 - - [04/Mar/2026 23:21:45] "GET /school-admin/settings?calendar_term=First+Term&calendar_year=2026-2027 HTTP/1.1" 200 -
+2026-03-04 23:21:45,620 - INFO - 127.0.0.1 - - [04/Mar/2026 23:21:45] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-04 23:21:45,621 - INFO - 127.0.0.1 - - [04/Mar/2026 23:21:45] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-04 23:21:45,625 - INFO - 127.0.0.1 - - [04/Mar/2026 23:21:45] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-04 23:21:47,476 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-04 23:21:47,493 - INFO - 127.0.0.1 - - [04/Mar/2026 23:21:47] "GET /school-admin HTTP/1.1" 200 -
+2026-03-04 23:21:47,514 - INFO - 127.0.0.1 - - [04/Mar/2026 23:21:47] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-04 23:21:47,520 - INFO - 127.0.0.1 - - [04/Mar/2026 23:21:47] "GET /school-logo/2?v=2026-03-03+18:49:25.651100 HTTP/1.1" 200 -
+2026-03-04 23:21:47,521 - INFO - 127.0.0.1 - - [04/Mar/2026 23:21:47] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-04 23:21:47,523 - INFO - 127.0.0.1 - - [04/Mar/2026 23:21:47] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-04 23:25:49,016 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-03-04 23:25:49,016 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-04 23:25:49,016 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-04 23:25:49,016 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.

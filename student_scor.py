@@ -8,7 +8,7 @@ Author: OSondu Stanley
 Version: 2.0.0
 """
 
-from flask import Flask, render_template, request, redirect, url_for, session, flash, send_file, Response
+from flask import Flask, render_template, request, redirect, url_for, session, flash, send_file, Response, g, has_request_context
 from flask_wtf.csrf import CSRFProtect, CSRFError
 import argparse
 import json
@@ -39,6 +39,7 @@ try:
     from dotenv import load_dotenv
 except Exception:
     load_dotenv = None
+from services import parent_queries as parent_queries_service
 
 if load_dotenv:
     load_dotenv()
@@ -171,7 +172,41 @@ _DB_POOL = None
 _SCHOOL_LOGO_CACHE = {}
 _SCHOOL_LOGO_CACHE_TTL = 600
 _SCHOOL_LOGO_MAX_BYTES = 3 * 1024 * 1024
+_SCHOOL_CACHE = {}
+_SCHOOL_CACHE_TTL = max(5, int((os.environ.get('SCHOOL_CACHE_TTL_SECONDS', '30') or '30').strip() or '30'))
+_SCHOOL_CACHE_MAX_ENTRIES = max(20, int((os.environ.get('SCHOOL_CACHE_MAX_ENTRIES', '500') or '500').strip() or '500'))
+_ENABLE_RUNTIME_PWA_INJECT = os.environ.get('ENABLE_RUNTIME_PWA_INJECT', '').strip().lower() in ('1', 'true', 'yes')
 _SCHEMA_DDL_ALLOWED = False
+
+def _prune_school_cache():
+    """Bound cache size and remove expired entries."""
+    now = time.time()
+    expired_keys = [
+        key for key, item in list(_SCHOOL_CACHE.items())
+        if (now - float((item or {}).get('ts', 0))) >= _SCHOOL_CACHE_TTL
+    ]
+    for key in expired_keys:
+        _SCHOOL_CACHE.pop(key, None)
+    if len(_SCHOOL_CACHE) <= _SCHOOL_CACHE_MAX_ENTRIES:
+        return
+    # Remove oldest entries first when still above cap.
+    for key, _item in sorted(_SCHOOL_CACHE.items(), key=lambda kv: float((kv[1] or {}).get('ts', 0)))[: max(0, len(_SCHOOL_CACHE) - _SCHOOL_CACHE_MAX_ENTRIES)]:
+        _SCHOOL_CACHE.pop(key, None)
+
+def invalidate_school_cache(school_id=''):
+    """Invalidate cached school rows globally and for current request context."""
+    school_key = (school_id or '').strip()
+    if school_key:
+        _SCHOOL_CACHE.pop(school_key, None)
+    else:
+        _SCHOOL_CACHE.clear()
+    if has_request_context():
+        request_cache = getattr(g, '_school_cache', None)
+        if isinstance(request_cache, dict):
+            if school_key:
+                request_cache.pop(school_key, None)
+            else:
+                request_cache.clear()
 
 @app.context_processor
 def inject_teacher_nav_flags():
@@ -240,7 +275,7 @@ def inject_teacher_nav_flags():
             teacher_selected_score_class = ''
     else:
         teacher_selected_score_class = ''
-    teacher_profile = get_teachers(school_id).get(teacher_id, {})
+    teacher_profile = get_teacher(school_id, teacher_id)
     teacher_display_name = (
         f"{(teacher_profile.get('firstname') or '').strip()} {(teacher_profile.get('lastname') or '').strip()}".strip()
         or teacher_id
@@ -3739,49 +3774,79 @@ def create_school_with_index_id(school_name, location='', phone='', email='', pr
             motto=motto,
         )
 
+def _school_row_to_dict(row):
+    if not row:
+        return None
+    return {
+        'school_id': row['school_id'],
+        'school_name': row['school_name'],
+        'location': row['location'] if 'location' in row.keys() else '',
+        'phone': row['phone'] if 'phone' in row.keys() else '',
+        'email': row['email'] if 'email' in row.keys() else '',
+        'principal_name': row['principal_name'] if 'principal_name' in row.keys() else '',
+        'motto': row['motto'] if 'motto' in row.keys() else '',
+        'updated_at': row['updated_at'] if 'updated_at' in row.keys() else None,
+        'principal_signature_image': row['principal_signature_image'] if 'principal_signature_image' in row.keys() else '',
+        'school_logo': normalize_school_logo_url(row['school_logo']),
+        'academic_year': row['academic_year'],
+        'current_term': row['current_term'],
+        'operations_enabled': row['operations_enabled'] if 'operations_enabled' in row.keys() else 1,
+        'teacher_operations_enabled': row['teacher_operations_enabled'] if 'teacher_operations_enabled' in row.keys() else 1,
+        'test_enabled': row['test_enabled'],
+        'exam_enabled': row['exam_enabled'],
+        'max_tests': row['max_tests'],
+        'test_score_max': row['test_score_max'],
+        'exam_objective_max': row['exam_objective_max'],
+        'exam_theory_max': row['exam_theory_max'],
+        'grade_a_min': row['grade_a_min'] if 'grade_a_min' in row.keys() else 70,
+        'grade_b_min': row['grade_b_min'] if 'grade_b_min' in row.keys() else 60,
+        'grade_c_min': row['grade_c_min'] if 'grade_c_min' in row.keys() else 50,
+        'grade_d_min': row['grade_d_min'] if 'grade_d_min' in row.keys() else 40,
+        'pass_mark': row['pass_mark'] if 'pass_mark' in row.keys() else 50,
+        'show_positions': row['show_positions'] if 'show_positions' in row.keys() else 1,
+        'ss_ranking_mode': row['ss_ranking_mode'] if 'ss_ranking_mode' in row.keys() else 'together',
+        'class_arm_ranking_mode': row['class_arm_ranking_mode'] if 'class_arm_ranking_mode' in row.keys() else 'separate',
+        'combine_third_term_results': row['combine_third_term_results'] if 'combine_third_term_results' in row.keys() else 0,
+        'ss1_stream_mode': row['ss1_stream_mode'] if 'ss1_stream_mode' in row.keys() else 'separate',
+        'theme_primary_color': normalize_hex_color(row['theme_primary_color'] if 'theme_primary_color' in row.keys() else '', '#1E3C72'),
+        'theme_secondary_color': normalize_hex_color(row['theme_secondary_color'] if 'theme_secondary_color' in row.keys() else '', '#2A5298'),
+        'theme_accent_color': normalize_hex_color(row['theme_accent_color'] if 'theme_accent_color' in row.keys() else '', '#1F7A8C'),
+    }
+
 def get_school(school_id):
     """Get school details."""
+    school_key = (school_id or '').strip()
+    if not school_key:
+        return None
+
+    request_cache = None
+    if has_request_context():
+        request_cache = getattr(g, '_school_cache', None)
+        if request_cache is None:
+            request_cache = {}
+            setattr(g, '_school_cache', request_cache)
+        if school_key in request_cache:
+            cached = request_cache.get(school_key)
+            return dict(cached) if isinstance(cached, dict) else None
+
+    now = time.time()
+    _prune_school_cache()
+    global_cached = _SCHOOL_CACHE.get(school_key)
+    if global_cached and (now - float(global_cached.get('ts', 0))) < _SCHOOL_CACHE_TTL:
+        data = global_cached.get('data')
+        if request_cache is not None:
+            request_cache[school_key] = data
+        return dict(data) if isinstance(data, dict) else None
+
     with db_connection() as conn:
         c = conn.cursor()
-        db_execute(c, 'SELECT * FROM schools WHERE school_id = ?', (school_id,))
+        db_execute(c, 'SELECT * FROM schools WHERE school_id = ?', (school_key,))
         row = c.fetchone()
-        if not row:
-            return None
-        return {
-            'school_id': row['school_id'],
-            'school_name': row['school_name'],
-            'location': row['location'] if 'location' in row.keys() else '',
-            'phone': row['phone'] if 'phone' in row.keys() else '',
-            'email': row['email'] if 'email' in row.keys() else '',
-            'principal_name': row['principal_name'] if 'principal_name' in row.keys() else '',
-            'motto': row['motto'] if 'motto' in row.keys() else '',
-            'updated_at': row['updated_at'] if 'updated_at' in row.keys() else None,
-            'principal_signature_image': row['principal_signature_image'] if 'principal_signature_image' in row.keys() else '',
-            'school_logo': normalize_school_logo_url(row['school_logo']),
-            'academic_year': row['academic_year'],
-            'current_term': row['current_term'],
-            'operations_enabled': row['operations_enabled'] if 'operations_enabled' in row.keys() else 1,
-            'teacher_operations_enabled': row['teacher_operations_enabled'] if 'teacher_operations_enabled' in row.keys() else 1,
-            'test_enabled': row['test_enabled'],
-            'exam_enabled': row['exam_enabled'],
-            'max_tests': row['max_tests'],
-            'test_score_max': row['test_score_max'],
-            'exam_objective_max': row['exam_objective_max'],
-            'exam_theory_max': row['exam_theory_max'],
-            'grade_a_min': row['grade_a_min'] if 'grade_a_min' in row.keys() else 70,
-            'grade_b_min': row['grade_b_min'] if 'grade_b_min' in row.keys() else 60,
-            'grade_c_min': row['grade_c_min'] if 'grade_c_min' in row.keys() else 50,
-            'grade_d_min': row['grade_d_min'] if 'grade_d_min' in row.keys() else 40,
-            'pass_mark': row['pass_mark'] if 'pass_mark' in row.keys() else 50,
-            'show_positions': row['show_positions'] if 'show_positions' in row.keys() else 1,
-            'ss_ranking_mode': row['ss_ranking_mode'] if 'ss_ranking_mode' in row.keys() else 'together',
-            'class_arm_ranking_mode': row['class_arm_ranking_mode'] if 'class_arm_ranking_mode' in row.keys() else 'separate',
-            'combine_third_term_results': row['combine_third_term_results'] if 'combine_third_term_results' in row.keys() else 0,
-            'ss1_stream_mode': row['ss1_stream_mode'] if 'ss1_stream_mode' in row.keys() else 'separate',
-            'theme_primary_color': normalize_hex_color(row['theme_primary_color'] if 'theme_primary_color' in row.keys() else '', '#1E3C72'),
-            'theme_secondary_color': normalize_hex_color(row['theme_secondary_color'] if 'theme_secondary_color' in row.keys() else '', '#2A5298'),
-            'theme_accent_color': normalize_hex_color(row['theme_accent_color'] if 'theme_accent_color' in row.keys() else '', '#1F7A8C'),
-        }
+        data = _school_row_to_dict(row)
+    _SCHOOL_CACHE[school_key] = {'ts': now, 'data': data}
+    if request_cache is not None:
+        request_cache[school_key] = data
+    return dict(data) if isinstance(data, dict) else None
 
 def get_all_schools():
     """Get all schools."""
@@ -3921,6 +3986,7 @@ def update_school_settings(school_id, settings):
     with db_connection(commit=True) as conn:
         c = conn.cursor()
         update_school_settings_with_cursor(c, school_id, settings)
+    invalidate_school_cache(school_id)
 
 def set_school_operations_enabled(school_id, enabled):
     """Enable/disable teacher/student operations for a school."""
@@ -3931,6 +3997,7 @@ def set_school_operations_enabled(school_id, enabled):
             'UPDATE schools SET operations_enabled = ? WHERE school_id = ?',
             (1 if enabled else 0, school_id)
         )
+    invalidate_school_cache(school_id)
 
 def set_teacher_operations_enabled(school_id, enabled):
     """Enable/disable teacher editing operations for a school (set by school admin)."""
@@ -3941,6 +4008,7 @@ def set_teacher_operations_enabled(school_id, enabled):
             'UPDATE schools SET teacher_operations_enabled = ? WHERE school_id = ?',
             (1 if enabled else 0, school_id)
         )
+    invalidate_school_cache(school_id)
 
 def get_grade_config(school_id):
     """Get grade thresholds for a school."""
@@ -4788,13 +4856,28 @@ def subject_overall_mark(subject_scores):
         total_exam = _coerce_number(total_exam, 0.0)
 
     # Backward-compat: if legacy rows only have overall_mark and no components, use it.
+    # Treat numeric strings as valid components to avoid stale overall_mark overriding
+    # real test/exam values loaded from loose imports.
+    def _has_numeric(value):
+        if isinstance(value, (int, float)):
+            return math.isfinite(float(value))
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return False
+            try:
+                return math.isfinite(float(text))
+            except (TypeError, ValueError):
+                return False
+        return False
+
     has_components = (
-        isinstance(subject_scores.get('total_test'), (int, float)) or
-        isinstance(subject_scores.get('total_exam'), (int, float)) or
-        isinstance(subject_scores.get('exam_score'), (int, float)) or
-        isinstance(subject_scores.get('objective'), (int, float)) or
-        isinstance(subject_scores.get('theory'), (int, float)) or
-        any(str(k).startswith('test_') and isinstance(v, (int, float)) for k, v in subject_scores.items())
+        _has_numeric(subject_scores.get('total_test')) or
+        _has_numeric(subject_scores.get('total_exam')) or
+        _has_numeric(subject_scores.get('exam_score')) or
+        _has_numeric(subject_scores.get('objective')) or
+        _has_numeric(subject_scores.get('theory')) or
+        any(str(k).startswith('test_') and _has_numeric(v) for k, v in subject_scores.items())
     )
     if not has_components and isinstance(explicit, (int, float, str)):
         return _coerce_number(explicit, 0.0)
@@ -5181,7 +5264,7 @@ def filter_visible_terms_for_student(school, published_terms):
     terms = list(published_terms or [])
     if not terms:
         return terms
-    if int((school or {}).get('operations_enabled', 1) or 1):
+    if safe_int((school or {}).get('operations_enabled', 1), 1):
         return terms
 
     current_term = get_current_term(school)
@@ -5213,14 +5296,29 @@ def detect_max_tests_from_scores(scores, default_max_tests=3):
     fallback = max(1, safe_int(default_max_tests, 3))
     return max_seen if max_seen > 0 else fallback
 
+
+def _is_finite_number_like(value):
+    if isinstance(value, (int, float)):
+        return math.isfinite(float(value))
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return False
+        try:
+            return math.isfinite(float(text))
+        except (TypeError, ValueError):
+            return False
+    return False
+
+
 def is_score_complete_for_subject(subject_scores, school):
     if not isinstance(subject_scores, dict):
         return False
-    if 'overall_mark' not in subject_scores:
+    if not _is_finite_number_like(subject_scores.get('overall_mark')):
         return False
-    if school.get('test_enabled', 1) and 'total_test' not in subject_scores:
+    if school.get('test_enabled', 1) and not _is_finite_number_like(subject_scores.get('total_test')):
         return False
-    if school.get('exam_enabled', 1) and 'total_exam' not in subject_scores:
+    if school.get('exam_enabled', 1) and not _is_finite_number_like(subject_scores.get('total_exam')):
         return False
     return True
 
@@ -5257,6 +5355,22 @@ def get_subject_score_block(scores_map, subject_name):
         if normalize_subject_name(str(key)).lower() == norm_target and isinstance(value, dict):
             return value
     return {}
+
+
+def compute_average_marks_from_scores(scores_map, subjects=None):
+    """Compute average marks, preferring active subject list when available."""
+    if not isinstance(scores_map, dict):
+        return 0.0
+    marks = []
+    subject_list = normalize_subjects_list(subjects or [])
+    if subject_list:
+        for subject in subject_list:
+            block = get_subject_score_block(scores_map, subject)
+            if isinstance(block, dict) and block:
+                marks.append(subject_overall_mark(block))
+    else:
+        marks = [subject_overall_mark(v) for v in scores_map.values() if isinstance(v, dict)]
+    return (sum(marks) / len(marks)) if marks else 0.0
 
 def compute_class_subject_completion(school_id, classname, term, academic_year='', school=None, class_students_data=None):
     """
@@ -5787,9 +5901,8 @@ def publish_results_for_class_atomic(school_id, classname, term, teacher_id, aca
             existing_principal_comment_by_student[_sid] = (_comment or '').strip()
         for sid, student in class_students.items():
             scores = student.get('scores', {}) if isinstance(student.get('scores', {}), dict) else {}
-            behaviour_payload = get_student_behaviour_assessment(school_id, sid, term, academic_year)
-            overall_marks = [subject_overall_mark(s) for s in scores.values() if isinstance(s, dict)]
-            average_marks = (sum(overall_marks) / len(overall_marks)) if overall_marks else 0
+            behaviour_payload = get_student_behaviour_assessment(school_id, sid, term, publish_year)
+            average_marks = compute_average_marks_from_scores(scores, subjects=student.get('subjects', []))
             grade = grade_from_score(average_marks, grade_cfg)
             status = status_from_score(average_marks, grade_cfg)
             principal_comment = (student.get('principal_comment') or '').strip()
@@ -6012,6 +6125,15 @@ def get_published_terms_for_student(school_id, student_id, classname=''):
             'label': label,
         })
     return terms
+
+def get_published_overview_for_students(school_id, student_ids):
+    return parent_queries_service.get_published_overview_for_students(
+        db_connection=db_connection,
+        db_execute=db_execute,
+        term_token_builder=_term_token,
+        school_id=school_id,
+        student_ids=student_ids,
+    )
 
 def load_published_student_result(school_id, student_id, term, academic_year='', classname=''):
     with db_connection() as conn:
@@ -6670,6 +6792,15 @@ def load_students_for_classes(school_id, classnames, term_filter=''):
                 'parent_password_hash': (parent_password_hash or '').strip(),
             }
         return students_data
+
+def load_students_for_student_ids(school_id, student_ids):
+    return parent_queries_service.load_students_for_student_ids(
+        db_connection=db_connection,
+        db_execute=db_execute,
+        students_has_parent_access_columns=students_has_parent_access_columns,
+        school_id=school_id,
+        student_ids=student_ids,
+    )
 
 def get_student_filter_options(school_id, classnames=None):
     """Return (available_classes, available_terms) without loading full student payloads."""
@@ -8285,17 +8416,36 @@ def build_school_analytics_data(school_id, term, academic_year):
             'avg_score': round((row.get('sum', 0.0) / cnt), 1) if cnt else 0.0,
         })
 
+    absent_days_by_student = {}
+    if ensure_student_attendance_schema():
+        with db_connection() as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """SELECT student_id, COUNT(DISTINCT attendance_date) AS absent_days
+                   FROM student_attendance
+                   WHERE school_id = ?
+                     AND COALESCE(term, '') = COALESCE(?, COALESCE(term, ''))
+                     AND COALESCE(academic_year, '') = COALESCE(?, COALESCE(academic_year, ''))
+                     AND LOWER(status) = 'absent'
+                   GROUP BY student_id""",
+                (school_id, term or None, academic_year or None),
+            )
+            for sid, absent_days in c.fetchall() or []:
+                key = str(sid or '').strip()
+                if not key:
+                    continue
+                absent_days_by_student[key] = int(absent_days or 0)
+
     buckets = {
         '0-2': {'label': '0-2 days absent', 'count': 0, 'sum_avg': 0.0},
         '3-5': {'label': '3-5 days absent', 'count': 0, 'sum_avg': 0.0},
         '6+': {'label': '6+ days absent', 'count': 0, 'sum_avg': 0.0},
     }
     for sid, student in (students or {}).items():
-        classname = (student.get('classname') or '').strip()
         scores = student.get('scores', {}) if isinstance(student.get('scores', {}), dict) else {}
-        overall_marks = [subject_overall_mark(v) for v in scores.values() if isinstance(v, dict)]
-        avg_score = (sum(overall_marks) / len(overall_marks)) if overall_marks else 0.0
-        absent_days = get_student_absent_days(school_id, sid, classname, term=term, academic_year=academic_year)
+        avg_score = compute_average_marks_from_scores(scores, subjects=student.get('subjects', []))
+        absent_days = int(absent_days_by_student.get(str(sid).strip(), 0))
         bucket_key = '0-2' if absent_days <= 2 else ('3-5' if absent_days <= 5 else '6+')
         b = buckets[bucket_key]
         b['count'] += 1
@@ -9155,6 +9305,58 @@ def normalize_teacher_gender(value):
     if raw in {'other', 'o'}:
         return 'other'
     return ''
+
+def get_teacher(school_id, teacher_id):
+    """Get one teacher profile for a school."""
+    sid = (school_id or '').strip()
+    tid = (teacher_id or '').strip()
+    if not sid or not tid:
+        return {}
+    with db_connection() as conn:
+        c = conn.cursor()
+        has_profile_image_col = True
+        try:
+            db_execute(
+                c,
+                """SELECT user_id, firstname, lastname, phone, gender, signature_image, profile_image, assigned_classes, subjects_taught
+                   FROM teachers
+                   WHERE school_id = ? AND user_id = ?
+                   LIMIT 1""",
+                (sid, tid),
+            )
+        except Exception:
+            has_profile_image_col = False
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            db_execute(
+                c,
+                """SELECT user_id, firstname, lastname, phone, gender, signature_image, assigned_classes, subjects_taught
+                   FROM teachers
+                   WHERE school_id = ? AND user_id = ?
+                   LIMIT 1""",
+                (sid, tid),
+            )
+        row = c.fetchone()
+    if not row:
+        return {}
+    raw_subjects = row[8] if has_profile_image_col and len(row) > 8 else (row[7] if len(row) > 7 else '')
+    try:
+        subjects_taught = normalize_subjects_list(json.loads(raw_subjects) if raw_subjects else [])
+    except Exception:
+        subjects_taught = normalize_subjects_list(raw_subjects or '')
+    assigned_classes_raw = row[7] if has_profile_image_col and len(row) > 7 else (row[6] if len(row) > 6 else '')
+    return {
+        'firstname': row[1],
+        'lastname': row[2],
+        'phone': (row[3] or '').strip() if len(row) > 3 else '',
+        'gender': normalize_teacher_gender(row[4] if len(row) > 4 else ''),
+        'signature_image': row[5] or '',
+        'profile_image': (row[6] or '') if has_profile_image_col and len(row) > 6 else '',
+        'assigned_classes': json.loads(assigned_classes_raw) if assigned_classes_raw else [],
+        'subjects_taught': subjects_taught,
+    }
 
 def get_teachers(school_id):
     """Get all teachers for a school."""
@@ -10028,6 +10230,23 @@ def school_logo_proxy(school_id):
     if not logo_url:
         return Response(status=404)
 
+    # Support uploaded images stored as data URLs.
+    if logo_url.lower().startswith('data:image/'):
+        try:
+            header, payload = logo_url.split(',', 1)
+            mime = header.split(';', 1)[0].replace('data:', '').strip().lower()
+            if ';base64' in header.lower():
+                data = base64.b64decode(payload, validate=True)
+            else:
+                data = urllib.parse.unquote_to_bytes(payload)
+            if not mime.startswith('image/') or not data:
+                return Response(status=404)
+            resp = Response(data, mimetype=mime)
+            resp.headers['Cache-Control'] = 'public, max-age=600'
+            return resp
+        except Exception:
+            return Response(status=404)
+
     # Serve local static logos directly when configured as /static/... path.
     if logo_url.startswith('/static/') or logo_url.startswith('static/'):
         rel_path = logo_url[1:] if logo_url.startswith('/') else logo_url
@@ -10077,9 +10296,9 @@ def enforce_school_operations_toggle():
     school = get_school(school_id)
     if not school:
         return None
-    if int(school.get('operations_enabled', 1)):
+    if safe_int(school.get('operations_enabled', 1), 1):
         # School-level OFF is not active, but teacher-level OFF may still apply.
-        if role != 'teacher' or int(school.get('teacher_operations_enabled', 1) or 1):
+        if role != 'teacher' or safe_int(school.get('teacher_operations_enabled', 1), 1):
             return None
 
     teacher_blocked_endpoints = {
@@ -10104,9 +10323,9 @@ def enforce_school_operations_toggle():
     }
 
     if role == 'teacher' and endpoint in teacher_blocked_endpoints:
-        if not int(school.get('operations_enabled', 1) or 1):
+        if not safe_int(school.get('operations_enabled', 1), 1):
             flash('School operations are OFF by super admin. Teachers are read-only now.', 'error')
-        elif not int(school.get('teacher_operations_enabled', 1) or 1):
+        elif not safe_int(school.get('teacher_operations_enabled', 1), 1):
             flash('Teacher operations are OFF by school admin. Teachers are read-only now.', 'error')
         else:
             return None
@@ -10169,19 +10388,20 @@ def apply_pwa_and_cache_headers(response):
     - Inject manifest/SW registration into HTML responses.
     - Prevent browser caching of authenticated dynamic pages.
     """
-    try:
-        content_type = (response.content_type or '').lower()
-        if 'text/html' in content_type:
-            body = response.get_data(as_text=True)
-            if '</head>' in body and '/manifest.webmanifest' not in body:
-                body = body.replace('</head>', f'{PWA_HEAD_SNIPPET}\n</head>')
-            if '</body>' in body and "register('/sw.js')" not in body:
-                body = body.replace('</body>', f'{PWA_BODY_SNIPPET}\n</body>')
-            response.set_data(body)
-            response.headers['Content-Length'] = str(len(response.get_data()))
-    except Exception:
-        # Keep response delivery resilient even if HTML injection fails.
-        pass
+    if _ENABLE_RUNTIME_PWA_INJECT:
+        try:
+            content_type = (response.content_type or '').lower()
+            if 'text/html' in content_type:
+                body = response.get_data(as_text=True)
+                if '</head>' in body and '/manifest.webmanifest' not in body:
+                    body = body.replace('</head>', f'{PWA_HEAD_SNIPPET}\n</head>')
+                if '</body>' in body and "register('/sw.js')" not in body:
+                    body = body.replace('</body>', f'{PWA_BODY_SNIPPET}\n</body>')
+                response.set_data(body)
+                response.headers['Content-Length'] = str(len(response.get_data()))
+        except Exception:
+            # Keep response delivery resilient even if HTML injection fails.
+            pass
 
     path = (request.path or '').strip()
     is_static_or_pwa = (
@@ -10309,7 +10529,7 @@ def _build_super_admin_school_overview():
         school['admin_username'] = get_school_admin_username(school.get('school_id'))
 
     total = len(schools)
-    operations_on = sum(1 for s in schools if int(s.get('operations_enabled', 1) or 1))
+    operations_on = sum(1 for s in schools if safe_int(s.get('operations_enabled', 1), 1))
     operations_off = max(0, total - operations_on)
     with_admin = sum(1 for s in schools if (s.get('admin_username') or '').strip())
     without_admin = max(0, total - with_admin)
@@ -10569,6 +10789,7 @@ def super_admin_update_school():
                    WHERE school_id = ?""",
                 (school_name, location, phone, school_email, principal_name, motto, class_arm_ranking_mode, datetime.now(), school_id),
             )
+        invalidate_school_cache(school_id)
         flash(f'School profile updated for {school_id}.', 'success')
     except Exception as exc:
         flash(f'Error updating school profile: {str(exc)}', 'error')
@@ -10634,12 +10855,22 @@ def school_admin_dashboard():
             teacher_class_map[assignment_teacher_id],
             key=lambda value: str(value).lower(),
         )
-    subject_assignments = get_teacher_subject_assignments(
-        school_id,
-        academic_year=current_year,
-    )
+    try:
+        subject_assignments = get_teacher_subject_assignments(
+            school_id,
+            academic_year=current_year,
+        )
+    except Exception as exc:
+        logging.warning("Failed to load teacher subject assignments for dashboard: %s", exc)
+        subject_assignments = []
+
     class_subject_options = {}
-    for cls in get_school_classnames(school_id):
+    try:
+        classnames_for_options = get_school_classnames(school_id)
+    except Exception as exc:
+        logging.warning("Failed to load school class names for dashboard subject options: %s", exc)
+        classnames_for_options = []
+    for cls in classnames_for_options:
         config = get_class_subject_config(school_id, cls) or {}
         subjects = normalize_subjects_list(
             (config.get('core_subjects') or [])
@@ -10695,8 +10926,17 @@ def school_admin_dashboard():
     approval_workflow_enabled = result_publication_has_approval_columns()
     last_login_at = format_timestamp(get_last_login_at(session.get('user_id')))
     has_principal_signature = bool((school or {}).get('principal_signature_image'))
-    student_message_rows = get_school_student_messages(school_id, limit=12)
-    teacher_message_rows = get_school_teacher_messages(school_id, limit=12)
+    try:
+        student_message_rows = get_school_student_messages(school_id, limit=12)
+    except Exception as exc:
+        logging.warning("Failed to load school student messages for dashboard: %s", exc)
+        student_message_rows = []
+    try:
+        teacher_message_rows = get_school_teacher_messages(school_id, limit=12)
+    except Exception as exc:
+        logging.warning("Failed to load school teacher messages for dashboard: %s", exc)
+        teacher_message_rows = []
+    school_message_total = len(student_message_rows or []) + len(teacher_message_rows or [])
     
     return render_template('school/school_admin_dashboard.html', 
                          school=school, 
@@ -10716,6 +10956,7 @@ def school_admin_dashboard():
                          has_principal_signature=has_principal_signature,
                          student_message_rows=student_message_rows,
                          teacher_message_rows=teacher_message_rows,
+                         school_message_total=school_message_total,
                          publication_statuses=publication_statuses,
                          missing_score_alerts=missing_score_alerts,
                          approval_workflow_enabled=approval_workflow_enabled)
@@ -11536,7 +11777,18 @@ def school_admin_settings():
 
         raw_school_logo = (request.form.get('school_logo') or '').strip()
         normalized_school_logo = normalize_school_logo_url(raw_school_logo)
-        if raw_school_logo and normalized_school_logo != raw_school_logo:
+        uploaded_logo = request.files.get('school_logo_file')
+        if uploaded_logo and (uploaded_logo.filename or '').strip():
+            uploaded_logo_data, logo_err = parse_uploaded_profile_image(uploaded_logo)
+            if logo_err:
+                flash(logo_err.replace('Profile image', 'School logo'), 'error')
+                return redirect(url_for('school_admin_settings'))
+            normalized_school_logo = uploaded_logo_data
+            flash('School logo image uploaded successfully.', 'success')
+        elif not raw_school_logo:
+            # Keep existing stored logo when URL field is blank and no new file is uploaded.
+            normalized_school_logo = (current_school.get('school_logo', '') or '').strip()
+        elif raw_school_logo and normalized_school_logo != raw_school_logo:
             flash('School logo URL was converted to a direct image link automatically.', 'info')
 
         settings = {
@@ -11677,9 +11929,14 @@ def school_admin_settings():
     selected_calendar_year = (request.args.get('calendar_year', '') or '').strip() or ((school or {}).get('academic_year', '') or '')
     calendar = get_school_term_calendar(school_id, selected_calendar_year, selected_calendar_term)
     calendar_rows = list_school_term_calendars(school_id)
+    logo_input_value = (school.get('school_logo') or '').strip() if school else ''
+    if logo_input_value.lower().startswith('data:image/'):
+        # Do not inject large base64 payloads into the URL input value.
+        logo_input_value = ''
     return render_template(
         'school/school_settings.html',
         school=school,
+        school_logo_input_value=logo_input_value,
         assessment_configs=assessment_configs,
         calendar=calendar,
         calendar_rows=calendar_rows,
@@ -13662,7 +13919,10 @@ def teacher_dashboard():
     ]
     subject_classes = sorted({r.get('classname', '') for r in subject_assignment_rows if r.get('classname', '')})
     dashboard_classes = sorted(set(classes) | set(subject_classes))
-    students = load_students_for_classes(school_id, dashboard_classes, term_filter=current_term)
+    if set(dashboard_classes) == set(classes):
+        students = class_students_data
+    else:
+        students = load_students_for_classes(school_id, dashboard_classes, term_filter=current_term)
     score_subject_nav_map = {}
     for row in subject_assignment_rows:
         cls = (row.get('classname') or '').strip()
@@ -13969,11 +14229,7 @@ def teacher_dashboard():
                 'message': f'{classname}: behaviour assessment pending for {int(s.get("behaviour_missing_count", 0) or 0)} student(s).',
             })
 
-    subject_students_lookup = load_students_for_classes(
-        school_id,
-        subject_map_by_class.keys(),
-        term_filter=current_term,
-    )
+    subject_students_lookup = subject_students_data
     seen_subject_alerts = set()
     for row in subject_assignment_rows:
         classname = (row.get('classname') or '').strip()
@@ -14021,13 +14277,24 @@ def teacher_dashboard():
     )
     subject_submit_rows = []
     submitted_map = get_subject_score_submission_map(school_id, teacher_id, current_term, current_year)
+    subject_submit_students = load_students_for_classes(
+        school_id,
+        subject_map_by_class.keys(),
+        term_filter=current_term,
+    )
+    students_by_class_for_submit = {}
+    for sid, st in (subject_submit_students or {}).items():
+        cls_name = (st.get('classname') or '').strip()
+        if not cls_name:
+            continue
+        students_by_class_for_submit.setdefault(cls_name, {})[sid] = st
     for cls in sorted(subject_map_by_class.keys(), key=lambda x: str(x).lower()):
         if (cls or '').strip().lower() in class_owner_set:
             continue
         allowed_subjects = subject_map_by_class.get(cls, set())
         if not allowed_subjects:
             continue
-        class_students = load_students(school_id, class_filter=cls, term_filter=current_term)
+        class_students = students_by_class_for_submit.get(cls, {})
         pending_entries = 0
         eligible_entries = 0
         for _sid, st in class_students.items():
@@ -15013,13 +15280,15 @@ def teacher_enter_scores():
             c = conn.cursor()
             db_execute(
                 c,
-                "SELECT scores FROM students WHERE school_id = ? AND student_id = ? LIMIT 1",
+                "SELECT term, scores FROM students WHERE school_id = ? AND student_id = ? LIMIT 1",
                 (school_id, student_id),
             )
             persisted_row = c.fetchone()
+            persisted_term = ''
             persisted_scores = {}
             if persisted_row:
-                raw_scores = persisted_row[0]
+                persisted_term = (persisted_row[0] or '').strip() if len(persisted_row) > 1 else ''
+                raw_scores = persisted_row[1] if len(persisted_row) > 1 else persisted_row[0]
                 if isinstance(raw_scores, dict):
                     persisted_scores = raw_scores
                 elif isinstance(raw_scores, str):
@@ -15031,7 +15300,9 @@ def teacher_enter_scores():
                         persisted_scores = {}
             if not isinstance(persisted_scores, dict):
                 persisted_scores = {}
-            merged_scores = dict(persisted_scores)
+            same_term_persisted = persisted_term == (current_term or '').strip()
+            base_scores = persisted_scores if same_term_persisted else {}
+            merged_scores = dict(base_scores)
             for subject in editable_subjects:
                 merged_scores[subject] = scores.get(subject, {})
             student['scores'] = merged_scores
@@ -15043,7 +15314,7 @@ def teacher_enter_scores():
                 classname=student.get('classname', ''),
                 term=current_term,
                 academic_year=current_year or '',
-                old_scores=persisted_scores or previous_scores_for_audit,
+                old_scores=base_scores or previous_scores_for_audit,
                 new_scores=merged_scores,
                 changed_by=teacher_id,
                 changed_by_role='teacher',
@@ -15096,7 +15367,7 @@ def teacher_enter_scores():
                     f'{class_name}: ' + ', '.join(pending_by_subject[:5]) + ('...' if len(pending_by_subject) > 5 else ''),
                     'info',
                 )
-        return redirect(url_for('teacher_dashboard'))
+        return redirect(url_for('teacher_enter_scores', **redirect_kwargs))
     
     return render_template('teacher/teacher_enter_scores.html', 
                          student=student, 
@@ -15705,7 +15976,7 @@ def student_dashboard():
             else:
                 dashboard_notice = 'No published result available yet.'
     else:
-        if int((school or {}).get('operations_enabled', 1) or 1):
+        if safe_int((school or {}).get('operations_enabled', 1), 1):
             dashboard_notice = 'No published result available yet.'
         else:
             dashboard_notice = 'Current term results are hidden while operations are OFF. Only previous published results are available.'
@@ -15898,7 +16169,7 @@ def student_view_result():
         get_published_terms_for_student(school_id, student_id, classname=selected_class),
     )
     if not published_terms:
-        if int((school or {}).get('operations_enabled', 1) or 1):
+        if safe_int((school or {}).get('operations_enabled', 1), 1):
             flash('No published result available yet.', 'error')
         else:
             flash('Current term results are hidden while operations are OFF. Only previous published results are available.', 'error')
@@ -16138,48 +16409,80 @@ def parent_dashboard():
     if not allowed_keys:
         flash('Parent session expired. Please login again.', 'error')
         return redirect(url_for('parent_portal'))
-    children = []
-    parent_term_events_by_school = {}
+    key_pairs = []
+    student_ids_by_school = {}
     for key in sorted(allowed_keys):
+        if '::' not in key:
+            continue
         school_id, student_id = key.split('::', 1)
-        student = load_student(school_id, student_id)
+        school_id = (school_id or '').strip()
+        student_id = (student_id or '').strip()
+        if not school_id or not student_id:
+            continue
+        key_pairs.append((key, school_id, student_id))
+        student_ids_by_school.setdefault(school_id, []).append(student_id)
+
+    schools_by_id = {sid: (get_school(sid) or {}) for sid in student_ids_by_school.keys()}
+    students_by_key = {}
+    parent_term_events_by_school = {}
+    published_overview_by_school = {}
+    for sid, student_ids in student_ids_by_school.items():
+        current_school = schools_by_id.get(sid, {})
+        current_term = get_current_term(current_school)
+        current_year = (current_school or {}).get('academic_year', '')
+        parent_term_events_by_school[sid] = get_visible_term_program_events(
+            school_id=sid,
+            academic_year=current_year,
+            term=current_term,
+            audience='parents',
+        )
+        rows = load_students_for_student_ids(sid, student_ids)
+        for student_id, student in rows.items():
+            students_by_key[f'{sid}::{student_id}'] = student
+        published_overview_by_school[sid] = get_published_overview_for_students(sid, student_ids)
+
+    children = []
+    for key, school_id, student_id in key_pairs:
+        student = students_by_key.get(key)
         if not student:
             continue
-        school = get_school(school_id) or {}
+        school = schools_by_id.get(school_id, {})
         current_term = get_current_term(school)
         current_year = (school or {}).get('academic_year', '')
-        if school_id not in parent_term_events_by_school:
-            parent_term_events_by_school[school_id] = get_visible_term_program_events(
-                school_id=school_id,
-                academic_year=current_year,
-                term=current_term,
-                audience='parents',
-            )
-        published_terms = filter_visible_terms_for_student(
-            school,
-            get_published_terms_for_student(school_id, student_id),
-        )
+        overview = published_overview_by_school.get(school_id, {})
+        all_terms = (overview.get('terms_by_student', {}) or {}).get(student_id, [])
+        snapshot_map = (overview.get('snapshot_by_student_token', {}) or {}).get(student_id, {})
+        published_terms = filter_visible_terms_for_student(school, all_terms)
         published_terms_sorted = sorted(
             list(published_terms or []),
             key=lambda x: ((_academic_year_start(x.get('academic_year')) or 0), term_sort_value(x.get('term'))),
         )
         latest = pick_default_published_term(published_terms, current_term, current_year) if published_terms else None
-        snapshot = None
-        if latest:
-            snapshot = load_published_student_result(
+        latest_token = _term_token((latest or {}).get('academic_year', ''), (latest or {}).get('term', ''))
+        snapshot = snapshot_map.get(latest_token)
+        if latest and (latest.get('term', '') or '').strip().lower() == 'third term' and bool((school or {}).get('combine_third_term_results')):
+            combined = load_published_student_result(
                 school_id,
                 student_id,
                 latest.get('term', ''),
                 latest.get('academic_year', ''),
             )
+            if combined:
+                snapshot = combined
         trend_points = []
         for term_item in published_terms_sorted:
-            snap = load_published_student_result(
-                school_id,
-                student_id,
-                term_item.get('term', ''),
-                term_item.get('academic_year', ''),
-            )
+            token = _term_token(term_item.get('academic_year', ''), term_item.get('term', ''))
+            snap = snapshot_map.get(token)
+            term_name = (term_item.get('term', '') or '').strip().lower()
+            if term_name == 'third term' and bool((school or {}).get('combine_third_term_results')):
+                combined = load_published_student_result(
+                    school_id,
+                    student_id,
+                    term_item.get('term', ''),
+                    term_item.get('academic_year', ''),
+                )
+                if combined:
+                    snap = combined
             if not snap:
                 continue
             trend_points.append({
@@ -16215,6 +16518,11 @@ def parent_dashboard():
             'breakpoint': breakpoint_info,
         })
     children.sort(key=lambda row: ((row.get('firstname') or '').lower(), (row.get('student_id') or '').lower()))
+    parent_theme_accent = '#1F7A8C'
+    if children:
+        first_school_id = (children[0].get('school_id') or '').strip()
+        first_school = schools_by_id.get(first_school_id, {}) if first_school_id else {}
+        parent_theme_accent = normalize_hex_color(first_school.get('theme_accent_color', ''), '#1F7A8C')
     parent_term_events = []
     for child in children:
         sid = child.get('school_id', '')
@@ -16238,6 +16546,7 @@ def parent_dashboard():
     return render_template(
         'parent/parent_dashboard.html',
         parent_phone=session.get('parent_phone', ''),
+        parent_theme_accent=parent_theme_accent,
         children=children,
         parent_term_events=parent_term_events,
         parent_messages=parent_messages,
@@ -17007,8 +17316,7 @@ def school_admin_correct_result():
 
         teacher_comment = (request.form.get('teacher_comment', '') or '').strip()[:1500]
         principal_comment = (request.form.get('principal_comment', '') or '').strip()[:1500]
-        marks = [subject_overall_mark(v) for v in scores.values() if isinstance(v, dict)]
-        average_marks = (sum(marks) / len(marks)) if marks else 0.0
+        average_marks = compute_average_marks_from_scores(scores, subjects=subjects)
         grade = grade_from_score(average_marks, grade_cfg)
         status = status_from_score(average_marks, grade_cfg)
         classname = snapshot.get('classname', student.get('classname', ''))
@@ -17283,7 +17591,7 @@ def check_result():
     school = get_school(school_id) or {}
     published_terms = filter_visible_terms_for_student(school, get_published_terms_for_student(school_id, sid))
     if not published_terms:
-        if int((school or {}).get('operations_enabled', 1) or 1):
+        if safe_int((school or {}).get('operations_enabled', 1), 1):
             flash('No published result available yet.', 'error')
         else:
             flash('Current term results are hidden while operations are OFF. Only previous published results are available.', 'error')
@@ -17518,8 +17826,7 @@ def view_students():
             is_class_owner = False
             subject_actions = []
         scores = student_data.get('scores', {}) if isinstance(student_data.get('scores', {}), dict) else {}
-        overall_marks = [subject_overall_mark(s) for s in scores.values() if isinstance(s, dict)]
-        average_marks = (sum(overall_marks) / len(overall_marks)) if overall_marks else 0
+        average_marks = compute_average_marks_from_scores(scores, subjects=student_data.get('subjects', []))
         grade = grade_from_score(average_marks, grade_cfg)
         status = status_from_score(average_marks, grade_cfg)
 
@@ -17798,10 +18105,9 @@ def validate_production_env():
     if len(backup_key) < 32:
         raise RuntimeError('BACKUP_SIGNING_KEY is too short. Use at least 32 characters in production.')
 
-# Enforce production env guards for both direct runs and WSGI imports (e.g., Gunicorn).
-validate_production_env()
-
 if __name__ == '__main__':
+    # Enforce production env guards at process startup entrypoint.
+    validate_production_env()
     parser = argparse.ArgumentParser(description='Student Score app runner and DB health tools')
     parser.add_argument('--db-health-check', action='store_true', help='Run DB connectivity/schema checks and exit.')
     parser.add_argument('--apply-fixes', action='store_true', help='With --db-health-check, apply best-effort schema fixes first.')

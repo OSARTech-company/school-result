@@ -8,6 +8,13 @@
             <i class="fas fa-home"></i>
             <span>Dashboard</span>
         </a>
+        <a href="{{ url_for('parent_dashboard') }}#parent-messages-card" class="side-link">
+            <i class="fas fa-bell"></i>
+            <span>Messages</span>
+            {% if unread_parent_messages|default(0) %}
+            <span class="notif-badge">{{ unread_parent_messages }}</span>
+            {% endif %}
+        </a>
         {% for child in (children or []) %}
         <a href="{{ url_for('parent_view_result', student_key=child.key) }}" class="side-link">
             <i class="fas fa-user-graduate"></i>

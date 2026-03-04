@@ -35,7 +35,7 @@
         .welcome-modal-card ol { margin: 8px 0 14px 18px; color: #334155; }
     </style>
 </head>
-<body>
+<body style="--accent: {{ parent_theme_accent if parent_theme_accent else '#1F7A8C' }};">
     <div class="app-shell topbar-layout">
         <div class="side-taskbar">
             <div class="side-brand">
@@ -46,6 +46,10 @@
                 <a href="{{ url_for('parent_dashboard') }}" class="side-link active">
                     <i class="fas fa-home"></i>
                     <span>Dashboard</span>
+                </a>
+                <a href="#parent-messages-card" class="side-link">
+                    <i class="fas fa-bell"></i>
+                    <span>Messages</span>
                     {% if unread_parent_messages %}
                     <span class="notif-badge">{{ unread_parent_messages }}</span>
                     {% endif %}
@@ -97,7 +101,7 @@
 
                 <div class="layout-main">
                 <div class="layout-side">
-                <div class="card">
+                <div class="card" id="parent-messages-card">
                     <h3 class="no-margin"><i class="fas fa-bell"></i> School Notifications</h3>
                     {% if unread_parent_messages %}
                     <div class="parent-message-actions">

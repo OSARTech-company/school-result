@@ -105,6 +105,10 @@
                 <a href="{{ url_for('student_dashboard') }}" class="side-link active">
                     <i class="fas fa-home"></i>
                     <span>Dashboard</span>
+                </a>
+                <a href="#student-messages-card" class="side-link">
+                    <i class="fas fa-bell"></i>
+                    <span>Messages</span>
                     {% if unread_student_messages %}
                     <span class="notif-badge">{{ unread_student_messages }}</span>
                     {% endif %}
@@ -161,7 +165,7 @@
 
                 <div class="layout-main">
                 <div class="layout-side">
-                <div class="card">
+                <div class="card" id="student-messages-card">
                     <h2><i class="fas fa-bullhorn"></i> School Messages & Deadlines</h2>
                     {% if unread_student_messages %}
                     <div class="student-message-actions">
