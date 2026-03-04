@@ -1998,9 +1998,13 @@ logging.info(
     RUN_STARTUP_BOOTSTRAP,
     _redact_database_url(DATABASE_URL),
 )
-# Note: As of 2026-02-26, schema management is handled via Flask-Migrate.
-# init_db() is no longer called during app startup. Run `flask db upgrade` separately.
-logging.info("Database schema is managed via Flask-Migrate. Run 'flask db upgrade' to apply migrations.")
+# Schema management is primarily handled via Flask-Migrate, but runtime startup DDL
+# can be explicitly enabled for guarded compatibility healing.
+if RUN_STARTUP_DDL:
+    logging.info("RUN_STARTUP_DDL enabled. Executing init_db() at startup.")
+    init_db()
+else:
+    logging.info("RUN_STARTUP_DDL disabled. Skipping init_db() at startup.")
 
 
 # Create super admin user (bootstrap-only, disabled for normal runtime startup).
@@ -5293,14 +5297,9 @@ def compute_class_subject_completion(school_id, classname, term, academic_year='
         if str(s).strip()
     ])
     if not subject_order:
-        defaults = _catalog_defaults_for_class(classname)
-        subject_order = _dedupe_keep_order([
-            normalize_subject_name(s)
-            for bucket in ('core', 'science', 'art', 'commercial', 'optional')
-            for s in (defaults.get(bucket) or [])
-            if str(s).strip()
-        ])
-    if not subject_order:
+        # Fall back to actual subjects offered by students in this class/term.
+        # Avoid using global defaults here because they can create false "pending"
+        # requirements for schools that have not configured this class yet.
         subject_order = _dedupe_keep_order([
             normalize_subject_name(subj)
             for s in students
@@ -10444,6 +10443,7 @@ def super_admin_add_school():
                 class_arm_ranking_mode = 'separate'
             with db_connection(commit=True) as conn:
                 c = conn.cursor()
+                db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS class_arm_ranking_mode TEXT DEFAULT 'separate'")
                 school_id = create_school_with_index_id_with_cursor(
                     c,
                     school_name,
@@ -10560,6 +10560,7 @@ def super_admin_update_school():
     try:
         with db_connection(commit=True) as conn:
             c = conn.cursor()
+            db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS class_arm_ranking_mode TEXT DEFAULT 'separate'")
             db_execute(
                 c,
                 """UPDATE schools
@@ -16553,6 +16554,7 @@ def download_result_pdf():
     exam_config = get_assessment_config_for_class(school_id, snapshot.get('classname', ''))
     combined_exam = (exam_config.get('exam_mode') or 'separate').strip().lower() == 'combined'
     scores = snapshot.get('scores', {}) if isinstance(snapshot.get('scores', {}), dict) else {}
+    show_positions = bool((school or {}).get('show_positions', 1))
     signoff = get_result_signoff_details(
         school_id,
         snapshot.get('classname', ''),
@@ -17796,6 +17798,9 @@ def validate_production_env():
     if len(backup_key) < 32:
         raise RuntimeError('BACKUP_SIGNING_KEY is too short. Use at least 32 characters in production.')
 
+# Enforce production env guards for both direct runs and WSGI imports (e.g., Gunicorn).
+validate_production_env()
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Student Score app runner and DB health tools')
     parser.add_argument('--db-health-check', action='store_true', help='Run DB connectivity/schema checks and exit.')
@@ -17805,8 +17810,6 @@ if __name__ == '__main__':
 
     if args.db_health_check:
         raise SystemExit(run_db_health_check(apply_fixes=args.apply_fixes, include_startup_ddl=args.include_startup_ddl))
-
-    validate_production_env()
 
     port = int(os.environ.get('PORT', 5000))
     debug_flag = (
