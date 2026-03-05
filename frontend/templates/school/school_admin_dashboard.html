@@ -166,12 +166,16 @@
                 <i class="fas fa-home"></i>
                 <span>Dashboard</span>
             </a>
-            <a href="#messages-center" class="side-link">
+            <a href="{{ url_for('school_admin_messages') }}" class="side-link">
                 <i class="fas fa-bell"></i>
                 <span>Messages</span>
                 {% if school_message_total %}
                 <span class="notif-badge">{{ school_message_total }}</span>
                 {% endif %}
+            </a>
+            <a href="{{ url_for('school_admin_publish_results') }}" class="side-link">
+                <i class="fas fa-cloud-upload-alt"></i>
+                <span>Publish Results</span>
             </a>
             <a href="{{ url_for('view_students') }}" class="side-link">
                 <i class="fas fa-users"></i>
@@ -423,159 +427,13 @@
             </a>
           </div>
 
-          <div class="card" id="messages-center">
-            <h2><i class="fas fa-bullhorn"></i> Student Message Broadcast</h2>
-            <p class="note">Send deadline notices or school messages to all students, one class, or one stream in a class.</p>
-            <form action="{{ url_for('school_admin_send_student_message') }}" method="POST">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-              <div class="form-group">
-                <label for="student_msg_title">Title</label>
-                <input type="text" id="student_msg_title" name="title" maxlength="160" required placeholder="e.g., Score Submission Deadline" />
-              </div>
-              <div class="form-group">
-                <label for="student_msg_body">Message</label>
-                <textarea id="student_msg_body" name="message" rows="4" maxlength="3000" required placeholder="Enter message to students..."></textarea>
-              </div>
-              <div class="form-group">
-                <label for="student_msg_target_mode">Target</label>
-                <select id="student_msg_target_mode" name="target_mode">
-                  <option value="all">All Students</option>
-                  <option value="class">One Class</option>
-                  <option value="stream">One Stream in Class</option>
-                </select>
-              </div>
-              <div id="studentMsgClassGroup" class="form-group student-message-target-fields">
-                <label for="student_msg_classname">Class</label>
-                <select id="student_msg_classname" name="target_classname">
-                  <option value="">-- Select Class --</option>
-                  {% for class_name in class_counts.keys()|sort %}
-                  <option value="{{ class_name }}">{{ class_name }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-              <div id="studentMsgStreamGroup" class="form-group student-message-target-fields">
-                <label for="student_msg_stream">Stream</label>
-                <select id="student_msg_stream" name="target_stream">
-                  <option value="">-- Select Stream --</option>
-                  <option value="Science">Science</option>
-                  <option value="Art">Art</option>
-                  <option value="Commercial">Commercial</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label for="student_msg_deadline">Deadline (optional)</label>
-                <input type="date" id="student_msg_deadline" name="deadline_date" />
-              </div>
-              <button type="submit" class="btn btn-primary"><i class="fas fa-paper-plane"></i> Send to Students</button>
-            </form>
-            <div class="student-message-list">
-              <h3 class="no-margin">Recent Messages</h3>
-              {% for msg in student_message_rows %}
-              <div class="student-message-item">
-                <h4>{{ msg.title }}</h4>
-                <div class="student-message-meta">
-                  Target:
-                  {% if msg.target_classname and msg.target_stream %}
-                    {{ msg.target_classname }} - {{ msg.target_stream }}
-                  {% elif msg.target_classname %}
-                    {{ msg.target_classname }} (all streams)
-                  {% else %}
-                    All Students
-                  {% endif %}
-                  |
-                  Deadline: {{ msg.deadline_date if msg.deadline_date else 'None' }}
-                  {% if msg.is_expired %}
-                    | <span class="chip chip-danger">Expired</span>
-                  {% endif %}
-                  |
-                  Sent: {{ msg.created_at }}
-                </div>
-                <div>{{ msg.message }}</div>
-              </div>
-              {% else %}
-              <p class="note">No student messages sent yet.</p>
-              {% endfor %}
-            </div>
-          </div>
-
           <div class="card">
-            <h2><i class="fas fa-bullhorn"></i> Teacher Message Broadcast</h2>
-            <p class="note">Send notices to all teachers, one class teacher group, one subject teacher group, or class + subject teachers.</p>
-            <form action="{{ url_for('school_admin_send_teacher_message') }}" method="POST">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-              <div class="form-group">
-                <label for="teacher_msg_title">Title</label>
-                <input type="text" id="teacher_msg_title" name="title" maxlength="160" required placeholder="e.g., Submit all scores before Friday" />
-              </div>
-              <div class="form-group">
-                <label for="teacher_msg_body">Message</label>
-                <textarea id="teacher_msg_body" name="message" rows="4" maxlength="3000" required placeholder="Enter message to teachers..."></textarea>
-              </div>
-              <div class="form-group">
-                <label for="teacher_msg_target_mode">Target</label>
-                <select id="teacher_msg_target_mode" name="target_mode">
-                  <option value="all">All Teachers</option>
-                  <option value="class">One Class</option>
-                  <option value="subject">One Subject</option>
-                  <option value="class_subject">Class + Subject</option>
-                </select>
-              </div>
-              <div id="teacherMsgClassGroup" class="form-group student-message-target-fields">
-                <label for="teacher_msg_classname">Class</label>
-                <select id="teacher_msg_classname" name="target_classname">
-                  <option value="">-- Select Class --</option>
-                  {% for class_name in class_counts.keys()|sort %}
-                  <option value="{{ class_name }}">{{ class_name }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-              <div id="teacherMsgSubjectGroup" class="form-group student-message-target-fields">
-                <label for="teacher_msg_subject">Subject</label>
-                <select id="teacher_msg_subject" name="target_subject">
-                  <option value="">-- Select Subject --</option>
-                  {% for row in subject_assignments %}
-                  {% if row.subject %}
-                  <option value="{{ row.subject }}">{{ row.subject }}</option>
-                  {% endif %}
-                  {% endfor %}
-                </select>
-              </div>
-              <div class="form-group">
-                <label for="teacher_msg_deadline">Deadline (optional)</label>
-                <input type="date" id="teacher_msg_deadline" name="deadline_date" />
-              </div>
-              <button type="submit" class="btn btn-primary"><i class="fas fa-paper-plane"></i> Send to Teachers</button>
-            </form>
-            <div class="student-message-list">
-              <h3 class="no-margin">Recent Teacher Messages</h3>
-              {% for msg in teacher_message_rows %}
-              <div class="student-message-item">
-                <h4>{{ msg.title }}</h4>
-                <div class="student-message-meta">
-                  Target:
-                  {% if msg.target_classname and msg.target_subject %}
-                    {{ msg.target_classname }} - {{ msg.target_subject }}
-                  {% elif msg.target_classname %}
-                    {{ msg.target_classname }} (all subjects)
-                  {% elif msg.target_subject %}
-                    {{ msg.target_subject }} (all classes)
-                  {% else %}
-                    All Teachers
-                  {% endif %}
-                  |
-                  Deadline: {{ msg.deadline_date if msg.deadline_date else 'None' }}
-                  {% if msg.is_expired %}
-                    | <span class="chip chip-danger">Expired</span>
-                  {% endif %}
-                  |
-                  Sent: {{ msg.created_at }}
-                </div>
-                <div>{{ msg.message }}</div>
-              </div>
-              {% else %}
-              <p class="note">No teacher messages sent yet.</p>
-              {% endfor %}
-            </div>
+            <h2><i class="fas fa-bullhorn"></i> Messages</h2>
+            <p class="note">Move message broadcast and history to a dedicated page to keep this dashboard focused.</p>
+            <p class="note">Current recent message count: <strong>{{ school_message_total or 0 }}</strong></p>
+            <a href="{{ url_for('school_admin_messages') }}" class="btn btn-primary">
+              <i class="fas fa-external-link-alt"></i> Open Messages Center
+            </a>
           </div>
 
           </div>
@@ -945,75 +803,19 @@
               current_term }})
             </h2>
             {% if publication_statuses %}
-            <div class="table-scroll">
-            <table class="assignment-table">
-              <thead>
-                <tr>
-                  <th>Class</th>
-                  <th>Teacher</th>
-                  <th>Upload Status</th>
-                  <th>Approval</th>
-                  <th>Published At</th>
-                  <th>Viewed</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for p in publication_statuses %}
-                <tr>
-                  <td>{{ p.classname }}</td>
-                  <td>
-                    {{ p.teacher_name }} <br /><small>{{ p.teacher_id }}</small>
-                  </td>
-                  <td>
-                    {% if p.is_published %}
-                    <span class="chip chip-success"
-                      >Uploaded/Published</span
-                    >
-                    {% else %}
-                    <span class="chip chip-warning"
-                      >Not Uploaded</span
-                    >
-                    {% endif %}
-                  </td>
-                  <td>
-                    {% if p.is_published %}
-                    <span class="chip chip-success">Approved</span>
-                    {% elif p.approval_status == 'pending' %}
-                    <span class="chip chip-pending">Pending</span>
-                    <br /><small>Submitted: {{ p.submitted_at or '-' }}</small>
-                    {% elif p.approval_status == 'rejected' %}
-                    <span class="chip chip-danger">Rejected</span>
-                    {% if p.review_note %}
-                    <br /><small>{{ p.review_note }}</small>
-                    {% endif %}
-                    {% else %}
-                    <span class="chip chip-muted">Not submitted</span>
-                    {% endif %}
-                  </td>
-                  <td>{{ p.published_at or '-' }}</td>
-                  <td>{{ p.viewed_count or 0 }}/{{ p.published_count or 0 }}</td>
-                  <td>
-                    {% if p.approval_status == 'pending' and not p.is_published %}
-                    <form action="{{ url_for('school_admin_approve_results') }}" method="POST" class="inline-form">
-                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-                      <input type="hidden" name="classname" value="{{ p.classname }}" />
-                      <button type="submit" class="btn btn-success btn-sm">Approve</button>
-                    </form>
-                    <form action="{{ url_for('school_admin_reject_results') }}" method="POST" class="inline-form">
-                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-                      <input type="hidden" name="classname" value="{{ p.classname }}" />
-                      <input type="text" name="review_note" placeholder="Reason (required)" required class="review-note-input" />
-                      <button type="submit" class="btn btn-danger btn-sm">Reject</button>
-                    </form>
-                    {% else %}
-                    <span class="chip chip-muted">-</span>
-                    {% endif %}
-                  </td>
-                </tr>
-                {% endfor %}
-              </tbody>
-            </table>
+            {% set pending_count = publication_statuses | selectattr('approval_status', 'equalto', 'pending') | list | length %}
+            {% set published_count = publication_statuses | selectattr('is_published') | list | length %}
+            <div class="stack-card">
+              <p class="no-margin">
+                <span class="chip chip-pending">Pending: {{ pending_count }}</span>
+                <span class="chip chip-success">Published: {{ published_count }}</span>
+              </p>
+              <p class="note">Open the dedicated page to approve/reject and monitor class publish status.</p>
+              <p class="mt-10">
+                <a href="{{ url_for('school_admin_publish_results') }}" class="btn btn-primary">
+                  <i class="fas fa-cloud-upload-alt"></i> Open Publish Results
+                </a>
+              </p>
             </div>
             {% else %}
             <p>No class assignments found for {{ current_term }}.</p>

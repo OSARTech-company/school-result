@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student Messages - Student Score Management System</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260303c') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { min-height: 100vh; }
+        .container { width: min(1080px, 100%); margin: 0 auto; padding: 24px; }
+        .header { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+        .header h1 { margin: 0; font-size: 1.85rem; }
+        .header .back { color: white; text-decoration: none; font-weight: 700; }
+        .student-message-card { border: 1px solid #dbe4ef; border-radius: 10px; padding: 12px; background: #f8fbff; margin-bottom: 10px; }
+        .student-message-card.is-unread { border-left: 4px solid #0F4C81; background: #eef6ff; }
+        .student-message-card h4 { margin: 0 0 6px; font-size: 1rem; color: #1e3a5f; }
+        .student-message-meta { color: #5b6475; font-size: 0.86rem; margin-bottom: 6px; }
+        .student-message-actions { margin-top: 10px; display: flex; gap: 8px; align-items: center; }
+    </style>
+</head>
+<body style="--brand: {{ school.theme_primary_color if school and school.theme_primary_color else '#0F4C81' }}; --brand-2: {{ school.theme_secondary_color if school and school.theme_secondary_color else '#1F7A8C' }}; --accent: {{ school.theme_accent_color if school and school.theme_accent_color else '#1F7A8C' }};">
+    <div class="app-shell topbar-layout">
+        <div class="side-taskbar">
+            <div class="side-brand">
+                <i class="fas fa-graduation-cap"></i>
+                <span>Student</span>
+            </div>
+            <div class="side-links">
+                <a href="{{ url_for('student_dashboard') }}" class="side-link">
+                    <i class="fas fa-home"></i>
+                    <span>Dashboard</span>
+                </a>
+                <a href="{{ url_for('student_messages') }}" class="side-link active">
+                    <i class="fas fa-bell"></i>
+                    <span>Messages</span>
+                    {% if unread_student_messages %}
+                    <span class="notif-badge">{{ unread_student_messages }}</span>
+                    {% endif %}
+                </a>
+                <a href="{{ url_for('student_view_result') }}" class="side-link">
+                    <i class="fas fa-chart-bar"></i>
+                    <span>View Results</span>
+                </a>
+                <a href="{{ url_for('parent_portal') }}" class="side-link">
+                    <i class="fas fa-user-friends"></i>
+                    <span>Parent Access</span>
+                </a>
+                <a href="{{ url_for('student_change_password') }}" class="side-link">
+                    <i class="fas fa-key"></i>
+                    <span>Change Password</span>
+                </a>
+                <a href="{{ url_for('help', role='student') }}" class="side-link">
+                    <i class="fas fa-question-circle"></i>
+                    <span>Help</span>
+                </a>
+                <form method="post" action="{{ url_for('logout') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="side-link side-link-logout">
+                        <i class="fas fa-sign-out-alt"></i>
+                        <span>Logout</span>
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <div class="container">
+                <div class="header">
+                    <h1><i class="fas fa-bell"></i> Messages</h1>
+                    <a href="{{ url_for('student_dashboard') }}" class="back"><i class="fas fa-arrow-left"></i> Back to Dashboard</a>
+                </div>
+
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        {% for category, message in messages %}
+                            <div class="flash {{ category }}">{{ message }}</div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
+
+                <div class="student-info">
+                    <h2>{{ student.firstname }} ({{ student.student_id }})</h2>
+                    <p><strong>Class:</strong> {{ student.classname }} | <strong>Term:</strong> {{ student.term }} | <strong>Stream:</strong> {{ student.stream }}</p>
+                </div>
+
+                <div class="card">
+                    <h2><i class="fas fa-bullhorn"></i> School Messages & Deadlines</h2>
+                    {% if unread_student_messages %}
+                    <div class="student-message-actions">
+                        <span class="chip chip-warning">Unread: {{ unread_student_messages }}</span>
+                        <form method="post" action="{{ url_for('student_mark_all_messages_read') }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-check-double"></i> Mark All Read
+                            </button>
+                        </form>
+                    </div>
+                    {% endif %}
+                    {% if student_messages %}
+                        {% for msg in student_messages %}
+                        <div class="student-message-card {% if not msg.is_read %}is-unread{% endif %}">
+                            <h4>{{ msg.title }}</h4>
+                            <div class="student-message-meta">
+                                Deadline: {{ msg.deadline_date if msg.deadline_date else 'None' }}
+                                {% if msg.is_expired %}
+                                    | <span class="chip chip-danger">Expired</span>
+                                {% elif msg.is_due_soon %}
+                                    | <span class="chip chip-warning">Due Soon</span>
+                                {% endif %}
+                                {% if msg.is_read %}
+                                    | <span class="chip chip-success">Read</span>
+                                {% else %}
+                                    | <span class="chip chip-warning">Unread</span>
+                                {% endif %}
+                                | Sent: {{ msg.created_at }}
+                            </div>
+                            <div>{{ msg.message }}</div>
+                            {% if not msg.is_read %}
+                            <div class="student-message-actions">
+                                <form method="post" action="{{ url_for('student_mark_message_read') }}">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <input type="hidden" name="message_id" value="{{ msg.id }}">
+                                    <button type="submit" class="btn btn-primary">
+                                        <i class="fas fa-check"></i> Mark as Read
+                                    </button>
+                                </form>
+                            </div>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                    <p class="note">No messages from school admin yet.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260303c') }}"></script>
+</body>
+</html>

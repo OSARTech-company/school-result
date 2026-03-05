@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>School Messages - Student Score Management System</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260303c') }}" />
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" />
+    <style>
+      body { min-height: 100vh; }
+      .container { width: min(1120px, 100%); margin: 0 auto; padding: 24px; }
+      .header { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+      .header h1 { margin: 0; font-size: 1.85rem; }
+      .header .back { color: white; text-decoration: none; font-weight: 700; }
+      .grid-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+      .student-message-list { margin-top: 12px; border-top: 1px solid #e2e8f0; padding-top: 10px; }
+      .student-message-item { border: 1px solid #dbe4ef; border-radius: 10px; padding: 10px; margin-bottom: 8px; background: #f8fbff; }
+      .student-message-item h4 { margin: 0 0 6px; color: #1e3a5f; font-size: 0.98rem; }
+      .student-message-meta { color: #5b6475; font-size: 0.85rem; margin-bottom: 4px; }
+      .student-message-target-fields { display: none; }
+      .student-message-target-fields.show { display: block; }
+    </style>
+  </head>
+  <body style="--brand: {{ school.theme_primary_color if school and school.theme_primary_color else '#0F4C81' }}; --brand-2: {{ school.theme_secondary_color if school and school.theme_secondary_color else '#1F7A8C' }}; --accent: {{ school.theme_accent_color if school and school.theme_accent_color else '#1F7A8C' }};">
+    <div class="app-shell topbar-layout">
+      {% set active_page = 'messages' %}
+      {% include 'school/_school_admin_sidebar.html' %}
+      <div class="main-content">
+        <div class="container">
+          <div class="header">
+            <h1><i class="fas fa-bell"></i> Messages Center</h1>
+            <a href="{{ url_for('school_admin_dashboard') }}" class="back"><i class="fas fa-arrow-left"></i> Back to Dashboard</a>
+          </div>
+
+          {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+              {% for category, message in messages %}
+                <div class="flash {{ category }}">{{ message }}</div>
+              {% endfor %}
+            {% endif %}
+          {% endwith %}
+
+          <div class="grid-two">
+            <div class="card">
+              <h2><i class="fas fa-bullhorn"></i> Student Message Broadcast</h2>
+              <p class="note">Send deadline notices or school messages to all students, one class, or one stream in a class.</p>
+              <form action="{{ url_for('school_admin_send_student_message') }}" method="POST">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                <div class="form-group">
+                  <label for="student_msg_title">Title</label>
+                  <input type="text" id="student_msg_title" name="title" maxlength="160" required placeholder="e.g., Score Submission Deadline" />
+                </div>
+                <div class="form-group">
+                  <label for="student_msg_body">Message</label>
+                  <textarea id="student_msg_body" name="message" rows="4" maxlength="3000" required placeholder="Enter message to students..."></textarea>
+                </div>
+                <div class="form-group">
+                  <label for="student_msg_target_mode">Target</label>
+                  <select id="student_msg_target_mode" name="target_mode">
+                    <option value="all">All Students</option>
+                    <option value="class">One Class</option>
+                    <option value="stream">One Stream in Class</option>
+                  </select>
+                </div>
+                <div id="studentMsgClassGroup" class="form-group student-message-target-fields">
+                  <label for="student_msg_classname">Class</label>
+                  <select id="student_msg_classname" name="target_classname">
+                    <option value="">-- Select Class --</option>
+                    {% for class_name in class_options %}
+                    <option value="{{ class_name }}">{{ class_name }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div id="studentMsgStreamGroup" class="form-group student-message-target-fields">
+                  <label for="student_msg_stream">Stream</label>
+                  <select id="student_msg_stream" name="target_stream">
+                    <option value="">-- Select Stream --</option>
+                    <option value="Science">Science</option>
+                    <option value="Art">Art</option>
+                    <option value="Commercial">Commercial</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="student_msg_deadline">Deadline (optional)</label>
+                  <input type="date" id="student_msg_deadline" name="deadline_date" />
+                </div>
+                <button type="submit" class="btn btn-primary"><i class="fas fa-paper-plane"></i> Send to Students</button>
+              </form>
+              <div class="student-message-list">
+                <h3 class="no-margin">Recent Student Messages</h3>
+                {% for msg in student_message_rows %}
+                <div class="student-message-item">
+                  <h4>{{ msg.title }}</h4>
+                  <div class="student-message-meta">
+                    Target:
+                    {% if msg.target_classname and msg.target_stream %}
+                      {{ msg.target_classname }} - {{ msg.target_stream }}
+                    {% elif msg.target_classname %}
+                      {{ msg.target_classname }} (all streams)
+                    {% else %}
+                      All Students
+                    {% endif %}
+                    |
+                    Deadline: {{ msg.deadline_date if msg.deadline_date else 'None' }}
+                    {% if msg.is_expired %}
+                      | <span class="chip chip-danger">Expired</span>
+                    {% endif %}
+                    |
+                    Sent: {{ msg.created_at }}
+                  </div>
+                  <div>{{ msg.message }}</div>
+                </div>
+                {% else %}
+                <p class="note">No student messages sent yet.</p>
+                {% endfor %}
+              </div>
+            </div>
+
+            <div class="card">
+              <h2><i class="fas fa-bullhorn"></i> Teacher Message Broadcast</h2>
+              <p class="note">Send notices to all teachers, one class teacher group, one subject teacher group, or class + subject teachers.</p>
+              <form action="{{ url_for('school_admin_send_teacher_message') }}" method="POST">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                <div class="form-group">
+                  <label for="teacher_msg_title">Title</label>
+                  <input type="text" id="teacher_msg_title" name="title" maxlength="160" required placeholder="e.g., Submit all scores before Friday" />
+                </div>
+                <div class="form-group">
+                  <label for="teacher_msg_body">Message</label>
+                  <textarea id="teacher_msg_body" name="message" rows="4" maxlength="3000" required placeholder="Enter message to teachers..."></textarea>
+                </div>
+                <div class="form-group">
+                  <label for="teacher_msg_target_mode">Target</label>
+                  <select id="teacher_msg_target_mode" name="target_mode">
+                    <option value="all">All Teachers</option>
+                    <option value="class">One Class</option>
+                    <option value="subject">One Subject</option>
+                    <option value="class_subject">Class + Subject</option>
+                  </select>
+                </div>
+                <div id="teacherMsgClassGroup" class="form-group student-message-target-fields">
+                  <label for="teacher_msg_classname">Class</label>
+                  <select id="teacher_msg_classname" name="target_classname">
+                    <option value="">-- Select Class --</option>
+                    {% for class_name in class_options %}
+                    <option value="{{ class_name }}">{{ class_name }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div id="teacherMsgSubjectGroup" class="form-group student-message-target-fields">
+                  <label for="teacher_msg_subject">Subject</label>
+                  <select id="teacher_msg_subject" name="target_subject">
+                    <option value="">-- Select Subject --</option>
+                    {% for subject_name in subject_options %}
+                    <option value="{{ subject_name }}">{{ subject_name }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="teacher_msg_deadline">Deadline (optional)</label>
+                  <input type="date" id="teacher_msg_deadline" name="deadline_date" />
+                </div>
+                <button type="submit" class="btn btn-primary"><i class="fas fa-paper-plane"></i> Send to Teachers</button>
+              </form>
+              <div class="student-message-list">
+                <h3 class="no-margin">Recent Teacher Messages</h3>
+                {% for msg in teacher_message_rows %}
+                <div class="student-message-item">
+                  <h4>{{ msg.title }}</h4>
+                  <div class="student-message-meta">
+                    Target:
+                    {% if msg.target_classname and msg.target_subject %}
+                      {{ msg.target_classname }} - {{ msg.target_subject }}
+                    {% elif msg.target_classname %}
+                      {{ msg.target_classname }} (all subjects)
+                    {% elif msg.target_subject %}
+                      {{ msg.target_subject }} (all classes)
+                    {% else %}
+                      All Teachers
+                    {% endif %}
+                    |
+                    Deadline: {{ msg.deadline_date if msg.deadline_date else 'None' }}
+                    {% if msg.is_expired %}
+                      | <span class="chip chip-danger">Expired</span>
+                    {% endif %}
+                    |
+                    Sent: {{ msg.created_at }}
+                  </div>
+                  <div>{{ msg.message }}</div>
+                </div>
+                {% else %}
+                <p class="note">No teacher messages sent yet.</p>
+                {% endfor %}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260303c') }}"></script>
+    <script>
+      (function () {
+        var body = document.body;
+        if (window.innerWidth > 600) {
+          body.classList.add('rail-expanded');
+        }
+      })();
+    </script>
+    <script>
+      (function () {
+        var mode = document.getElementById('student_msg_target_mode');
+        var classGroup = document.getElementById('studentMsgClassGroup');
+        var streamGroup = document.getElementById('studentMsgStreamGroup');
+        var classInput = document.getElementById('student_msg_classname');
+        var streamInput = document.getElementById('student_msg_stream');
+        if (!mode || !classGroup || !streamGroup || !classInput || !streamInput) return;
+        function syncMode() {
+          var value = (mode.value || 'all').toLowerCase();
+          classGroup.classList.toggle('show', value === 'class' || value === 'stream');
+          streamGroup.classList.toggle('show', value === 'stream');
+          classInput.required = (value === 'class' || value === 'stream');
+          streamInput.required = (value === 'stream');
+          if (value === 'all') {
+            classInput.value = '';
+            streamInput.value = '';
+          } else if (value === 'class') {
+            streamInput.value = '';
+          }
+        }
+        mode.addEventListener('change', syncMode);
+        syncMode();
+      })();
+    </script>
+    <script>
+      (function () {
+        var mode = document.getElementById('teacher_msg_target_mode');
+        var classGroup = document.getElementById('teacherMsgClassGroup');
+        var subjectGroup = document.getElementById('teacherMsgSubjectGroup');
+        var classInput = document.getElementById('teacher_msg_classname');
+        var subjectInput = document.getElementById('teacher_msg_subject');
+        if (!mode || !classGroup || !subjectGroup || !classInput || !subjectInput) return;
+        function syncMode() {
+          var value = (mode.value || 'all').toLowerCase();
+          classGroup.classList.toggle('show', value === 'class' || value === 'class_subject');
+          subjectGroup.classList.toggle('show', value === 'subject' || value === 'class_subject');
+          classInput.required = (value === 'class' || value === 'class_subject');
+          subjectInput.required = (value === 'subject' || value === 'class_subject');
+          if (value === 'all') {
+            classInput.value = '';
+            subjectInput.value = '';
+          } else if (value === 'class') {
+            subjectInput.value = '';
+          } else if (value === 'subject') {
+            classInput.value = '';
+          }
+        }
+        mode.addEventListener('change', syncMode);
+        syncMode();
+      })();
+    </script>
+  </body>
+</html>

@@ -106,7 +106,7 @@
                     <i class="fas fa-home"></i>
                     <span>Dashboard</span>
                 </a>
-                <a href="#student-messages-card" class="side-link">
+                <a href="{{ url_for('student_messages') }}" class="side-link">
                     <i class="fas fa-bell"></i>
                     <span>Messages</span>
                     {% if unread_student_messages %}
@@ -167,52 +167,11 @@
                 <div class="layout-side">
                 <div class="card" id="student-messages-card">
                     <h2><i class="fas fa-bullhorn"></i> School Messages & Deadlines</h2>
-                    {% if unread_student_messages %}
-                    <div class="student-message-actions">
-                        <span class="chip chip-warning">Unread: {{ unread_student_messages }}</span>
-                        <form method="post" action="{{ url_for('student_mark_all_messages_read') }}">
-                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                            <button type="submit" class="btn btn-primary">
-                                <i class="fas fa-check-double"></i> Mark All Read
-                            </button>
-                        </form>
-                    </div>
-                    {% endif %}
-                    {% if student_messages %}
-                        {% for msg in student_messages %}
-                        <div class="student-message-card {% if not msg.is_read %}is-unread{% endif %}">
-                            <h4>{{ msg.title }}</h4>
-                            <div class="student-message-meta">
-                                Deadline: {{ msg.deadline_date if msg.deadline_date else 'None' }}
-                                {% if msg.is_expired %}
-                                    | <span class="chip chip-danger">Expired</span>
-                                {% elif msg.is_due_soon %}
-                                    | <span class="chip chip-warning">Due Soon</span>
-                                {% endif %}
-                                {% if msg.is_read %}
-                                    | <span class="chip chip-success">Read</span>
-                                {% else %}
-                                    | <span class="chip chip-warning">Unread</span>
-                                {% endif %}
-                                | Sent: {{ msg.created_at }}
-                            </div>
-                            <div>{{ msg.message }}</div>
-                            {% if not msg.is_read %}
-                            <div class="student-message-actions">
-                                <form method="post" action="{{ url_for('student_mark_message_read') }}">
-                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                    <input type="hidden" name="message_id" value="{{ msg.id }}">
-                                    <button type="submit" class="btn btn-primary">
-                                        <i class="fas fa-check"></i> Mark as Read
-                                    </button>
-                                </form>
-                            </div>
-                            {% endif %}
-                        </div>
-                        {% endfor %}
-                    {% else %}
-                    <p class="note">No messages from school admin yet.</p>
-                    {% endif %}
+                    <p class="note">Open a dedicated messages page to keep this dashboard clean.</p>
+                    <p class="note">Unread notifications: <strong>{{ unread_student_messages or 0 }}</strong></p>
+                    <a href="{{ url_for('student_messages') }}" class="btn btn-primary">
+                        <i class="fas fa-external-link-alt"></i> Open Messages
+                    </a>
                 </div>
 
                 <div class="card">

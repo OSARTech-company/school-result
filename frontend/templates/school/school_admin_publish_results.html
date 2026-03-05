@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Publish Results - Student Score Management System</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260303c') }}" />
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" />
+    <style>
+      body { min-height: 100vh; }
+      .container { width: min(1120px, 100%); margin: 0 auto; padding: 24px; }
+      .header { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+      .header h1 { margin: 0; font-size: 1.85rem; }
+      .header .back { color: white; text-decoration: none; font-weight: 700; }
+      .review-note-input { min-width: 220px; }
+      .admin-pass-input { min-width: 160px; }
+    </style>
+  </head>
+  <body style="--brand: {{ school.theme_primary_color if school and school.theme_primary_color else '#0F4C81' }}; --brand-2: {{ school.theme_secondary_color if school and school.theme_secondary_color else '#1F7A8C' }}; --accent: {{ school.theme_accent_color if school and school.theme_accent_color else '#1F7A8C' }};">
+    <div class="app-shell topbar-layout">
+      {% set active_page = 'publish_results' %}
+      {% include 'school/_school_admin_sidebar.html' %}
+      <div class="main-content">
+        <div class="container">
+          <div class="header">
+            <h1><i class="fas fa-cloud-upload-alt"></i> Publish Results</h1>
+            <a href="{{ url_for('school_admin_dashboard') }}" class="back"><i class="fas fa-arrow-left"></i> Back to Dashboard</a>
+          </div>
+
+          {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+              {% for category, message in messages %}
+                <div class="flash {{ category }}">{{ message }}</div>
+              {% endfor %}
+            {% endif %}
+          {% endwith %}
+
+          <div class="card">
+            <h2>
+              <i class="fas fa-clipboard-check"></i> Teacher Upload Status ({{ current_term }})
+            </h2>
+            {% if not approval_workflow_enabled %}
+            <div class="flash error">
+              Approval workflow columns are missing. Run migration and reload this page.
+            </div>
+            {% endif %}
+            {% if publication_statuses %}
+            <div class="table-scroll">
+              <table class="assignment-table">
+                <thead>
+                  <tr>
+                    <th>Class</th>
+                    <th>Teacher</th>
+                    <th>Upload Status</th>
+                    <th>Approval</th>
+                    <th>Published At</th>
+                    <th>Viewed</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for p in publication_statuses %}
+                  <tr>
+                    <td>{{ p.classname }}</td>
+                    <td>{{ p.teacher_name }} <br /><small>{{ p.teacher_id }}</small></td>
+                    <td>
+                      {% if p.is_published %}
+                      <span class="chip chip-success">Uploaded/Published</span>
+                      {% else %}
+                      <span class="chip chip-warning">Not Uploaded</span>
+                      {% endif %}
+                    </td>
+                    <td>
+                      {% if p.is_published %}
+                      <span class="chip chip-success">Approved</span>
+                      {% elif p.approval_status == 'pending' %}
+                      <span class="chip chip-pending">Pending</span>
+                      <br /><small>Submitted: {{ p.submitted_at or '-' }}</small>
+                      {% elif p.approval_status == 'rejected' %}
+                      <span class="chip chip-danger">Rejected</span>
+                      {% if p.review_note %}
+                      <br /><small>{{ p.review_note }}</small>
+                      {% endif %}
+                      {% else %}
+                      <span class="chip chip-muted">Not submitted</span>
+                      {% endif %}
+                    </td>
+                    <td>{{ p.published_at or '-' }}</td>
+                    <td>{{ p.viewed_count or 0 }}/{{ p.published_count or 0 }}</td>
+                    <td>
+                      {% if p.approval_status == 'pending' and not p.is_published %}
+                      <form action="{{ url_for('school_admin_approve_results') }}" method="POST" class="inline-form">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                        <input type="hidden" name="classname" value="{{ p.classname }}" />
+                        <input type="hidden" name="term" value="{{ p.term }}" />
+                        <input type="hidden" name="academic_year" value="{{ p.academic_year }}" />
+                        <button type="submit" class="btn btn-success btn-sm">Approve</button>
+                      </form>
+                      <form action="{{ url_for('school_admin_reject_results') }}" method="POST" class="inline-form">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                        <input type="hidden" name="classname" value="{{ p.classname }}" />
+                        <input type="hidden" name="term" value="{{ p.term }}" />
+                        <input type="hidden" name="academic_year" value="{{ p.academic_year }}" />
+                        <input type="text" name="review_note" placeholder="Reason (required)" required class="review-note-input" />
+                        <button type="submit" class="btn btn-danger btn-sm">Reject</button>
+                      </form>
+                      {% elif p.is_published %}
+                      <a
+                        href="{{ url_for('school_admin_publish_results_corrections', classname=p.classname, term=p.term, academic_year=p.academic_year) }}"
+                        class="btn btn-primary btn-sm"
+                      >
+                        Correct Result
+                      </a>
+                      <form action="{{ url_for('school_admin_unpublish_results') }}" method="POST" class="inline-form">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                        <input type="hidden" name="classname" value="{{ p.classname }}" />
+                        <input type="hidden" name="term_token" value="{{ p.academic_year }}::{{ p.term }}" />
+                        <input type="password" name="admin_password" placeholder="Admin password" required class="admin-pass-input" />
+                        <button type="submit" class="btn btn-danger btn-sm">Unpublish</button>
+                      </form>
+                      {% else %}
+                      <span class="chip chip-muted">-</span>
+                      {% endif %}
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            {% else %}
+            <p>No class assignments found for {{ current_term }}.</p>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+    <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260303c') }}"></script>
+    <script>
+      (function () {
+        var body = document.body;
+        if (window.innerWidth > 600) {
+          body.classList.add('rail-expanded');
+        }
+      })();
+    </script>
+  </body>
+</html>

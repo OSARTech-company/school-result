@@ -3690,7 +3690,11 @@ def calculate_positions(students_list, ss_ranking_mode='together', school=None):
         class_groups[rank_key].append(student)
 
     for rank_key, class_students in class_groups.items():
-        sorted_students = sorted(class_students, key=lambda x: x.get('average_marks', 0), reverse=True)
+        sorted_students = sorted(
+            class_students,
+            key=lambda x: safe_float(x.get('average_marks', 0), 0),
+            reverse=True,
+        )
         prev_score = None
         current_pos = 0
         for index, student in enumerate(sorted_students, 1):
@@ -5467,95 +5471,117 @@ def compute_class_subject_completion(school_id, classname, term, academic_year='
         'total_students': total_students,
     }
 
-def set_result_published(school_id, classname, term, academic_year, teacher_id, is_published, teacher_name='', principal_name=''):
-    """Publish/unpublish a class result for a term."""
+def _set_result_published_with_cursor(
+    c,
+    school_id,
+    classname,
+    term,
+    academic_year,
+    teacher_id,
+    is_published,
+    teacher_name='',
+    principal_name='',
+):
+    """Write result_publications row using caller-owned transaction."""
     ensure_result_publication_approval_columns()
     has_approval_cols = result_publication_has_approval_columns()
     school = get_school(school_id) or {}
     resolved_principal_name = (principal_name or school.get('principal_name', '') or '').strip()
     resolved_teacher_name = (teacher_name or '').strip()
     if not resolved_teacher_name and teacher_id:
-        with db_connection() as conn:
-            c = conn.cursor()
-            db_execute(
-                c,
-                "SELECT firstname, lastname FROM teachers WHERE school_id = ? AND user_id = ? LIMIT 1",
-                (school_id, teacher_id),
-            )
-            row = c.fetchone()
-            if row:
-                resolved_teacher_name = f"{row[0] or ''} {row[1] or ''}".strip() or str(teacher_id)
-            else:
-                resolved_teacher_name = str(teacher_id)
+        db_execute(
+            c,
+            "SELECT firstname, lastname FROM teachers WHERE school_id = ? AND user_id = ? LIMIT 1",
+            (school_id, teacher_id),
+        )
+        row = c.fetchone()
+        if row:
+            resolved_teacher_name = f"{row[0] or ''} {row[1] or ''}".strip() or str(teacher_id)
+        else:
+            resolved_teacher_name = str(teacher_id)
+    if has_approval_cols:
+        db_execute(
+            c,
+            (
+                "INSERT INTO result_publications "
+                "(school_id, classname, term, academic_year, teacher_id, teacher_name, principal_name, is_published, published_at, "
+                "approval_status, submitted_at, submitted_by, reviewed_at, reviewed_by, review_note, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
+                "ON CONFLICT(school_id, classname, term, academic_year) DO UPDATE SET "
+                "teacher_id = excluded.teacher_id, "
+                "teacher_name = excluded.teacher_name, "
+                "principal_name = excluded.principal_name, "
+                "is_published = excluded.is_published, "
+                "published_at = excluded.published_at, "
+                "approval_status = excluded.approval_status, "
+                "submitted_at = excluded.submitted_at, "
+                "submitted_by = excluded.submitted_by, "
+                "reviewed_at = excluded.reviewed_at, "
+                "reviewed_by = excluded.reviewed_by, "
+                "review_note = excluded.review_note, "
+                "updated_at = CURRENT_TIMESTAMP"
+            ),
+            (
+                school_id,
+                classname,
+                term,
+                academic_year or '',
+                teacher_id,
+                resolved_teacher_name,
+                resolved_principal_name,
+                1 if is_published else 0,
+                datetime.now().isoformat() if is_published else None,
+                'approved' if is_published else 'not_submitted',
+                None,
+                None,
+                None,
+                None,
+                None,
+            ),
+        )
+    else:
+        db_execute(
+            c,
+            (
+                "INSERT INTO result_publications "
+                "(school_id, classname, term, academic_year, teacher_id, teacher_name, principal_name, is_published, published_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
+                "ON CONFLICT(school_id, classname, term, academic_year) DO UPDATE SET "
+                "teacher_id = excluded.teacher_id, "
+                "teacher_name = excluded.teacher_name, "
+                "principal_name = excluded.principal_name, "
+                "is_published = excluded.is_published, "
+                "published_at = excluded.published_at, "
+                "updated_at = CURRENT_TIMESTAMP"
+            ),
+            (
+                school_id,
+                classname,
+                term,
+                academic_year or '',
+                teacher_id,
+                resolved_teacher_name,
+                resolved_principal_name,
+                1 if is_published else 0,
+                datetime.now().isoformat() if is_published else None,
+            ),
+        )
+
+def set_result_published(school_id, classname, term, academic_year, teacher_id, is_published, teacher_name='', principal_name=''):
+    """Publish/unpublish a class result for a term."""
     with db_connection(commit=True) as conn:
         c = conn.cursor()
-        if has_approval_cols:
-            db_execute(
-                c,
-                (
-                    "INSERT INTO result_publications "
-                    "(school_id, classname, term, academic_year, teacher_id, teacher_name, principal_name, is_published, published_at, "
-                    "approval_status, submitted_at, submitted_by, reviewed_at, reviewed_by, review_note, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
-                    "ON CONFLICT(school_id, classname, term, academic_year) DO UPDATE SET "
-                    "teacher_id = excluded.teacher_id, "
-                    "teacher_name = excluded.teacher_name, "
-                    "principal_name = excluded.principal_name, "
-                    "is_published = excluded.is_published, "
-                    "published_at = excluded.published_at, "
-                    "approval_status = excluded.approval_status, "
-                    "submitted_at = excluded.submitted_at, "
-                    "submitted_by = excluded.submitted_by, "
-                    "reviewed_at = excluded.reviewed_at, "
-                    "reviewed_by = excluded.reviewed_by, "
-                    "review_note = excluded.review_note, "
-                    "updated_at = CURRENT_TIMESTAMP"
-                ),
-                (
-                    school_id,
-                    classname,
-                    term,
-                    academic_year or '',
-                    teacher_id,
-                    resolved_teacher_name,
-                    resolved_principal_name,
-                    1 if is_published else 0,
-                    datetime.now().isoformat() if is_published else None,
-                    'approved' if is_published else 'not_submitted',
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                ),
-            )
-        else:
-            db_execute(
-                c,
-                (
-                    "INSERT INTO result_publications "
-                    "(school_id, classname, term, academic_year, teacher_id, teacher_name, principal_name, is_published, published_at, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
-                    "ON CONFLICT(school_id, classname, term, academic_year) DO UPDATE SET "
-                    "teacher_id = excluded.teacher_id, "
-                    "teacher_name = excluded.teacher_name, "
-                    "principal_name = excluded.principal_name, "
-                    "is_published = excluded.is_published, "
-                    "published_at = excluded.published_at, "
-                    "updated_at = CURRENT_TIMESTAMP"
-                ),
-                (
-                    school_id,
-                    classname,
-                    term,
-                    academic_year or '',
-                    teacher_id,
-                    resolved_teacher_name,
-                    resolved_principal_name,
-                    1 if is_published else 0,
-                    datetime.now().isoformat() if is_published else None,
-                ),
-            )
+        _set_result_published_with_cursor(
+            c=c,
+            school_id=school_id,
+            classname=classname,
+            term=term,
+            academic_year=academic_year,
+            teacher_id=teacher_id,
+            is_published=is_published,
+            teacher_name=teacher_name,
+            principal_name=principal_name,
+        )
 
 def is_result_published(school_id, classname, term, academic_year=''):
     with db_connection() as conn:
@@ -6011,7 +6037,17 @@ def publish_results_for_class_atomic(school_id, classname, term, teacher_id, aca
 def review_result_approval_request(school_id, classname, term, academic_year, admin_user_id, approve, review_note=''):
     ensure_result_publication_approval_columns()
     clean_note = (review_note or '').strip()
-    row = get_result_publication_row(school_id, classname, term, academic_year)
+    try:
+        row = get_result_publication_row(school_id, classname, term, academic_year)
+    except Exception as exc:
+        logging.exception(
+            "Failed to load publication row for approval review. school_id=%s class=%s term=%s year=%s",
+            school_id,
+            classname,
+            term,
+            academic_year,
+        )
+        return False, f'Failed to load submission for review: {exc}'
     if not row:
         return False, 'No submission found for this class.'
     if row.get('approval_status') != 'pending':
@@ -6021,12 +6057,22 @@ def review_result_approval_request(school_id, classname, term, academic_year, ad
 
     if approve:
         school = get_school(school_id) or {}
-        gate = get_class_attendance_publish_readiness(
-            school_id=school_id,
-            classname=classname,
-            term=term,
-            academic_year=(academic_year or (school.get('academic_year', '') or '')),
-        )
+        try:
+            gate = get_class_attendance_publish_readiness(
+                school_id=school_id,
+                classname=classname,
+                term=term,
+                academic_year=(academic_year or (school.get('academic_year', '') or '')),
+            )
+        except Exception as exc:
+            logging.exception(
+                "Attendance readiness check failed during approval. school_id=%s class=%s term=%s year=%s",
+                school_id,
+                classname,
+                term,
+                academic_year,
+            )
+            return False, f'Attendance readiness check failed: {exc}'
         if not gate.get('ready', False):
             msg = (gate.get('message') or '').strip()
             if not msg:
@@ -6354,6 +6400,38 @@ def load_published_class_results(school_id, classname, term, academic_year='', s
         })
     return out
 
+def get_published_students_for_class(school_id, classname, term, academic_year=''):
+    """List published students for one class and term."""
+    if not school_id or not classname or not term:
+        return []
+    with db_connection() as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """SELECT student_id, firstname, classname, term, COALESCE(academic_year, ''),
+                      average_marks, grade, status, published_at
+               FROM published_student_results
+               WHERE school_id = ? AND LOWER(classname) = LOWER(?) AND term = ?
+                 AND COALESCE(academic_year, '') = COALESCE(?, '')
+               ORDER BY firstname ASC, student_id ASC""",
+            (school_id, classname, term, academic_year or ''),
+        )
+        rows = c.fetchall()
+    out = []
+    for row in rows or []:
+        out.append({
+            'student_id': row[0] or '',
+            'firstname': row[1] or '',
+            'classname': row[2] or '',
+            'term': row[3] or '',
+            'academic_year': row[4] or '',
+            'average_marks': float(row[5] or 0),
+            'grade': row[6] or '',
+            'status': row[7] or '',
+            'published_at': row[8] or '',
+        })
+    return out
+
 def record_result_view(school_id, student_id, term, academic_year=''):
     """Mark a published result as viewed by student."""
     if not school_id or not student_id or not term:
@@ -6447,7 +6525,6 @@ def get_school_publication_statuses(school_id, term, academic_year='', assignmen
         if (a.get('term') or '') == term and (a.get('academic_year') or '') == (academic_year or '')
     ]
     classes = [a.get('classname', '') for a in assignments if a.get('classname')]
-    counts_by_class = get_class_published_view_counts(school_id, term, academic_year, classes)
 
     publication_rows = {}
     with db_connection() as conn:
@@ -6455,7 +6532,7 @@ def get_school_publication_statuses(school_id, term, academic_year='', assignmen
         if has_approval_cols:
             db_execute(
                 c,
-                """SELECT classname, teacher_id, is_published, published_at,
+                """SELECT classname, teacher_id, teacher_name, is_published, published_at,
                           COALESCE(approval_status, 'not_submitted'),
                           submitted_at, submitted_by, reviewed_at, reviewed_by, review_note
                    FROM result_publications
@@ -6465,19 +6542,20 @@ def get_school_publication_statuses(school_id, term, academic_year='', assignmen
             for row in c.fetchall():
                 publication_rows[row[0]] = {
                     'teacher_id': row[1],
-                    'is_published': bool(int(row[2] or 0)),
-                    'published_at': row[3] or '',
-                    'approval_status': row[4] or 'not_submitted',
-                    'submitted_at': row[5] or '',
-                    'submitted_by': row[6] or '',
-                    'reviewed_at': row[7] or '',
-                    'reviewed_by': row[8] or '',
-                    'review_note': row[9] or '',
+                    'teacher_name': row[2] or '',
+                    'is_published': bool(int(row[3] or 0)),
+                    'published_at': row[4] or '',
+                    'approval_status': row[5] or 'not_submitted',
+                    'submitted_at': row[6] or '',
+                    'submitted_by': row[7] or '',
+                    'reviewed_at': row[8] or '',
+                    'reviewed_by': row[9] or '',
+                    'review_note': row[10] or '',
                 }
         else:
             db_execute(
                 c,
-                """SELECT classname, teacher_id, is_published, published_at
+                """SELECT classname, teacher_id, teacher_name, is_published, published_at
                    FROM result_publications
                    WHERE school_id = ? AND term = ? AND COALESCE(academic_year, '') = COALESCE(?, '')""",
                 (school_id, term, academic_year or ''),
@@ -6485,26 +6563,56 @@ def get_school_publication_statuses(school_id, term, academic_year='', assignmen
             for row in c.fetchall():
                 publication_rows[row[0]] = {
                     'teacher_id': row[1],
-                    'is_published': bool(int(row[2] or 0)),
-                    'published_at': row[3] or '',
-                    'approval_status': 'approved' if bool(int(row[2] or 0)) else 'not_submitted',
+                    'teacher_name': row[2] or '',
+                    'is_published': bool(int(row[3] or 0)),
+                    'published_at': row[4] or '',
+                    'approval_status': 'approved' if bool(int(row[3] or 0)) else 'not_submitted',
                     'submitted_at': '',
                     'submitted_by': '',
                     'reviewed_at': '',
                     'reviewed_by': '',
                     'review_note': '',
                 }
+    all_classes = sorted(
+        {c for c in classes if c} | {c for c in publication_rows.keys() if c},
+        key=lambda value: str(value).lower(),
+    )
+    counts_by_class = get_class_published_view_counts(school_id, term, academic_year, all_classes)
 
     out = []
+    seen_classes = set()
     for a in assignments:
         classname = a.get('classname', '')
         pub = publication_rows.get(classname, {})
         cnt = counts_by_class.get(classname, {})
+        seen_classes.add(classname)
         out.append({
             'classname': classname,
-            'teacher_name': a.get('teacher_name', ''),
+            'teacher_name': a.get('teacher_name', '') or pub.get('teacher_name', ''),
             'teacher_id': a.get('teacher_id', ''),
             'term': term,
+            'academic_year': academic_year or '',
+            'is_published': bool(pub.get('is_published', False)),
+            'published_at': pub.get('published_at', ''),
+            'approval_status': pub.get('approval_status', 'not_submitted'),
+            'submitted_at': pub.get('submitted_at', ''),
+            'submitted_by': pub.get('submitted_by', ''),
+            'reviewed_at': pub.get('reviewed_at', ''),
+            'reviewed_by': pub.get('reviewed_by', ''),
+            'review_note': pub.get('review_note', ''),
+            'published_count': int(cnt.get('published_count', 0)),
+            'viewed_count': int(cnt.get('viewed_count', 0)),
+        })
+    for classname, pub in publication_rows.items():
+        if not classname or classname in seen_classes:
+            continue
+        cnt = counts_by_class.get(classname, {})
+        out.append({
+            'classname': classname,
+            'teacher_name': pub.get('teacher_name', ''),
+            'teacher_id': pub.get('teacher_id', ''),
+            'term': term,
+            'academic_year': academic_year or '',
             'is_published': bool(pub.get('is_published', False)),
             'published_at': pub.get('published_at', ''),
             'approval_status': pub.get('approval_status', 'not_submitted'),
@@ -8207,6 +8315,15 @@ def rollover_school_term_data_with_cursor(c, school_id, from_term, to_term, from
            FROM class_assignments
            WHERE school_id = ? AND LOWER(term) = LOWER(?) AND COALESCE(academic_year, '') = COALESCE(?, '')
            ON CONFLICT(school_id, classname, term, academic_year) DO NOTHING""",
+        (dst_term, dst_year, school_id, src_term, src_year),
+    )
+    db_execute(
+        c,
+        """INSERT INTO teacher_subject_assignments (school_id, teacher_id, classname, subject, term, academic_year)
+           SELECT school_id, teacher_id, classname, subject, ?, ?
+           FROM teacher_subject_assignments
+           WHERE school_id = ? AND LOWER(term) = LOWER(?) AND COALESCE(academic_year, '') = COALESCE(?, '')
+           ON CONFLICT(school_id, classname, subject, term, academic_year) DO NOTHING""",
         (dst_term, dst_year, school_id, src_term, src_year),
     )
     promoted_reset_sql = 'FALSE' if students_promoted_is_boolean() else '0'
@@ -10961,6 +11078,148 @@ def school_admin_dashboard():
                          missing_score_alerts=missing_score_alerts,
                          approval_workflow_enabled=approval_workflow_enabled)
 
+
+@app.route('/school-admin/messages')
+def school_admin_messages():
+    if session.get('role') != 'school_admin':
+        return redirect(url_for('login'))
+
+    school_id = session.get('school_id')
+    school = get_school(school_id) or {}
+    current_term = get_current_term(school)
+    current_year = (school or {}).get('academic_year', '')
+    class_counts = get_student_count_by_class(school_id) or {}
+
+    try:
+        class_options = sorted(
+            {str(name).strip() for name in get_school_classnames(school_id) if str(name).strip()}
+            | {str(name).strip() for name in class_counts.keys() if str(name).strip()},
+            key=lambda value: str(value).lower(),
+        )
+    except Exception:
+        class_options = sorted(
+            [str(name).strip() for name in class_counts.keys() if str(name).strip()],
+            key=lambda value: str(value).lower(),
+        )
+
+    try:
+        subject_assignments = get_teacher_subject_assignments(
+            school_id,
+            academic_year=current_year,
+        )
+    except Exception as exc:
+        logging.warning("Failed to load teacher subject assignments for messages page: %s", exc)
+        subject_assignments = []
+    subject_options = sorted(
+        {
+            normalize_subject_name((row.get('subject') or '').strip())
+            for row in (subject_assignments or [])
+            if normalize_subject_name((row.get('subject') or '').strip())
+        },
+        key=lambda value: str(value).lower(),
+    )
+
+    try:
+        student_message_rows = get_school_student_messages(school_id, limit=40)
+    except Exception as exc:
+        logging.warning("Failed to load school student messages for messages page: %s", exc)
+        student_message_rows = []
+    try:
+        teacher_message_rows = get_school_teacher_messages(school_id, limit=40)
+    except Exception as exc:
+        logging.warning("Failed to load school teacher messages for messages page: %s", exc)
+        teacher_message_rows = []
+
+    school_message_total = len(student_message_rows or []) + len(teacher_message_rows or [])
+
+    return render_template(
+        'school/school_admin_messages.html',
+        school=school,
+        current_term=current_term,
+        current_year=current_year,
+        class_options=class_options,
+        subject_options=subject_options,
+        student_message_rows=student_message_rows,
+        teacher_message_rows=teacher_message_rows,
+        school_message_total=school_message_total,
+    )
+
+@app.route('/school-admin/publish-results')
+def school_admin_publish_results():
+    if session.get('role') != 'school_admin':
+        return redirect(url_for('login'))
+
+    school_id = session.get('school_id')
+    school = get_school(school_id) or {}
+    current_term = get_current_term(school)
+    current_year = (school or {}).get('academic_year', '')
+    assignments = get_class_assignments(school_id)
+    publication_statuses = get_school_publication_statuses(
+        school_id,
+        current_term,
+        current_year,
+        assignments=assignments,
+    )
+    approval_workflow_enabled = result_publication_has_approval_columns()
+    try:
+        student_message_rows = get_school_student_messages(school_id, limit=12)
+    except Exception as exc:
+        logging.warning("Failed to load school student messages for publish page badge: %s", exc)
+        student_message_rows = []
+    try:
+        teacher_message_rows = get_school_teacher_messages(school_id, limit=12)
+    except Exception as exc:
+        logging.warning("Failed to load school teacher messages for publish page badge: %s", exc)
+        teacher_message_rows = []
+    school_message_total = len(student_message_rows or []) + len(teacher_message_rows or [])
+    return render_template(
+        'school/school_admin_publish_results.html',
+        school=school,
+        current_term=current_term,
+        current_year=current_year,
+        publication_statuses=publication_statuses,
+        approval_workflow_enabled=approval_workflow_enabled,
+        school_message_total=school_message_total,
+    )
+
+@app.route('/school-admin/publish-results/corrections')
+def school_admin_publish_results_corrections():
+    if session.get('role') != 'school_admin':
+        return redirect(url_for('login'))
+
+    school_id = session.get('school_id')
+    school = get_school(school_id) or {}
+    classname = (request.args.get('classname', '') or '').strip()
+    term = (request.args.get('term', '') or '').strip() or get_current_term(school)
+    academic_year = (request.args.get('academic_year', '') or '').strip() or ((school or {}).get('academic_year', '') or '')
+    if not classname:
+        flash('Class is required to open correction list.', 'error')
+        return redirect(url_for('school_admin_publish_results'))
+    students = get_published_students_for_class(
+        school_id=school_id,
+        classname=classname,
+        term=term,
+        academic_year=academic_year,
+    )
+    term_token = _term_token(academic_year, term)
+    school_message_total = 0
+    try:
+        student_message_rows = get_school_student_messages(school_id, limit=12)
+        teacher_message_rows = get_school_teacher_messages(school_id, limit=12)
+        school_message_total = len(student_message_rows or []) + len(teacher_message_rows or [])
+    except Exception:
+        school_message_total = 0
+    return render_template(
+        'school/school_admin_publish_result_corrections.html',
+        school=school,
+        classname=classname,
+        term=term,
+        academic_year=academic_year,
+        term_token=term_token,
+        students=students,
+        school_message_total=school_message_total,
+    )
+
 @app.route('/school-admin/term-programs', methods=['GET'])
 def school_admin_term_programs():
     if session.get('role') != 'school_admin':
@@ -11837,6 +12096,13 @@ def school_admin_settings():
                 if exam_score_max > 100:
                     flash(f'{level.upper()} objective + theory maxima must not exceed 100.', 'error')
                     return redirect(url_for('school_admin_settings'))
+            if (test_score_max + exam_score_max) > 100:
+                flash(
+                    f'{level.upper()} total test + exam maxima must not exceed 100 '
+                    f'(current: test={test_score_max}, exam={exam_score_max}).',
+                    'error',
+                )
+                return redirect(url_for('school_admin_settings'))
             assessment_updates.append({
                 'level': level,
                 'exam_mode': mode,
@@ -13740,15 +14006,15 @@ def school_admin_send_student_message():
     elif target_mode == 'class':
         if not target_classname:
             flash('Select class target for this message.', 'error')
-            return redirect(url_for('school_admin_dashboard'))
+            return redirect(url_for('school_admin_messages'))
         target_stream = ''
     else:  # stream
         if not target_classname:
             flash('Select class for stream-targeted message.', 'error')
-            return redirect(url_for('school_admin_dashboard'))
+            return redirect(url_for('school_admin_messages'))
         if target_stream not in {'Science', 'Art', 'Commercial'}:
             flash('Select a valid stream target (Science, Art, Commercial).', 'error')
-            return redirect(url_for('school_admin_dashboard'))
+            return redirect(url_for('school_admin_messages'))
 
     try:
         create_student_message(
@@ -13763,7 +14029,7 @@ def school_admin_send_student_message():
         flash('Student message sent successfully.', 'success')
     except Exception as exc:
         flash(f'Failed to send student message: {exc}', 'error')
-    return redirect(url_for('school_admin_dashboard'))
+    return redirect(url_for('school_admin_messages'))
 
 @app.route('/school-admin/send-teacher-message', methods=['POST'])
 def school_admin_send_teacher_message():
@@ -13785,17 +14051,17 @@ def school_admin_send_teacher_message():
     elif target_mode == 'class':
         if not target_classname:
             flash('Select class target for teacher message.', 'error')
-            return redirect(url_for('school_admin_dashboard'))
+            return redirect(url_for('school_admin_messages'))
         target_subject = ''
     elif target_mode == 'subject':
         if not target_subject:
             flash('Select subject target for teacher message.', 'error')
-            return redirect(url_for('school_admin_dashboard'))
+            return redirect(url_for('school_admin_messages'))
         target_classname = ''
     else:
         if not target_classname or not target_subject:
             flash('Select both class and subject for this teacher message target.', 'error')
-            return redirect(url_for('school_admin_dashboard'))
+            return redirect(url_for('school_admin_messages'))
     try:
         create_teacher_message(
             school_id=school_id,
@@ -13809,7 +14075,7 @@ def school_admin_send_teacher_message():
         flash('Teacher message sent successfully.', 'success')
     except Exception as exc:
         flash(f'Failed to send teacher message: {exc}', 'error')
-    return redirect(url_for('school_admin_dashboard'))
+    return redirect(url_for('school_admin_messages'))
 
 @app.route('/school-admin/toggle-operations', methods=['POST'])
 def school_admin_toggle_operations():
@@ -14406,13 +14672,13 @@ def teacher_mark_message_read():
         message_id = int(message_id_raw)
     except Exception:
         flash('Invalid message selection.', 'error')
-        return redirect(url_for('teacher_dashboard'))
+        return redirect(url_for('teacher_messages'))
     changed = mark_teacher_message_read(school_id, teacher_id, message_id)
     if changed:
         flash('Notification marked as read.', 'success')
     else:
         flash('Unable to update notification status.', 'warning')
-    return redirect(url_for('teacher_dashboard'))
+    return redirect(url_for('teacher_messages'))
 
 @app.route('/teacher/messages/mark-all-read', methods=['POST'])
 def teacher_mark_all_messages_read():
@@ -14442,7 +14708,52 @@ def teacher_mark_all_messages_read():
         flash('All notifications marked as read.', 'success')
     else:
         flash('No visible notifications to update.', 'warning')
-    return redirect(url_for('teacher_dashboard'))
+    return redirect(url_for('teacher_messages'))
+
+
+@app.route('/teacher/messages')
+def teacher_messages():
+    if session.get('role') != 'teacher':
+        return redirect(url_for('login'))
+
+    school_id = session.get('school_id')
+    teacher_id = session.get('user_id')
+    school = get_school(school_id) or {}
+    current_term = get_current_term(school)
+    current_year = (school.get('academic_year', '') or '').strip()
+    classes = get_teacher_classes(school_id, teacher_id, term=current_term, academic_year=current_year)
+    subject_rows = get_teacher_subject_assignments(
+        school_id,
+        teacher_id=teacher_id,
+        term=current_term,
+        academic_year=current_year,
+    )
+    subject_set = {normalize_subject_name(row.get('subject', '')) for row in subject_rows if normalize_subject_name(row.get('subject', ''))}
+    class_set = sorted(set(classes) | {str(row.get('classname') or '').strip() for row in subject_rows if (row.get('classname') or '').strip()})
+    teacher_messages = get_teacher_messages_for_teacher(
+        school_id=school_id,
+        teacher_id=teacher_id,
+        classes=class_set,
+        subjects=sorted(subject_set),
+        limit=80,
+    )
+    unread_teacher_messages = sum(1 for row in teacher_messages if not row.get('is_read'))
+    teacher_profile = get_teachers(school_id).get(teacher_id, {})
+    teacher_name = f"{teacher_profile.get('firstname', '')} {teacher_profile.get('lastname', '')}".strip() or teacher_id
+    teacher_profile_image = (teacher_profile.get('profile_image') or '').strip()
+
+    return render_template(
+        'teacher/teacher_messages.html',
+        school=school,
+        current_term=current_term,
+        current_year=current_year,
+        teacher_name=teacher_name,
+        teacher_profile_image=teacher_profile_image,
+        classes=classes,
+        selected_class=(classes[0] if classes else ''),
+        teacher_messages=teacher_messages,
+        unread_teacher_messages=unread_teacher_messages,
+    )
 
 @app.route('/teacher/attendance', methods=['GET', 'POST'])
 def teacher_attendance():
@@ -14886,24 +15197,37 @@ def school_admin_approve_results():
     school_id = session.get('school_id')
     admin_user_id = session.get('user_id')
     classname = request.form.get('classname', '').strip()
+    term = (request.form.get('term', '') or '').strip()
+    academic_year = (request.form.get('academic_year', '') or '').strip()
     if not classname:
         flash('Class is required.', 'error')
-        return redirect(url_for('school_admin_dashboard'))
+        return redirect(url_for('school_admin_publish_results'))
     school = get_school(school_id) or {}
-    current_term = get_current_term(school)
-    current_year = school.get('academic_year', '')
+    current_term = term or get_current_term(school)
+    current_year = academic_year or school.get('academic_year', '')
     review_note = (request.form.get('review_note', '') or '').strip()
-    ok, message = review_result_approval_request(
-        school_id=school_id,
-        classname=classname,
-        term=current_term,
-        academic_year=current_year,
-        admin_user_id=admin_user_id,
-        approve=True,
-        review_note=review_note,
-    )
+    try:
+        ok, message = review_result_approval_request(
+            school_id=school_id,
+            classname=classname,
+            term=current_term,
+            academic_year=current_year,
+            admin_user_id=admin_user_id,
+            approve=True,
+            review_note=review_note,
+        )
+    except Exception as exc:
+        logging.exception(
+            "Unhandled error while approving results. school_id=%s class=%s term=%s year=%s admin=%s",
+            school_id,
+            classname,
+            current_term,
+            current_year,
+            admin_user_id,
+        )
+        ok, message = False, f'Approval failed due to a server error: {exc}'
     flash(message, 'success' if ok else 'error')
-    return redirect(url_for('school_admin_dashboard'))
+    return redirect(url_for('school_admin_publish_results'))
 
 @app.route('/school-admin/reject-results', methods=['POST'])
 def school_admin_reject_results():
@@ -14912,27 +15236,40 @@ def school_admin_reject_results():
     school_id = session.get('school_id')
     admin_user_id = session.get('user_id')
     classname = request.form.get('classname', '').strip()
+    term = (request.form.get('term', '') or '').strip()
+    academic_year = (request.form.get('academic_year', '') or '').strip()
     if not classname:
         flash('Class is required.', 'error')
-        return redirect(url_for('school_admin_dashboard'))
+        return redirect(url_for('school_admin_publish_results'))
     school = get_school(school_id) or {}
-    current_term = get_current_term(school)
-    current_year = school.get('academic_year', '')
+    current_term = term or get_current_term(school)
+    current_year = academic_year or school.get('academic_year', '')
     review_note = (request.form.get('review_note', '') or '').strip()
     if not review_note:
         flash('Rejection reason is required.', 'error')
-        return redirect(url_for('school_admin_dashboard'))
-    ok, message = review_result_approval_request(
-        school_id=school_id,
-        classname=classname,
-        term=current_term,
-        academic_year=current_year,
-        admin_user_id=admin_user_id,
-        approve=False,
-        review_note=review_note,
-    )
+        return redirect(url_for('school_admin_publish_results'))
+    try:
+        ok, message = review_result_approval_request(
+            school_id=school_id,
+            classname=classname,
+            term=current_term,
+            academic_year=current_year,
+            admin_user_id=admin_user_id,
+            approve=False,
+            review_note=review_note,
+        )
+    except Exception as exc:
+        logging.exception(
+            "Unhandled error while rejecting results. school_id=%s class=%s term=%s year=%s admin=%s",
+            school_id,
+            classname,
+            current_term,
+            current_year,
+            admin_user_id,
+        )
+        ok, message = False, f'Rejection failed due to a server error: {exc}'
     flash(message, 'success' if ok else 'error')
-    return redirect(url_for('school_admin_dashboard'))
+    return redirect(url_for('school_admin_publish_results'))
 
 @app.route('/teacher/allocate-stream', methods=['GET', 'POST'])
 def teacher_allocate_stream():
@@ -15234,6 +15571,13 @@ def teacher_enter_scores():
             
             # Calculate overall
             subject_scores['overall_mark'] = subject_overall_mark(subject_scores)
+            if subject_scores['overall_mark'] > 100:
+                flash(
+                    f'Total score for {subject} exceeds 100. '
+                    'Reduce scores or adjust school test/exam maxima.',
+                    'error',
+                )
+                return redirect(url_for('teacher_enter_scores', **redirect_kwargs))
             subject_scores['total_score'] = subject_scores['overall_mark']
             
             # Grade
@@ -15590,6 +15934,11 @@ def teacher_upload_csv():
                     subject_scores['total_exam'] = 0
 
                 subject_scores['overall_mark'] = float(subject_scores.get('total_test', 0) or 0) + float(subject_scores.get('total_exam', 0) or 0)
+                if subject_scores['overall_mark'] > 100:
+                    raise ValueError(
+                        f'Row {idx}: Total score for {student_id} {subject_key} exceeds 100. '
+                        'Check test/exam limits or score values.'
+                    )
                 subject_scores['total_score'] = subject_scores['overall_mark']
                 subject_scores['grade'] = grade_from_score(subject_scores['overall_mark'], grade_cfg)
                 existing_scores[subject_key] = subject_scores
@@ -16001,6 +16350,46 @@ def student_dashboard():
         unread_student_messages=unread_student_messages,
     )
 
+
+@app.route('/student/messages')
+def student_messages():
+    if session.get('role') != 'student':
+        return redirect(url_for('login'))
+
+    school_id = session.get('school_id')
+    student_id = session.get('user_id')
+    student = load_student(school_id, student_id) or {}
+    school = get_school(school_id) or {}
+    current_term = get_current_term(school)
+    current_year = (school or {}).get('academic_year', '')
+
+    message_rows = get_student_messages_for_student(
+        school_id=school_id,
+        classname=student.get('classname', ''),
+        stream=student.get('stream', ''),
+        student_id=student_id,
+        limit=80,
+    )
+    unread_student_messages = sum(1 for row in message_rows if not row.get('is_read'))
+
+    student_view = {
+        'firstname': student.get('firstname', ''),
+        'student_id': student_id,
+        'classname': student.get('classname', ''),
+        'term': current_term,
+        'stream': student.get('stream', ''),
+    }
+
+    return render_template(
+        'student/student_messages.html',
+        school=school,
+        student=student_view,
+        student_messages=message_rows,
+        unread_student_messages=unread_student_messages,
+        current_year=current_year,
+    )
+
+
 @app.route('/student/messages/mark-read', methods=['POST'])
 def student_mark_message_read():
     if session.get('role') != 'student':
@@ -16013,7 +16402,7 @@ def student_mark_message_read():
         message_id = int(message_id_raw)
     except Exception:
         flash('Invalid message selection.', 'error')
-        return redirect(url_for('student_dashboard'))
+        return redirect(url_for('student_messages'))
     changed = mark_student_message_read(
         school_id=school_id,
         student_id=student_id,
@@ -16025,7 +16414,7 @@ def student_mark_message_read():
         flash('Notification marked as read.', 'success')
     else:
         flash('Message not found or not visible to your account.', 'error')
-    return redirect(url_for('student_dashboard'))
+    return redirect(url_for('student_messages'))
 
 @app.route('/student/messages/mark-all-read', methods=['POST'])
 def student_mark_all_messages_read():
@@ -16044,7 +16433,7 @@ def student_mark_all_messages_read():
         flash('All notifications marked as read.', 'success')
     else:
         flash('No visible notifications to update.', 'warning')
-    return redirect(url_for('student_dashboard'))
+    return redirect(url_for('student_messages'))
 
 @app.route('/student/change-password', methods=['GET', 'POST'])
 def student_change_password():
@@ -16562,12 +16951,12 @@ def parent_mark_message_read():
     parent_phone = session.get('parent_phone', '')
     if not school_id:
         flash('Invalid message selection.', 'error')
-        return redirect(url_for('parent_dashboard'))
+        return redirect(url_for('parent_messages'))
     try:
         message_id = int(message_id_raw)
     except Exception:
         flash('Invalid message selection.', 'error')
-        return redirect(url_for('parent_dashboard'))
+        return redirect(url_for('parent_messages'))
     allowed_keys = _parent_allowed_student_keys()
     children = []
     for key in sorted(allowed_keys):
@@ -16590,13 +16979,13 @@ def parent_mark_message_read():
     }
     if (school_id, message_id) not in allowed_pairs:
         flash('You are not allowed to update that notification.', 'error')
-        return redirect(url_for('parent_dashboard'))
+        return redirect(url_for('parent_messages'))
     changed = mark_parent_message_read(school_id, parent_phone, message_id)
     if changed:
         flash('Notification marked as read.', 'success')
     else:
         flash('Unable to update notification status.', 'warning')
-    return redirect(url_for('parent_dashboard'))
+    return redirect(url_for('parent_messages'))
 
 @app.route('/parent/messages/mark-all-read', methods=['POST'])
 def parent_mark_all_messages_read():
@@ -16625,7 +17014,76 @@ def parent_mark_all_messages_read():
         flash('All notifications marked as read.', 'success')
     else:
         flash('No visible notifications to update.', 'warning')
-    return redirect(url_for('parent_dashboard'))
+    return redirect(url_for('parent_messages'))
+
+
+@app.route('/parent/messages')
+def parent_messages():
+    if session.get('role') != 'parent':
+        return redirect(url_for('parent_portal'))
+    allowed_keys = _parent_allowed_student_keys()
+    if not allowed_keys:
+        flash('Parent session expired. Please login again.', 'error')
+        return redirect(url_for('parent_portal'))
+
+    key_pairs = []
+    student_ids_by_school = {}
+    for key in sorted(allowed_keys):
+        if '::' not in key:
+            continue
+        school_id, student_id = key.split('::', 1)
+        school_id = (school_id or '').strip()
+        student_id = (student_id or '').strip()
+        if not school_id or not student_id:
+            continue
+        key_pairs.append((key, school_id, student_id))
+        student_ids_by_school.setdefault(school_id, []).append(student_id)
+
+    schools_by_id = {sid: (get_school(sid) or {}) for sid in student_ids_by_school.keys()}
+    students_by_key = {}
+    for sid, student_ids in student_ids_by_school.items():
+        rows = load_students_for_student_ids(sid, student_ids)
+        for student_id, student in rows.items():
+            students_by_key[f'{sid}::{student_id}'] = student
+
+    children = []
+    for key, school_id, student_id in key_pairs:
+        student = students_by_key.get(key)
+        if not student:
+            continue
+        school = schools_by_id.get(school_id, {})
+        children.append({
+            'key': key,
+            'school_id': school_id,
+            'school_name': (school or {}).get('school_name', school_id),
+            'student_id': student_id,
+            'firstname': student.get('firstname', ''),
+            'classname': student.get('classname', ''),
+            'stream': student.get('stream', ''),
+        })
+    children.sort(key=lambda row: ((row.get('firstname') or '').lower(), (row.get('student_id') or '').lower()))
+
+    parent_theme_accent = '#1F7A8C'
+    if children:
+        first_school_id = (children[0].get('school_id') or '').strip()
+        first_school = schools_by_id.get(first_school_id, {}) if first_school_id else {}
+        parent_theme_accent = normalize_hex_color(first_school.get('theme_accent_color', ''), '#1F7A8C')
+
+    parent_messages = get_parent_messages_for_children(
+        parent_phone=session.get('parent_phone', ''),
+        children=children,
+        limit_per_school=120,
+    )
+    unread_parent_messages = sum(1 for row in parent_messages if not row.get('is_read'))
+
+    return render_template(
+        'parent/parent_messages.html',
+        parent_phone=session.get('parent_phone', ''),
+        parent_theme_accent=parent_theme_accent,
+        children=children,
+        parent_messages=parent_messages,
+        unread_parent_messages=unread_parent_messages,
+    )
 
 
 @app.route('/parent/student-result')
@@ -17093,6 +17551,149 @@ def teacher_student_result():
         now=datetime.now(),
     )
 
+@app.route('/parent/compare-results')
+def parent_compare_results():
+    if session.get('role') != 'parent':
+        return redirect(url_for('parent_portal'))
+    student_key = (request.args.get('student_key', '') or '').strip()
+    allowed = _parent_allowed_student_keys()
+    if not student_key or student_key not in allowed or '::' not in student_key:
+        flash('Student access is not allowed for this parent account.', 'error')
+        return redirect(url_for('parent_dashboard'))
+
+    school_id, student_id = student_key.split('::', 1)
+    school = get_school(school_id) or {}
+    student = load_student(school_id, student_id)
+    if not student:
+        flash('Student not found.', 'error')
+        return redirect(url_for('parent_dashboard'))
+
+    current_term = get_current_term(school)
+    current_year = (school or {}).get('academic_year', '')
+    published_terms = filter_visible_terms_for_student(
+        school,
+        get_published_terms_for_student(school_id, student_id),
+    )
+    published_terms_sorted = sorted(
+        list(published_terms or []),
+        key=lambda x: ((_academic_year_start(x.get('academic_year')) or 0), term_sort_value(x.get('term'))),
+    )
+    if len(published_terms_sorted) < 2:
+        flash('At least two published terms are required for comparison.', 'error')
+        return redirect(url_for('parent_view_result', student_key=student_key))
+
+    term_a_raw = (request.args.get('term_a', '') or '').strip()
+    term_b_raw = (request.args.get('term_b', '') or '').strip()
+    selected_a = resolve_requested_published_term(
+        published_terms_sorted,
+        term_a_raw,
+        current_term=current_term,
+        current_year=current_year,
+    ) if term_a_raw else published_terms_sorted[-2]
+    selected_b = resolve_requested_published_term(
+        published_terms_sorted,
+        term_b_raw,
+        current_term=current_term,
+        current_year=current_year,
+    ) if term_b_raw else published_terms_sorted[-1]
+    if not selected_a or not selected_b:
+        flash('Invalid terms selected for comparison.', 'error')
+        return redirect(url_for('parent_compare_results', student_key=student_key))
+    if selected_a.get('token') == selected_b.get('token'):
+        flash('Select two different terms to compare.', 'error')
+        return redirect(url_for('parent_compare_results', student_key=student_key))
+
+    snap_a = load_published_student_result(
+        school_id,
+        student_id,
+        selected_a.get('term', ''),
+        selected_a.get('academic_year', ''),
+    )
+    snap_b = load_published_student_result(
+        school_id,
+        student_id,
+        selected_b.get('term', ''),
+        selected_b.get('academic_year', ''),
+    )
+    if not snap_a or not snap_b:
+        flash('Could not load one or both selected term snapshots.', 'error')
+        return redirect(url_for('parent_view_result', student_key=student_key))
+
+    scores_a = snap_a.get('scores', {}) if isinstance(snap_a.get('scores', {}), dict) else {}
+    scores_b = snap_b.get('scores', {}) if isinstance(snap_b.get('scores', {}), dict) else {}
+    subjects = sorted(
+        set(normalize_subjects_list(list(scores_a.keys()))) | set(normalize_subjects_list(list(scores_b.keys()))),
+        key=lambda value: str(value).lower(),
+    )
+    grade_cfg = get_grade_config(school_id)
+    rows = []
+    for subject in subjects:
+        block_a = get_subject_score_block(scores_a, subject)
+        block_b = get_subject_score_block(scores_b, subject)
+        score_a = round(subject_overall_mark(block_a), 2) if isinstance(block_a, dict) and block_a else None
+        score_b = round(subject_overall_mark(block_b), 2) if isinstance(block_b, dict) and block_b else None
+        delta = round((score_b - score_a), 2) if isinstance(score_a, (int, float)) and isinstance(score_b, (int, float)) else None
+        grade_a = ''
+        grade_b = ''
+        if isinstance(block_a, dict) and block_a:
+            grade_a = (block_a.get('grade') or '').strip()
+        if isinstance(block_b, dict) and block_b:
+            grade_b = (block_b.get('grade') or '').strip()
+        if not grade_a and isinstance(score_a, (int, float)):
+            grade_a = grade_from_score(score_a, grade_cfg)
+        if not grade_b and isinstance(score_b, (int, float)):
+            grade_b = grade_from_score(score_b, grade_cfg)
+        rows.append({
+            'subject': subject,
+            'score_a': score_a,
+            'score_b': score_b,
+            'grade_a': grade_a,
+            'grade_b': grade_b,
+            'delta': delta,
+        })
+
+    avg_a = round(float(snap_a.get('average_marks', 0) or 0), 2)
+    avg_b = round(float(snap_b.get('average_marks', 0) or 0), 2)
+    avg_delta = round(avg_b - avg_a, 2)
+
+    parent_phone = session.get('parent_phone', '')
+    children = []
+    for key in sorted(allowed):
+        if '::' not in key:
+            continue
+        sid, stid = key.split('::', 1)
+        st = load_student(sid, stid)
+        if not st:
+            continue
+        children.append({
+            'key': key,
+            'firstname': st.get('firstname', stid),
+        })
+    parent_messages = get_parent_messages_for_children(
+        parent_phone=parent_phone,
+        children=children,
+        limit_per_school=80,
+    )
+    unread_parent_messages = sum(1 for row in parent_messages if not row.get('is_read'))
+    parent_theme_accent = normalize_hex_color((school or {}).get('theme_accent_color', ''), '#1F7A8C')
+
+    return render_template(
+        'parent/parent_compare_results.html',
+        school=school,
+        student_key=student_key,
+        student=student,
+        selected_a=selected_a,
+        selected_b=selected_b,
+        published_terms=published_terms_sorted,
+        rows=rows,
+        avg_a=avg_a,
+        avg_b=avg_b,
+        avg_delta=avg_delta,
+        children=children,
+        unread_parent_messages=unread_parent_messages,
+        parent_theme_accent=parent_theme_accent,
+    )
+
 @app.route('/school-admin/student-result')
 def school_admin_student_result():
     """School admin can view any student's published result and switch terms."""
@@ -17269,6 +17870,7 @@ def school_admin_correct_result():
     if not snapshot:
         flash('Published snapshot not found for correction.', 'error')
         return redirect(url_for('school_admin_student_result', student_id=sid, term=target_token))
+    exam_config = get_assessment_config_for_class(school_id, snapshot.get('classname', ''))
 
     if request.method == 'POST':
         correction_reason = (request.form.get('correction_reason', '') or '').strip()
@@ -17306,9 +17908,39 @@ def school_admin_correct_result():
             if total_test > total_value:
                 total_test = total_value
                 block['total_test'] = total_test
-            block['total_exam'] = round(max(0.0, total_value - total_test), 2)
-            if (block.get('exam_mode') or '').strip().lower() == 'combined':
+            exam_mode = ((block.get('exam_mode') or exam_config.get('exam_mode') or 'separate')).strip().lower()
+            exam_total_max = max(0.0, safe_float(exam_config.get('exam_score_max', 70), 70))
+            computed_total_exam = round(max(0.0, total_value - total_test), 2)
+            if computed_total_exam > exam_total_max:
+                flash(
+                    f'{subject} exam component cannot exceed {exam_total_max:g} for current exam configuration.',
+                    'error',
+                )
+                return redirect(url_for('school_admin_correct_result', student_id=sid, term=target_token))
+            block['total_exam'] = computed_total_exam
+            if exam_mode == 'combined':
+                block['objective'] = 0
+                block['theory'] = 0
                 block['exam_score'] = block['total_exam']
+                block['exam_mode'] = 'combined'
+            else:
+                objective_max = max(0.0, safe_float(exam_config.get('objective_max', 30), 30))
+                theory_max = max(0.0, safe_float(exam_config.get('theory_max', 40), 40))
+                objective = min(block['total_exam'], objective_max)
+                theory = round(block['total_exam'] - objective, 2)
+                if theory > theory_max:
+                    theory = theory_max
+                    objective = round(block['total_exam'] - theory, 2)
+                if objective < 0 or objective > objective_max or theory < 0 or theory > theory_max:
+                    flash(
+                        f'{subject} exam split does not fit configured objective/theory limits.',
+                        'error',
+                    )
+                    return redirect(url_for('school_admin_correct_result', student_id=sid, term=target_token))
+                block['objective'] = round(objective, 2)
+                block['theory'] = round(theory, 2)
+                block.pop('exam_score', None)
+                block['exam_mode'] = 'separate'
             block['overall_mark'] = total_value
             block['total_score'] = total_value
             block['grade'] = grade_from_score(total_value, grade_cfg)
@@ -17455,25 +18087,30 @@ def school_admin_unpublish_results():
         return redirect(fallback)
 
     pub_row = get_result_publication_row(school_id, classname, target_term, target_year) or {}
-    set_result_published(
-        school_id=school_id,
-        classname=classname,
-        term=target_term,
-        academic_year=target_year,
-        teacher_id=pub_row.get('teacher_id', '') or '',
-        is_published=False,
-        teacher_name=pub_row.get('teacher_name', '') or '',
-        principal_name=pub_row.get('principal_name', '') or '',
-    )
-    with db_connection(commit=True) as conn:
-        c = conn.cursor()
-        db_execute(
-            c,
-            """DELETE FROM published_student_results
-               WHERE school_id = ? AND LOWER(classname) = LOWER(?) AND term = ?
-                 AND COALESCE(academic_year, '') = COALESCE(?, '')""",
-            (school_id, classname, target_term, target_year or ''),
-        )
+    try:
+        with db_connection(commit=True) as conn:
+            c = conn.cursor()
+            _set_result_published_with_cursor(
+                c=c,
+                school_id=school_id,
+                classname=classname,
+                term=target_term,
+                academic_year=target_year,
+                teacher_id=pub_row.get('teacher_id', '') or '',
+                is_published=False,
+                teacher_name=pub_row.get('teacher_name', '') or '',
+                principal_name=pub_row.get('principal_name', '') or '',
+            )
+            db_execute(
+                c,
+                """DELETE FROM published_student_results
+                   WHERE school_id = ? AND LOWER(classname) = LOWER(?) AND term = ?
+                     AND COALESCE(academic_year, '') = COALESCE(?, '')""",
+                (school_id, classname, target_term, target_year or ''),
+            )
+    except Exception as exc:
+        flash(f'Failed to unpublish result: {exc}', 'error')
+        return redirect(fallback)
 
     flash(f'Unpublished {classname} ({target_term}). It is now hidden until republished.', 'success')
     return redirect(url_for('view_students', **{'class': classname, 'term': target_term}))
