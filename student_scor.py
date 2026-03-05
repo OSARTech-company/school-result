@@ -396,6 +396,25 @@ def db_execute(cursor, query, params=None):
         logging.error("Database Error: %s", e)
         raise
 
+def _is_transient_db_transport_error(exc):
+    """Best-effort detection of short-lived DB transport errors (SSL/socket drops)."""
+    text = (str(exc) or '').strip().lower()
+    markers = (
+        'ssl error',
+        'decryption failed',
+        'bad record mac',
+        'connection already closed',
+        'server closed the connection unexpectedly',
+        'ssl syscall error',
+        'could not receive data from server',
+        'terminating connection due to administrator command',
+        'connection reset by peer',
+        'broken pipe',
+        'eof detected',
+        'connection timed out',
+    )
+    return any(m in text for m in markers)
+
 def canonicalize_classname(value):
     """Canonical class key used for shared subject catalog (e.g. 'Primary 1' -> 'PRIMARY1')."""
     return re.sub(r'[^A-Za-z0-9]+', '', (value or '').strip()).upper()
@@ -15221,26 +15240,43 @@ def school_admin_approve_results():
     current_term = term or get_current_term(school)
     current_year = academic_year or school.get('academic_year', '')
     review_note = (request.form.get('review_note', '') or '').strip()
-    try:
-        ok, message = review_result_approval_request(
-            school_id=school_id,
-            classname=classname,
-            term=current_term,
-            academic_year=current_year,
-            admin_user_id=admin_user_id,
-            approve=True,
-            review_note=review_note,
-        )
-    except Exception as exc:
-        logging.exception(
-            "Unhandled error while approving results. school_id=%s class=%s term=%s year=%s admin=%s",
-            school_id,
-            classname,
-            current_term,
-            current_year,
-            admin_user_id,
-        )
-        ok, message = False, f'Approval failed due to a server error: {exc}'
+    ok = False
+    message = 'Approval failed.'
+    for attempt in range(2):
+        try:
+            ok, message = review_result_approval_request(
+                school_id=school_id,
+                classname=classname,
+                term=current_term,
+                academic_year=current_year,
+                admin_user_id=admin_user_id,
+                approve=True,
+                review_note=review_note,
+            )
+            break
+        except Exception as exc:
+            transient = _is_transient_db_transport_error(exc)
+            if transient and attempt == 0:
+                logging.warning(
+                    "Transient DB error during approve (retrying once). school_id=%s class=%s term=%s year=%s err=%s",
+                    school_id,
+                    classname,
+                    current_term,
+                    current_year,
+                    exc,
+                )
+                time.sleep(0.2)
+                continue
+            logging.exception(
+                "Unhandled error while approving results. school_id=%s class=%s term=%s year=%s admin=%s",
+                school_id,
+                classname,
+                current_term,
+                current_year,
+                admin_user_id,
+            )
+            ok, message = False, f'Approval failed due to a server error: {exc}'
+            break
     flash(message, 'success' if ok else 'error')
     return redirect(url_for('school_admin_publish_results'))
 
@@ -15263,26 +15299,43 @@ def school_admin_reject_results():
     if not review_note:
         flash('Rejection reason is required.', 'error')
         return redirect(url_for('school_admin_publish_results'))
-    try:
-        ok, message = review_result_approval_request(
-            school_id=school_id,
-            classname=classname,
-            term=current_term,
-            academic_year=current_year,
-            admin_user_id=admin_user_id,
-            approve=False,
-            review_note=review_note,
-        )
-    except Exception as exc:
-        logging.exception(
-            "Unhandled error while rejecting results. school_id=%s class=%s term=%s year=%s admin=%s",
-            school_id,
-            classname,
-            current_term,
-            current_year,
-            admin_user_id,
-        )
-        ok, message = False, f'Rejection failed due to a server error: {exc}'
+    ok = False
+    message = 'Rejection failed.'
+    for attempt in range(2):
+        try:
+            ok, message = review_result_approval_request(
+                school_id=school_id,
+                classname=classname,
+                term=current_term,
+                academic_year=current_year,
+                admin_user_id=admin_user_id,
+                approve=False,
+                review_note=review_note,
+            )
+            break
+        except Exception as exc:
+            transient = _is_transient_db_transport_error(exc)
+            if transient and attempt == 0:
+                logging.warning(
+                    "Transient DB error during reject (retrying once). school_id=%s class=%s term=%s year=%s err=%s",
+                    school_id,
+                    classname,
+                    current_term,
+                    current_year,
+                    exc,
+                )
+                time.sleep(0.2)
+                continue
+            logging.exception(
+                "Unhandled error while rejecting results. school_id=%s class=%s term=%s year=%s admin=%s",
+                school_id,
+                classname,
+                current_term,
+                current_year,
+                admin_user_id,
+            )
+            ok, message = False, f'Rejection failed due to a server error: {exc}'
+            break
     flash(message, 'success' if ok else 'error')
     return redirect(url_for('school_admin_publish_results'))
 
