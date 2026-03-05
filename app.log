@@ -25729,3 +25729,5 @@ LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
 2026-03-05 01:15:03,617 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
 2026-03-05 01:15:03,795 - WARNING -  * Debugger is active!
 2026-03-05 01:15:03,803 - INFO -  * Debugger PIN: 541-365-780
+2026-03-05 01:27:37,618 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-05 01:27:37,888 - INFO -  * Restarting with stat

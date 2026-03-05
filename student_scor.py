@@ -17553,146 +17553,161 @@ def teacher_student_result():
 
 @app.route('/parent/compare-results')
 def parent_compare_results():
-    if session.get('role') != 'parent':
-        return redirect(url_for('parent_portal'))
-    student_key = (request.args.get('student_key', '') or '').strip()
-    allowed = _parent_allowed_student_keys()
-    if not student_key or student_key not in allowed or '::' not in student_key:
-        flash('Student access is not allowed for this parent account.', 'error')
+    try:
+        if session.get('role') != 'parent':
+            return redirect(url_for('parent_portal'))
+        student_key = (request.args.get('student_key', '') or '').strip()
+        allowed = _parent_allowed_student_keys()
+        if not student_key or student_key not in allowed or '::' not in student_key:
+            flash('Student access is not allowed for this parent account.', 'error')
+            return redirect(url_for('parent_dashboard'))
+
+        school_id, student_id = student_key.split('::', 1)
+        school = get_school(school_id) or {}
+        student = load_student(school_id, student_id)
+        if not student:
+            flash('Student not found.', 'error')
+            return redirect(url_for('parent_dashboard'))
+
+        current_term = get_current_term(school)
+        current_year = (school or {}).get('academic_year', '')
+        published_terms = filter_visible_terms_for_student(
+            school,
+            get_published_terms_for_student(school_id, student_id),
+        )
+        published_terms_sorted = sorted(
+            list(published_terms or []),
+            key=lambda x: ((_academic_year_start(x.get('academic_year')) or 0), term_sort_value(x.get('term'))),
+        )
+        if len(published_terms_sorted) < 2:
+            flash('At least two published terms are required for comparison.', 'error')
+            return redirect(url_for('parent_view_result', student_key=student_key))
+
+        term_a_raw = (request.args.get('term_a', '') or '').strip()
+        term_b_raw = (request.args.get('term_b', '') or '').strip()
+        selected_a = resolve_requested_published_term(
+            published_terms_sorted,
+            term_a_raw,
+            current_term=current_term,
+            current_year=current_year,
+        ) if term_a_raw else published_terms_sorted[-2]
+        selected_b = resolve_requested_published_term(
+            published_terms_sorted,
+            term_b_raw,
+            current_term=current_term,
+            current_year=current_year,
+        ) if term_b_raw else published_terms_sorted[-1]
+        if not selected_a or not selected_b:
+            flash('Invalid terms selected for comparison.', 'error')
+            return redirect(url_for('parent_compare_results', student_key=student_key))
+        if selected_a.get('token') == selected_b.get('token'):
+            flash('Select two different terms to compare.', 'error')
+            return redirect(url_for('parent_compare_results', student_key=student_key))
+
+        snap_a = load_published_student_result(
+            school_id,
+            student_id,
+            selected_a.get('term', ''),
+            selected_a.get('academic_year', ''),
+        )
+        snap_b = load_published_student_result(
+            school_id,
+            student_id,
+            selected_b.get('term', ''),
+            selected_b.get('academic_year', ''),
+        )
+        if not snap_a or not snap_b:
+            flash('Could not load one or both selected term snapshots.', 'error')
+            return redirect(url_for('parent_view_result', student_key=student_key))
+
+        scores_a = snap_a.get('scores', {}) if isinstance(snap_a.get('scores', {}), dict) else {}
+        scores_b = snap_b.get('scores', {}) if isinstance(snap_b.get('scores', {}), dict) else {}
+        subjects = sorted(
+            set(normalize_subjects_list(list(scores_a.keys()))) | set(normalize_subjects_list(list(scores_b.keys()))),
+            key=lambda value: str(value).lower(),
+        )
+        grade_cfg = get_grade_config(school_id)
+        rows = []
+        for subject in subjects:
+            block_a = get_subject_score_block(scores_a, subject)
+            block_b = get_subject_score_block(scores_b, subject)
+            score_a = round(subject_overall_mark(block_a), 2) if isinstance(block_a, dict) and block_a else None
+            score_b = round(subject_overall_mark(block_b), 2) if isinstance(block_b, dict) and block_b else None
+            delta = round((score_b - score_a), 2) if isinstance(score_a, (int, float)) and isinstance(score_b, (int, float)) else None
+            grade_a = ''
+            grade_b = ''
+            if isinstance(block_a, dict) and block_a:
+                grade_a = (block_a.get('grade') or '').strip()
+            if isinstance(block_b, dict) and block_b:
+                grade_b = (block_b.get('grade') or '').strip()
+            if not grade_a and isinstance(score_a, (int, float)):
+                grade_a = grade_from_score(score_a, grade_cfg)
+            if not grade_b and isinstance(score_b, (int, float)):
+                grade_b = grade_from_score(score_b, grade_cfg)
+            rows.append({
+                'subject': subject,
+                'score_a': score_a,
+                'score_b': score_b,
+                'grade_a': grade_a,
+                'grade_b': grade_b,
+                'delta': delta,
+            })
+
+        avg_a = round(float(snap_a.get('average_marks', 0) or 0), 2)
+        avg_b = round(float(snap_b.get('average_marks', 0) or 0), 2)
+        avg_delta = round(avg_b - avg_a, 2)
+
+        parent_phone = session.get('parent_phone', '')
+        children = []
+        for key in sorted(allowed):
+            if '::' not in key:
+                continue
+            sid, stid = key.split('::', 1)
+            st = load_student(sid, stid)
+            school_row = get_school(sid) or {}
+            if not st:
+                continue
+            children.append({
+                'key': key,
+                'school_id': sid,
+                'school_name': school_row.get('school_name', sid),
+                'classname': st.get('classname', ''),
+                'stream': st.get('stream', ''),
+                'firstname': st.get('firstname', stid),
+            })
+        unread_parent_messages = 0
+        try:
+            parent_messages = get_parent_messages_for_children(
+                parent_phone=parent_phone,
+                children=children,
+                limit_per_school=80,
+            )
+            unread_parent_messages = sum(1 for row in parent_messages if not row.get('is_read'))
+        except Exception as exc:
+            logging.warning("Parent compare messages fetch failed: %s", exc)
+            unread_parent_messages = 0
+        parent_theme_accent = normalize_hex_color((school or {}).get('theme_accent_color', ''), '#1F7A8C')
+
+        return render_template(
+            'parent/parent_compare_results.html',
+            school=school,
+            student_key=student_key,
+            student=student,
+            selected_a=selected_a,
+            selected_b=selected_b,
+            published_terms=published_terms_sorted,
+            rows=rows,
+            avg_a=avg_a,
+            avg_b=avg_b,
+            avg_delta=avg_delta,
+            children=children,
+            unread_parent_messages=unread_parent_messages,
+            parent_theme_accent=parent_theme_accent,
+        )
+    except Exception as exc:
+        logging.exception("Parent compare results failed for student_key=%s", request.args.get('student_key', ''))
+        flash(f'Could not open term comparison: {exc}', 'error')
         return redirect(url_for('parent_dashboard'))
-
-    school_id, student_id = student_key.split('::', 1)
-    school = get_school(school_id) or {}
-    student = load_student(school_id, student_id)
-    if not student:
-        flash('Student not found.', 'error')
-        return redirect(url_for('parent_dashboard'))
-
-    current_term = get_current_term(school)
-    current_year = (school or {}).get('academic_year', '')
-    published_terms = filter_visible_terms_for_student(
-        school,
-        get_published_terms_for_student(school_id, student_id),
-    )
-    published_terms_sorted = sorted(
-        list(published_terms or []),
-        key=lambda x: ((_academic_year_start(x.get('academic_year')) or 0), term_sort_value(x.get('term'))),
-    )
-    if len(published_terms_sorted) < 2:
-        flash('At least two published terms are required for comparison.', 'error')
-        return redirect(url_for('parent_view_result', student_key=student_key))
-
-    term_a_raw = (request.args.get('term_a', '') or '').strip()
-    term_b_raw = (request.args.get('term_b', '') or '').strip()
-    selected_a = resolve_requested_published_term(
-        published_terms_sorted,
-        term_a_raw,
-        current_term=current_term,
-        current_year=current_year,
-    ) if term_a_raw else published_terms_sorted[-2]
-    selected_b = resolve_requested_published_term(
-        published_terms_sorted,
-        term_b_raw,
-        current_term=current_term,
-        current_year=current_year,
-    ) if term_b_raw else published_terms_sorted[-1]
-    if not selected_a or not selected_b:
-        flash('Invalid terms selected for comparison.', 'error')
-        return redirect(url_for('parent_compare_results', student_key=student_key))
-    if selected_a.get('token') == selected_b.get('token'):
-        flash('Select two different terms to compare.', 'error')
-        return redirect(url_for('parent_compare_results', student_key=student_key))
-
-    snap_a = load_published_student_result(
-        school_id,
-        student_id,
-        selected_a.get('term', ''),
-        selected_a.get('academic_year', ''),
-    )
-    snap_b = load_published_student_result(
-        school_id,
-        student_id,
-        selected_b.get('term', ''),
-        selected_b.get('academic_year', ''),
-    )
-    if not snap_a or not snap_b:
-        flash('Could not load one or both selected term snapshots.', 'error')
-        return redirect(url_for('parent_view_result', student_key=student_key))
-
-    scores_a = snap_a.get('scores', {}) if isinstance(snap_a.get('scores', {}), dict) else {}
-    scores_b = snap_b.get('scores', {}) if isinstance(snap_b.get('scores', {}), dict) else {}
-    subjects = sorted(
-        set(normalize_subjects_list(list(scores_a.keys()))) | set(normalize_subjects_list(list(scores_b.keys()))),
-        key=lambda value: str(value).lower(),
-    )
-    grade_cfg = get_grade_config(school_id)
-    rows = []
-    for subject in subjects:
-        block_a = get_subject_score_block(scores_a, subject)
-        block_b = get_subject_score_block(scores_b, subject)
-        score_a = round(subject_overall_mark(block_a), 2) if isinstance(block_a, dict) and block_a else None
-        score_b = round(subject_overall_mark(block_b), 2) if isinstance(block_b, dict) and block_b else None
-        delta = round((score_b - score_a), 2) if isinstance(score_a, (int, float)) and isinstance(score_b, (int, float)) else None
-        grade_a = ''
-        grade_b = ''
-        if isinstance(block_a, dict) and block_a:
-            grade_a = (block_a.get('grade') or '').strip()
-        if isinstance(block_b, dict) and block_b:
-            grade_b = (block_b.get('grade') or '').strip()
-        if not grade_a and isinstance(score_a, (int, float)):
-            grade_a = grade_from_score(score_a, grade_cfg)
-        if not grade_b and isinstance(score_b, (int, float)):
-            grade_b = grade_from_score(score_b, grade_cfg)
-        rows.append({
-            'subject': subject,
-            'score_a': score_a,
-            'score_b': score_b,
-            'grade_a': grade_a,
-            'grade_b': grade_b,
-            'delta': delta,
-        })
-
-    avg_a = round(float(snap_a.get('average_marks', 0) or 0), 2)
-    avg_b = round(float(snap_b.get('average_marks', 0) or 0), 2)
-    avg_delta = round(avg_b - avg_a, 2)
-
-    parent_phone = session.get('parent_phone', '')
-    children = []
-    for key in sorted(allowed):
-        if '::' not in key:
-            continue
-        sid, stid = key.split('::', 1)
-        st = load_student(sid, stid)
-        if not st:
-            continue
-        children.append({
-            'key': key,
-            'firstname': st.get('firstname', stid),
-        })
-    parent_messages = get_parent_messages_for_children(
-        parent_phone=parent_phone,
-        children=children,
-        limit_per_school=80,
-    )
-    unread_parent_messages = sum(1 for row in parent_messages if not row.get('is_read'))
-    parent_theme_accent = normalize_hex_color((school or {}).get('theme_accent_color', ''), '#1F7A8C')
-
-    return render_template(
-        'parent/parent_compare_results.html',
-        school=school,
-        student_key=student_key,
-        student=student,
-        selected_a=selected_a,
-        selected_b=selected_b,
-        published_terms=published_terms_sorted,
-        rows=rows,
-        avg_a=avg_a,
-        avg_b=avg_b,
-        avg_delta=avg_delta,
-        children=children,
-        unread_parent_messages=unread_parent_messages,
-        parent_theme_accent=parent_theme_accent,
-    )
 
 @app.route('/school-admin/student-result')
 def school_admin_student_result():
