@@ -2134,10 +2134,6 @@ def normalize_all_student_passwords(target_school_id=''):
         )
 
 if os.environ.get('RESET_STUDENT_PASSWORDS_ON_STARTUP', '').strip().lower() in ('1', 'true', 'yes'):
-    if not ALLOW_INSECURE_DEFAULTS:
-        raise RuntimeError(
-            "RESET_STUDENT_PASSWORDS_ON_STARTUP is only allowed when ALLOW_INSECURE_DEFAULTS is enabled."
-        )
     reset_school_id = (os.environ.get('RESET_STUDENT_PASSWORDS_SCHOOL_ID', '') or '').strip()
     if not reset_school_id:
         raise RuntimeError(
@@ -5959,17 +5955,6 @@ def publish_results_for_class_atomic(school_id, classname, term, teacher_id, aca
     with db_connection(commit=True) as conn:
         c = conn.cursor()
         behaviour_by_student = get_class_behaviour_assessments(school_id, classname, term, publish_year)
-        existing_principal_comment_by_student = {}
-        db_execute(
-            c,
-            """SELECT student_id, principal_comment
-               FROM published_student_results
-               WHERE school_id = ? AND LOWER(classname) = LOWER(?) AND term = ?
-                 AND COALESCE(academic_year, '') = COALESCE(?, '')""",
-            (school_id, classname, term, publish_year or ''),
-        )
-        for _sid, _comment in c.fetchall() or []:
-            existing_principal_comment_by_student[_sid] = (_comment or '').strip()
         for sid, student in class_students.items():
             scores = student.get('scores', {}) if isinstance(student.get('scores', {}), dict) else {}
             behaviour_payload = behaviour_by_student.get(sid, _default_behaviour_assessment())
@@ -5977,8 +5962,6 @@ def publish_results_for_class_atomic(school_id, classname, term, teacher_id, aca
             grade = grade_from_score(average_marks, grade_cfg)
             status = status_from_score(average_marks, grade_cfg)
             principal_comment = (student.get('principal_comment') or '').strip()
-            if not principal_comment:
-                principal_comment = (existing_principal_comment_by_student.get(sid, '') or '').strip()
             db_execute(
                 c,
                 """INSERT INTO published_student_results
@@ -10604,9 +10587,29 @@ def login():
             return render_template('shared/login.html', terms_read=terms_read)
 
         user = get_user(username)
+        # Legacy self-heal: if a student record exists but corresponding users row is missing,
+        # provision a student login with the configured default password.
+        if not user:
+            try:
+                resolved_school_id = find_student_school_id(username)
+            except Exception:
+                resolved_school_id = None
+            if resolved_school_id:
+                student_row = load_student(resolved_school_id, username)
+                if student_row:
+                    try:
+                        upsert_user(username, hash_password(DEFAULT_STUDENT_PASSWORD), 'student', resolved_school_id)
+                        user = get_user(username)
+                    except Exception as exc:
+                        logging.warning(
+                            "Student login auto-provision failed for username=%s school_id=%s: %s",
+                            username,
+                            resolved_school_id,
+                            exc,
+                        )
         
         if user and check_password(user['password_hash'], password):
-            role = user.get('role')
+            role = (user.get('role') or '').strip().lower()
             if role not in {'super_admin', 'school_admin', 'teacher', 'student'}:
                 register_failed_login('login', username, client_ip)
                 record_login_audit(username, role, user.get('school_id'), 'login', False, 'invalid_role')
@@ -10620,7 +10623,7 @@ def login():
                 mark_terms_accepted(user.get('username'))
 
             user_school_id = user.get('school_id')
-            if user.get('role') == 'student' and not user_school_id:
+            if role == 'student' and not user_school_id:
                 resolved_school_id = find_student_school_id(user.get('username'))
                 if resolved_school_id:
                     update_user_school_id_only(user.get('username'), resolved_school_id)

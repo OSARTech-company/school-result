@@ -25785,3 +25785,27 @@ LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
 2026-03-05 02:10:28,254 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
 2026-03-05 02:10:28,416 - WARNING -  * Debugger is active!
 2026-03-05 02:10:28,421 - INFO -  * Debugger PIN: 541-365-780
+2026-03-05 02:55:16,851 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-03-05 02:55:16,852 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-05 02:55:16,852 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-05 02:55:16,853 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-05 02:55:17,064 - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.1.112:5000
+2026-03-05 02:55:17,064 - INFO - [33mPress CTRL+C to quit[0m
+2026-03-05 02:55:17,067 - INFO -  * Restarting with stat
+2026-03-05 02:55:19,962 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-03-05 02:55:19,962 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-05 02:55:19,962 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-05 02:55:19,963 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-05 02:55:20,133 - WARNING -  * Debugger is active!
+2026-03-05 02:55:20,137 - INFO -  * Debugger PIN: 541-365-780
+2026-03-05 07:19:20,572 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-05 07:19:20,865 - INFO -  * Restarting with stat
+2026-03-05 07:19:22,450 - WARNING - ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.
+2026-03-05 07:19:22,450 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-05 07:19:22,450 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-05 07:19:22,450 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-05 07:19:22,577 - WARNING -  * Debugger is active!
+2026-03-05 07:19:22,580 - INFO -  * Debugger PIN: 541-365-780
