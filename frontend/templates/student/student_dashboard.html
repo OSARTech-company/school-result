@@ -117,10 +117,6 @@
                     <i class="fas fa-chart-bar"></i>
                     <span>View Results</span>
                 </a>
-                <a href="{{ url_for('parent_portal') }}" class="side-link">
-                    <i class="fas fa-user-friends"></i>
-                    <span>Parent Access</span>
-                </a>
                 <a href="{{ url_for('student_change_password') }}" class="side-link">
                     <i class="fas fa-key"></i>
                     <span>Change Password</span>
@@ -175,26 +171,44 @@
                 </div>
 
                 <div class="card">
-                    <h2><i class="fas fa-users"></i> Parent Access (Optional)</h2>
+                    <h2><i class="fas fa-users"></i> Parent Access</h2>
                     <p class="note no-margin">
-                        Add your parent/guardian phone number and password so they can login from the parent portal.
+                        Add parent/guardian login details. Parent 2 is optional.
                     </p>
                     {% if has_parent_access %}
-                    <p class="chip chip-success"><strong>Active:</strong> {{ parent_phone }}</p>
+                    <p class="chip chip-success">
+                        <strong>Active:</strong>
+                        Parent 1: {{ parent_phone or '-' }}{% if parent_gender %} ({{ parent_gender }}){% endif %}
+                        {% if parent_phone_2 %} | Parent 2: {{ parent_phone_2 }}{% if parent_gender_2 %} ({{ parent_gender_2 }}){% endif %}{% endif %}
+                    </p>
                     {% endif %}
                     <form method="post" action="{{ url_for('student_update_parent_access') }}">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <div class="grid">
-                            <input type="text" name="parent_phone" value="{{ parent_phone or '' }}" placeholder="Parent phone number">
-                            <input type="password" name="parent_password" placeholder="Parent password (min 6 chars)" autocomplete="new-password">
-                            <input type="password" name="confirm_parent_password" placeholder="Confirm parent password" autocomplete="new-password">
+                            <select name="parent_gender" required>
+                                <option value="">Parent 1 Gender</option>
+                                <option value="Male" {% if (parent_gender or '') == 'Male' %}selected{% endif %}>Male</option>
+                                <option value="Female" {% if (parent_gender or '') == 'Female' %}selected{% endif %}>Female</option>
+                            </select>
+                            <input type="text" name="parent_phone" value="{{ parent_phone or '' }}" placeholder="Parent 1 phone number" required>
+                            <input type="password" name="parent_password" placeholder="Parent 1 password (min 6 chars)" autocomplete="new-password" required>
+                            <input type="password" name="confirm_parent_password" placeholder="Confirm Parent 1 password" autocomplete="new-password" required>
+                        </div>
+                        <div class="grid mt-10">
+                            <select name="parent_gender_2">
+                                <option value="">Parent 2 Gender (Optional)</option>
+                                <option value="Male" {% if (parent_gender_2 or '') == 'Male' %}selected{% endif %}>Male</option>
+                                <option value="Female" {% if (parent_gender_2 or '') == 'Female' %}selected{% endif %}>Female</option>
+                            </select>
+                            <input type="text" name="parent_phone_2" value="{{ parent_phone_2 or '' }}" placeholder="Parent 2 phone number (optional)">
+                            <input type="password" name="parent_password_2" placeholder="Parent 2 password (optional)" autocomplete="new-password">
+                            <input type="password" name="confirm_parent_password_2" placeholder="Confirm Parent 2 password" autocomplete="new-password">
                         </div>
                         <p class="note mt-10">
                             Once added, parent access cannot be removed. You can only update phone/password.
                         </p>
                         <div class="mt-12">
                             <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Save Parent Access</button>
-                            <a href="{{ url_for('parent_portal') }}" class="btn btn-primary ml-10"><i class="fas fa-external-link-alt"></i> Open Parent Portal</a>
                         </div>
                     </form>
                 </div>

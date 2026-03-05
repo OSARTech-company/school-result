@@ -28,12 +28,10 @@
         {% endwith %}
         <div class="card">
             <h2><i class="fas fa-users"></i> Parent Portal Login</h2>
-            <p>Login with the parent phone number and password set by your child.</p>
+            <p>Login with parent phone and password. If multiple children are linked, you can access each child separately from your dashboard.</p>
             <form method="post" action="{{ url_for('parent_portal') }}">
                 <label for="parent_phone">Parent Phone</label>
                 <input class="input" id="parent_phone" name="parent_phone" type="text" required>
-                <label for="student_id">Student ID (optional)</label>
-                <input class="input" id="student_id" name="student_id" type="text" placeholder="Use if multiple children are linked">
                 <label for="password">Password</label>
                 <input class="input" id="password" name="password" type="password" required>
                 <button class="btn" type="submit"><i class="fas fa-sign-in-alt"></i> Login</button>

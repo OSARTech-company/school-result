@@ -28,11 +28,14 @@ from werkzeug.security import generate_password_hash, check_password_hash
 import mimetypes
 import time
 import urllib.request
+import threading
+from collections import deque
 
 import os
 import secrets
 import atexit
 from contextlib import contextmanager
+from functools import wraps
 
 import logging
 try:
@@ -314,10 +317,94 @@ def inject_teacher_nav_flags():
 def inject_first_login_tutorial_context():
     role = (session.get('first_login_tutorial_role') or session.get('role') or '').strip().lower()
     show = bool(session.get('show_first_login_tutorial')) and role in {'school_admin', 'teacher', 'student', 'parent'}
+    display_name = ''
+    if show and role == 'student':
+        school_id = (session.get('school_id') or '').strip()
+        student_id = (session.get('user_id') or '').strip()
+        if school_id and student_id:
+            try:
+                student_row = load_student(school_id, student_id)
+                display_name = (student_row or {}).get('firstname', '') or ''
+            except Exception:
+                display_name = ''
     return {
         'show_first_login_tutorial': show,
-        'first_login_tutorial': build_first_login_tutorial(role) if show else {},
+        'first_login_tutorial': build_first_login_tutorial(role, display_name=display_name) if show else {},
     }
+
+def _current_role():
+    return (session.get('role') or '').strip().lower()
+
+def enforce_role_access(allowed_roles, redirect_endpoint='login', message='You are not allowed to access this page.'):
+    role = _current_role()
+    normalized = {(r or '').strip().lower() for r in (allowed_roles or []) if (r or '').strip()}
+    if role in normalized:
+        return None
+    flash(message, 'error')
+    return redirect(url_for(redirect_endpoint))
+
+def require_roles(*allowed_roles, redirect_endpoint='login', message='You are not allowed to access this page.'):
+    """Decorator to enforce a centralized role-policy check on routes."""
+    def _decorator(fn):
+        @wraps(fn)
+        def _wrapped(*args, **kwargs):
+            blocked = enforce_role_access(allowed_roles, redirect_endpoint=redirect_endpoint, message=message)
+            if blocked is not None:
+                return blocked
+            return fn(*args, **kwargs)
+        return _wrapped
+    return _decorator
+
+def _env_int(name, default):
+    try:
+        return int(os.environ.get(name, default))
+    except Exception:
+        return int(default)
+
+RATE_LIMIT_ENABLED = os.environ.get('RATE_LIMIT_ENABLED', '1').strip().lower() in ('1', 'true', 'yes')
+RATE_LIMIT_LOGIN_PER_MIN = max(1, _env_int('RATE_LIMIT_LOGIN_PER_MIN', 25))
+RATE_LIMIT_PARENT_PORTAL_PER_MIN = max(1, _env_int('RATE_LIMIT_PARENT_PORTAL_PER_MIN', 20))
+RATE_LIMIT_CHECK_RESULT_PER_MIN = max(1, _env_int('RATE_LIMIT_CHECK_RESULT_PER_MIN', 25))
+RATE_LIMIT_MUTATION_PER_MIN = max(1, _env_int('RATE_LIMIT_MUTATION_PER_MIN', 40))
+_RATE_LIMIT_EVENTS = {}
+_RATE_LIMIT_LOCK = threading.Lock()
+
+def _rate_limit_consume(key, limit, window_seconds):
+    """Sliding-window in-memory rate limit."""
+    now_ts = time.time()
+    with _RATE_LIMIT_LOCK:
+        q = _RATE_LIMIT_EVENTS.get(key)
+        if q is None:
+            q = deque()
+            _RATE_LIMIT_EVENTS[key] = q
+        cutoff = now_ts - max(1, int(window_seconds))
+        while q and q[0] <= cutoff:
+            q.popleft()
+        if len(q) >= max(1, int(limit)):
+            retry_after = int(max(1, math.ceil((q[0] + window_seconds) - now_ts))) if q else int(window_seconds)
+            return False, retry_after
+        q.append(now_ts)
+        return True, 0
+
+def require_rate_limit(scope, limit_per_window, window_seconds=60, redirect_endpoint='login', methods=('POST',)):
+    """Decorator to throttle request rate by endpoint scope + client IP."""
+    methods_norm = {str(m).upper() for m in (methods or [])}
+    def _decorator(fn):
+        @wraps(fn)
+        def _wrapped(*args, **kwargs):
+            if not RATE_LIMIT_ENABLED:
+                return fn(*args, **kwargs)
+            if methods_norm and (request.method or '').upper() not in methods_norm:
+                return fn(*args, **kwargs)
+            client_ip = (get_client_ip() or request.remote_addr or 'unknown').strip()
+            key = f'{scope}:{client_ip}'
+            allowed, retry_after = _rate_limit_consume(key, limit_per_window, window_seconds)
+            if not allowed:
+                flash(f'Too many requests. Try again in about {retry_after} second(s).', 'error')
+                return redirect(url_for(redirect_endpoint))
+            return fn(*args, **kwargs)
+        return _wrapped
+    return _decorator
 
 @contextmanager
 def schema_ddl_mode(enabled=False):
@@ -761,6 +848,7 @@ def db_connection(commit=False):
 _STUDENTS_PROMOTED_IS_BOOL = None
 _STUDENTS_HAS_USER_ID = None
 _STUDENTS_HAS_PARENT_ACCESS_COLS = None
+_STUDENTS_HAS_PARENT_MULTI_COLS = None
 _STUDENTS_HAS_ARCHIVE_COLS = None
 _TEACHERS_HAS_ARCHIVE_COLS = None
 _USERS_HAS_PASSWORD_CHANGED_AT = None
@@ -812,6 +900,34 @@ def students_has_parent_access_columns():
     except Exception:
         _STUDENTS_HAS_PARENT_ACCESS_COLS = False
     return _STUDENTS_HAS_PARENT_ACCESS_COLS
+
+def students_has_parent_multi_access_columns():
+    """Detect whether students has secondary parent + parent gender columns."""
+    global _STUDENTS_HAS_PARENT_MULTI_COLS
+    if _STUDENTS_HAS_PARENT_MULTI_COLS is not None:
+        return _STUDENTS_HAS_PARENT_MULTI_COLS
+    try:
+        with db_connection() as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """SELECT column_name
+                   FROM information_schema.columns
+                   WHERE table_schema = 'public'
+                     AND table_name = 'students'
+                     AND column_name = ANY(%s)""",
+                (['parent_gender', 'parent_phone_2', 'parent_password_hash_2', 'parent_gender_2'],),
+            )
+            cols = {str(row[0]) for row in c.fetchall() if row and row[0]}
+            _STUDENTS_HAS_PARENT_MULTI_COLS = (
+                'parent_gender' in cols
+                and 'parent_phone_2' in cols
+                and 'parent_password_hash_2' in cols
+                and 'parent_gender_2' in cols
+            )
+    except Exception:
+        _STUDENTS_HAS_PARENT_MULTI_COLS = False
+    return _STUDENTS_HAS_PARENT_MULTI_COLS
 
 def students_has_archive_columns():
     """Detect whether students.is_archived + students.archived_at exist."""
@@ -993,7 +1109,7 @@ def mark_user_first_login_tutorial_seen(username):
             return 0
         return 0
 
-def build_first_login_tutorial(role):
+def build_first_login_tutorial(role, display_name=''):
     role_name = (role or '').strip().lower()
     common = [
         'Use the left navigation menu to move between modules.',
@@ -1022,10 +1138,12 @@ def build_first_login_tutorial(role):
             'Change parent password immediately for account security.',
         ],
     }
+    clean_name = normalize_person_name(display_name) if display_name else ''
+    student_title = f'Welcome, {clean_name}' if clean_name else 'Welcome, Student'
     title_map = {
         'school_admin': 'Welcome, School Admin',
         'teacher': 'Welcome, Teacher',
-        'student': 'Welcome, Student',
+        'student': student_title,
         'parent': 'Welcome, Parent',
     }
     steps = by_role.get(role_name, []) + common
@@ -1470,6 +1588,10 @@ def init_db():
                         promoted INTEGER DEFAULT 0,
                         parent_phone TEXT,
                         parent_password_hash TEXT,
+                        parent_gender TEXT DEFAULT '',
+                        parent_phone_2 TEXT DEFAULT '',
+                        parent_password_hash_2 TEXT DEFAULT '',
+                        parent_gender_2 TEXT DEFAULT '',
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         UNIQUE(school_id, student_id)
                     )""")
@@ -1477,6 +1599,10 @@ def init_db():
     safe_exec_ignore("ALTER TABLE students ADD COLUMN gender TEXT")
     safe_exec_ignore("ALTER TABLE students ADD COLUMN parent_phone TEXT")
     safe_exec_ignore("ALTER TABLE students ADD COLUMN parent_password_hash TEXT")
+    safe_exec_ignore("ALTER TABLE students ADD COLUMN parent_gender TEXT DEFAULT ''")
+    safe_exec_ignore("ALTER TABLE students ADD COLUMN parent_phone_2 TEXT DEFAULT ''")
+    safe_exec_ignore("ALTER TABLE students ADD COLUMN parent_password_hash_2 TEXT DEFAULT ''")
+    safe_exec_ignore("ALTER TABLE students ADD COLUMN parent_gender_2 TEXT DEFAULT ''")
     safe_exec_ignore("ALTER TABLE students ADD COLUMN is_archived INTEGER DEFAULT 0")
     safe_exec_ignore("ALTER TABLE students ADD COLUMN archived_at TIMESTAMP")
     
@@ -2596,15 +2722,46 @@ def save_student_with_cursor(c, school_id, student_id, student_data):
     gender = normalize_student_gender(student_data.get('gender', ''))
     parent_phone = (student_data.get('parent_phone', '') or '').strip()
     parent_password_hash = (student_data.get('parent_password_hash', '') or '').strip()
+    parent_gender = normalize_parent_gender(student_data.get('parent_gender', ''))
+    parent_phone_2 = (student_data.get('parent_phone_2', '') or '').strip()
+    parent_password_hash_2 = (student_data.get('parent_password_hash_2', '') or '').strip()
+    parent_gender_2 = normalize_parent_gender(student_data.get('parent_gender_2', ''))
     has_parent_cols = students_has_parent_access_columns()
+    has_parent_multi_cols = students_has_parent_multi_access_columns()
+    promoted_value = normalize_promoted_db_value(student_data.get('promoted', 0))
+    if has_parent_cols:
+        if has_parent_multi_cols:
+            parent_insert_cols = ", parent_phone, parent_password_hash, parent_gender, parent_phone_2, parent_password_hash_2, parent_gender_2"
+            parent_update_cols = """
+                     parent_phone = excluded.parent_phone,
+                     parent_password_hash = excluded.parent_password_hash,
+                     parent_gender = excluded.parent_gender,
+                     parent_phone_2 = excluded.parent_phone_2,
+                     parent_password_hash_2 = excluded.parent_password_hash_2,
+                     parent_gender_2 = excluded.parent_gender_2,"""
+            parent_values = [parent_phone, parent_password_hash, parent_gender, parent_phone_2, parent_password_hash_2, parent_gender_2]
+            parent_placeholders = ", ?, ?, ?, ?, ?, ?"
+        else:
+            parent_insert_cols = ", parent_phone, parent_password_hash"
+            parent_update_cols = """
+                     parent_phone = excluded.parent_phone,
+                     parent_password_hash = excluded.parent_password_hash,"""
+            parent_values = [parent_phone, parent_password_hash]
+            parent_placeholders = ", ?, ?"
+    else:
+        parent_insert_cols = ""
+        parent_update_cols = ""
+        parent_values = []
+        parent_placeholders = ""
+
     if students_has_user_id_column():
         user_id = student_id
-        if has_parent_cols:
-            db_execute(
-                c,
-                """INSERT INTO students
-                   (user_id, school_id, student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects, scores, promoted, parent_phone, parent_password_hash)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        db_execute(
+            c,
+            f"""INSERT INTO students
+                   (user_id, school_id, student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream,
+                    number_of_subject, subjects, scores, promoted{parent_insert_cols})
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?{parent_placeholders})
                    ON CONFLICT(school_id, student_id) DO UPDATE SET
                      firstname = excluded.firstname,
                      date_of_birth = excluded.date_of_birth,
@@ -2616,70 +2773,32 @@ def save_student_with_cursor(c, school_id, student_id, student_data):
                      number_of_subject = excluded.number_of_subject,
                      subjects = excluded.subjects,
                      scores = excluded.scores,
-                     promoted = excluded.promoted,
-                     parent_phone = excluded.parent_phone,
-                     parent_password_hash = excluded.parent_password_hash""",
-                (
-                    user_id,
-                    school_id,
-                    student_id,
-                    firstname,
-                    date_of_birth,
-                    gender,
-                    student_data['classname'],
-                    first_year_class,
-                    term,
-                    stream,
-                    number_of_subject,
-                    subjects_str,
-                    scores_str,
-                    normalize_promoted_db_value(student_data.get('promoted', 0)),
-                    parent_phone,
-                    parent_password_hash,
-                ),
-            )
-        else:
-            db_execute(
-                c,
-                """INSERT INTO students
-                   (user_id, school_id, student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects, scores, promoted)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                   ON CONFLICT(school_id, student_id) DO UPDATE SET
-                     firstname = excluded.firstname,
-                     date_of_birth = excluded.date_of_birth,
-                     gender = excluded.gender,
-                     classname = excluded.classname,
-                     first_year_class = excluded.first_year_class,
-                     term = excluded.term,
-                     stream = excluded.stream,
-                     number_of_subject = excluded.number_of_subject,
-                     subjects = excluded.subjects,
-                     scores = excluded.scores,
-                     promoted = excluded.promoted""",
-                (
-                    user_id,
-                    school_id,
-                    student_id,
-                    firstname,
-                    date_of_birth,
-                    gender,
-                    student_data['classname'],
-                    first_year_class,
-                    term,
-                    stream,
-                    number_of_subject,
-                    subjects_str,
-                    scores_str,
-                    normalize_promoted_db_value(student_data.get('promoted', 0)),
-                ),
-            )
+                     promoted = excluded.promoted,{parent_update_cols}
+                     student_id = excluded.student_id""",
+            [
+                user_id,
+                school_id,
+                student_id,
+                firstname,
+                date_of_birth,
+                gender,
+                student_data['classname'],
+                first_year_class,
+                term,
+                stream,
+                number_of_subject,
+                subjects_str,
+                scores_str,
+                promoted_value,
+            ] + parent_values,
+        )
     else:
-        if has_parent_cols:
-            db_execute(
-                c,
-                """INSERT INTO students
-                   (school_id, student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects, scores, promoted, parent_phone, parent_password_hash)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        db_execute(
+            c,
+            f"""INSERT INTO students
+                   (school_id, student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream,
+                    number_of_subject, subjects, scores, promoted{parent_insert_cols})
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?{parent_placeholders})
                    ON CONFLICT(school_id, student_id) DO UPDATE SET
                      firstname = excluded.firstname,
                      date_of_birth = excluded.date_of_birth,
@@ -2691,61 +2810,23 @@ def save_student_with_cursor(c, school_id, student_id, student_data):
                      number_of_subject = excluded.number_of_subject,
                      subjects = excluded.subjects,
                      scores = excluded.scores,
-                     promoted = excluded.promoted,
-                     parent_phone = excluded.parent_phone,
-                     parent_password_hash = excluded.parent_password_hash""",
-                (
-                    school_id,
-                    student_id,
-                    firstname,
-                    date_of_birth,
-                    gender,
-                    student_data['classname'],
-                    first_year_class,
-                    term,
-                    stream,
-                    number_of_subject,
-                    subjects_str,
-                    scores_str,
-                    normalize_promoted_db_value(student_data.get('promoted', 0)),
-                    parent_phone,
-                    parent_password_hash,
-                ),
-            )
-        else:
-            db_execute(
-                c,
-                """INSERT INTO students
-                   (school_id, student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects, scores, promoted)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                   ON CONFLICT(school_id, student_id) DO UPDATE SET
-                     firstname = excluded.firstname,
-                     date_of_birth = excluded.date_of_birth,
-                     gender = excluded.gender,
-                     classname = excluded.classname,
-                     first_year_class = excluded.first_year_class,
-                     term = excluded.term,
-                     stream = excluded.stream,
-                     number_of_subject = excluded.number_of_subject,
-                     subjects = excluded.subjects,
-                     scores = excluded.scores,
-                     promoted = excluded.promoted""",
-                (
-                    school_id,
-                    student_id,
-                    firstname,
-                    date_of_birth,
-                    gender,
-                    student_data['classname'],
-                    first_year_class,
-                    term,
-                    stream,
-                    number_of_subject,
-                    subjects_str,
-                    scores_str,
-                    normalize_promoted_db_value(student_data.get('promoted', 0)),
-                ),
-            )
+                     promoted = excluded.promoted{(',' + parent_update_cols) if parent_update_cols else ''}""",
+            [
+                school_id,
+                student_id,
+                firstname,
+                date_of_birth,
+                gender,
+                student_data['classname'],
+                first_year_class,
+                term,
+                stream,
+                number_of_subject,
+                subjects_str,
+                scores_str,
+                promoted_value,
+            ] + parent_values,
+        )
 
 def _normalize_score_block_for_audit(score_block):
     if not isinstance(score_block, dict):
@@ -3395,6 +3476,15 @@ def normalize_person_name(value):
 
 def normalize_student_gender(value):
     """Normalize student gender to Male/Female (or empty if invalid)."""
+    text = (value or '').strip().lower()
+    if text in {'male', 'm'}:
+        return 'Male'
+    if text in {'female', 'f'}:
+        return 'Female'
+    return ''
+
+def normalize_parent_gender(value):
+    """Normalize parent gender to Male/Female (or empty if invalid)."""
     text = (value or '').strip().lower()
     if text in {'male', 'm'}:
         return 'Male'
@@ -4297,6 +4387,10 @@ def ensure_extended_features_schema():
             db_execute(c, "ALTER TABLE users ADD COLUMN IF NOT EXISTS tutorial_seen_at TIMESTAMP")
             db_execute(c, "ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_phone TEXT")
             db_execute(c, "ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_password_hash TEXT")
+            db_execute(c, "ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_gender TEXT DEFAULT ''")
+            db_execute(c, "ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_phone_2 TEXT DEFAULT ''")
+            db_execute(c, "ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_password_hash_2 TEXT DEFAULT ''")
+            db_execute(c, "ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_gender_2 TEXT DEFAULT ''")
             db_execute(
                 c,
                 """CREATE TABLE IF NOT EXISTS login_audit_logs (
@@ -7054,12 +7148,19 @@ def build_positions_from_published_results(school, classname, term, class_result
 def load_students(school_id, class_filter='', term_filter='', include_archived=False):
     """Load students for a school."""
     has_parent_cols = students_has_parent_access_columns()
+    has_parent_multi_cols = students_has_parent_multi_access_columns()
     has_archive_cols = students_has_archive_columns()
     with db_connection() as conn:
         c = conn.cursor()
         if has_parent_cols:
             archive_col = ', COALESCE(is_archived, 0)' if has_archive_cols else ''
-            query = f'SELECT student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects, scores, promoted, parent_phone, parent_password_hash{archive_col} FROM students WHERE school_id = ?'
+            if has_parent_multi_cols:
+                query = f"""SELECT student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream,
+                            number_of_subject, subjects, scores, promoted, parent_phone, parent_password_hash, parent_gender,
+                            parent_phone_2, parent_password_hash_2, parent_gender_2{archive_col}
+                            FROM students WHERE school_id = ?"""
+            else:
+                query = f'SELECT student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects, scores, promoted, parent_phone, parent_password_hash{archive_col} FROM students WHERE school_id = ?'
         else:
             archive_col = ', COALESCE(is_archived, 0)' if has_archive_cols else ''
             query = f'SELECT student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects, scores, promoted{archive_col} FROM students WHERE school_id = ?'
@@ -7080,18 +7181,27 @@ def load_students(school_id, class_filter='', term_filter='', include_archived=F
         students_data = {}
         for row in c.fetchall():
             if has_parent_cols:
-                if has_archive_cols:
-                    student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted, parent_phone, parent_password_hash, is_archived = row
+                if has_parent_multi_cols:
+                    if has_archive_cols:
+                        student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted, parent_phone, parent_password_hash, parent_gender, parent_phone_2, parent_password_hash_2, parent_gender_2, is_archived = row
+                    else:
+                        student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted, parent_phone, parent_password_hash, parent_gender, parent_phone_2, parent_password_hash_2, parent_gender_2 = row
+                        is_archived = 0
                 else:
-                    student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted, parent_phone, parent_password_hash = row
-                    is_archived = 0
+                    if has_archive_cols:
+                        student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted, parent_phone, parent_password_hash, is_archived = row
+                    else:
+                        student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted, parent_phone, parent_password_hash = row
+                        is_archived = 0
+                    parent_gender, parent_phone_2, parent_password_hash_2, parent_gender_2 = '', '', '', ''
             else:
                 if has_archive_cols:
                     student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted, is_archived = row
                 else:
                     student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted = row
                     is_archived = 0
-                parent_phone, parent_password_hash = '', ''
+                parent_phone, parent_password_hash, parent_gender = '', '', ''
+                parent_phone_2, parent_password_hash_2, parent_gender_2 = '', '', ''
             subjects = json.loads(subjects_str) if subjects_str else []
             scores = json.loads(scores_str) if scores_str else {}
             students_data[student_id] = {
@@ -7108,6 +7218,10 @@ def load_students(school_id, class_filter='', term_filter='', include_archived=F
                 'promoted': promoted,
                 'parent_phone': (parent_phone or '').strip(),
                 'parent_password_hash': (parent_password_hash or '').strip(),
+                'parent_gender': (parent_gender or '').strip(),
+                'parent_phone_2': (parent_phone_2 or '').strip(),
+                'parent_password_hash_2': (parent_password_hash_2 or '').strip(),
+                'parent_gender_2': (parent_gender_2 or '').strip(),
                 'is_archived': int(is_archived or 0),
             }
         return students_data
@@ -7118,17 +7232,25 @@ def load_students_for_classes(school_id, classnames, term_filter='', include_arc
     if not class_list:
         return {}
     has_parent_cols = students_has_parent_access_columns()
+    has_parent_multi_cols = students_has_parent_multi_access_columns()
     has_archive_cols = students_has_archive_columns()
     with db_connection() as conn:
         c = conn.cursor()
         placeholders = ','.join(['?'] * len(class_list))
         if has_parent_cols:
             archive_col = ', COALESCE(is_archived, 0)' if has_archive_cols else ''
-            query = (
-                'SELECT student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, '
-                f'number_of_subject, subjects, scores, promoted, parent_phone, parent_password_hash{archive_col} '
-                f'FROM students WHERE school_id = ? AND classname IN ({placeholders})'
-            )
+            if has_parent_multi_cols:
+                query = (
+                    'SELECT student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, '
+                    f'number_of_subject, subjects, scores, promoted, parent_phone, parent_password_hash, parent_gender, parent_phone_2, parent_password_hash_2, parent_gender_2{archive_col} '
+                    f'FROM students WHERE school_id = ? AND classname IN ({placeholders})'
+                )
+            else:
+                query = (
+                    'SELECT student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, '
+                    f'number_of_subject, subjects, scores, promoted, parent_phone, parent_password_hash{archive_col} '
+                    f'FROM students WHERE school_id = ? AND classname IN ({placeholders})'
+                )
         else:
             archive_col = ', COALESCE(is_archived, 0)' if has_archive_cols else ''
             query = (
@@ -7147,18 +7269,27 @@ def load_students_for_classes(school_id, classnames, term_filter='', include_arc
         students_data = {}
         for row in c.fetchall():
             if has_parent_cols:
-                if has_archive_cols:
-                    student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted, parent_phone, parent_password_hash, is_archived = row
+                if has_parent_multi_cols:
+                    if has_archive_cols:
+                        student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted, parent_phone, parent_password_hash, parent_gender, parent_phone_2, parent_password_hash_2, parent_gender_2, is_archived = row
+                    else:
+                        student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted, parent_phone, parent_password_hash, parent_gender, parent_phone_2, parent_password_hash_2, parent_gender_2 = row
+                        is_archived = 0
                 else:
-                    student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted, parent_phone, parent_password_hash = row
-                    is_archived = 0
+                    if has_archive_cols:
+                        student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted, parent_phone, parent_password_hash, is_archived = row
+                    else:
+                        student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted, parent_phone, parent_password_hash = row
+                        is_archived = 0
+                    parent_gender, parent_phone_2, parent_password_hash_2, parent_gender_2 = '', '', '', ''
             else:
                 if has_archive_cols:
                     student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted, is_archived = row
                 else:
                     student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted = row
                     is_archived = 0
-                parent_phone, parent_password_hash = '', ''
+                parent_phone, parent_password_hash, parent_gender = '', '', ''
+                parent_phone_2, parent_password_hash_2, parent_gender_2 = '', '', ''
             students_data[student_id] = {
                 'firstname': firstname,
                 'date_of_birth': (date_of_birth or '').strip(),
@@ -7173,6 +7304,10 @@ def load_students_for_classes(school_id, classnames, term_filter='', include_arc
                 'promoted': promoted,
                 'parent_phone': (parent_phone or '').strip(),
                 'parent_password_hash': (parent_password_hash or '').strip(),
+                'parent_gender': (parent_gender or '').strip(),
+                'parent_phone_2': (parent_phone_2 or '').strip(),
+                'parent_password_hash_2': (parent_password_hash_2 or '').strip(),
+                'parent_gender_2': (parent_gender_2 or '').strip(),
                 'is_archived': int(is_archived or 0),
             }
         return students_data
@@ -7230,16 +7365,24 @@ def get_student_filter_options(school_id, classnames=None):
 def load_student(school_id, student_id, include_archived=False):
     """Load a single student."""
     has_parent_cols = students_has_parent_access_columns()
+    has_parent_multi_cols = students_has_parent_multi_access_columns()
     has_archive_cols = students_has_archive_columns()
     with db_connection() as conn:
         c = conn.cursor()
         if has_parent_cols:
             archived_sql = '' if (include_archived or not has_archive_cols) else ' AND COALESCE(is_archived, 0) = 0'
             archive_col = ', COALESCE(is_archived, 0)' if has_archive_cols else ''
-            db_execute(c, f"""SELECT student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, 
-                           number_of_subject, subjects, scores, promoted, parent_phone, parent_password_hash{archive_col} FROM students 
-                           WHERE school_id = ? AND student_id = ?{archived_sql}""",
-                       (school_id, student_id))
+            if has_parent_multi_cols:
+                db_execute(c, f"""SELECT student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream,
+                               number_of_subject, subjects, scores, promoted, parent_phone, parent_password_hash, parent_gender,
+                               parent_phone_2, parent_password_hash_2, parent_gender_2{archive_col} FROM students
+                               WHERE school_id = ? AND student_id = ?{archived_sql}""",
+                           (school_id, student_id))
+            else:
+                db_execute(c, f"""SELECT student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream,
+                               number_of_subject, subjects, scores, promoted, parent_phone, parent_password_hash{archive_col} FROM students
+                               WHERE school_id = ? AND student_id = ?{archived_sql}""",
+                           (school_id, student_id))
         else:
             archived_sql = '' if (include_archived or not has_archive_cols) else ' AND COALESCE(is_archived, 0) = 0'
             archive_col = ', COALESCE(is_archived, 0)' if has_archive_cols else ''
@@ -7250,9 +7393,29 @@ def load_student(school_id, student_id, include_archived=False):
         row = c.fetchone()
         if not row:
             return None
-        parent_phone = (row[12] or '').strip() if has_parent_cols else ''
-        parent_password_hash = (row[13] or '').strip() if has_parent_cols else ''
-        archived_idx = (14 if has_parent_cols else 12) if has_archive_cols else None
+        if has_parent_cols:
+            parent_phone = (row[12] or '').strip()
+            parent_password_hash = (row[13] or '').strip()
+            if has_parent_multi_cols:
+                parent_gender = (row[14] or '').strip()
+                parent_phone_2 = (row[15] or '').strip()
+                parent_password_hash_2 = (row[16] or '').strip()
+                parent_gender_2 = (row[17] or '').strip()
+                archived_idx = 18 if has_archive_cols else None
+            else:
+                parent_gender = ''
+                parent_phone_2 = ''
+                parent_password_hash_2 = ''
+                parent_gender_2 = ''
+                archived_idx = 14 if has_archive_cols else None
+        else:
+            parent_phone = ''
+            parent_password_hash = ''
+            parent_gender = ''
+            parent_phone_2 = ''
+            parent_password_hash_2 = ''
+            parent_gender_2 = ''
+            archived_idx = 12 if has_archive_cols else None
         return {
             'student_id': row[0],
             'firstname': row[1],
@@ -7268,6 +7431,10 @@ def load_student(school_id, student_id, include_archived=False):
             'promoted': row[11],
             'parent_phone': parent_phone,
             'parent_password_hash': parent_password_hash,
+            'parent_gender': parent_gender,
+            'parent_phone_2': parent_phone_2,
+            'parent_password_hash_2': parent_password_hash_2,
+            'parent_gender_2': parent_gender_2,
             'is_archived': int(row[archived_idx] or 0) if archived_idx is not None else 0,
         }
 
@@ -7296,19 +7463,40 @@ def get_parent_students_by_phone(parent_phone):
     """Return student rows linked to one parent phone."""
     if not students_has_parent_access_columns():
         return []
+    has_parent_multi_cols = students_has_parent_multi_access_columns()
     normalized_phone = normalize_parent_phone(parent_phone)
     if not normalized_phone:
         return []
     with db_connection() as conn:
         c = conn.cursor()
-        db_execute(
-            c,
-            """SELECT school_id, student_id, firstname, classname, term, stream, parent_password_hash
-               FROM students
-               WHERE parent_phone = ?
-               ORDER BY school_id, classname, firstname, student_id""",
-            (normalized_phone,),
-        )
+        if has_parent_multi_cols:
+            db_execute(
+                c,
+                """SELECT school_id, student_id, firstname, classname, term, stream,
+                          CASE
+                              WHEN parent_phone = ? THEN parent_password_hash
+                              WHEN parent_phone_2 = ? THEN parent_password_hash_2
+                              ELSE ''
+                          END AS matched_parent_password_hash,
+                          CASE
+                              WHEN parent_phone = ? THEN parent_gender
+                              WHEN parent_phone_2 = ? THEN parent_gender_2
+                              ELSE ''
+                          END AS matched_parent_gender
+                   FROM students
+                   WHERE parent_phone = ? OR parent_phone_2 = ?
+                   ORDER BY school_id, classname, firstname, student_id""",
+                (normalized_phone, normalized_phone, normalized_phone, normalized_phone, normalized_phone, normalized_phone),
+            )
+        else:
+            db_execute(
+                c,
+                """SELECT school_id, student_id, firstname, classname, term, stream, parent_password_hash, '' AS matched_parent_gender
+                   FROM students
+                   WHERE parent_phone = ?
+                   ORDER BY school_id, classname, firstname, student_id""",
+                (normalized_phone,),
+            )
         rows = c.fetchall()
     out = []
     for row in rows:
@@ -7320,6 +7508,7 @@ def get_parent_students_by_phone(parent_phone):
             'term': row[4] or '',
             'stream': row[5] or '',
             'parent_password_hash': row[6] or '',
+            'parent_gender': row[7] or '',
         })
     return out
 
@@ -7327,105 +7516,7 @@ def save_student(school_id, student_id, student_data):
     """Save a student."""
     with db_connection(commit=True) as conn:
         c = conn.cursor()
-        firstname = normalize_person_name(student_data.get('firstname', ''))
-        subjects = _dedupe_keep_order([normalize_subject_name(s) for s in (student_data.get('subjects', []) or []) if s])
-        subjects_str = json.dumps(subjects)
-        scores_str = json.dumps(student_data.get('scores', {}))
-        term = student_data.get('term', 'First Term')
-        stream = student_data.get('stream', 'Science')
-        first_year_class = student_data.get('first_year_class', student_data.get('classname', ''))
-        number_of_subject = len(subjects)
-        date_of_birth = (student_data.get('date_of_birth', '') or '').strip()
-        gender = normalize_student_gender(student_data.get('gender', ''))
-        parent_phone = (student_data.get('parent_phone', '') or '').strip()
-        parent_password_hash = (student_data.get('parent_password_hash', '') or '').strip()
-        has_parent_cols = students_has_parent_access_columns()
-        if students_has_user_id_column():
-            # user_id is used for student login - same as student_id
-            user_id = student_id
-            if has_parent_cols:
-                db_execute(c, """INSERT INTO students
-                                 (user_id, school_id, student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects, scores, promoted, parent_phone, parent_password_hash)
-                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                 ON CONFLICT(school_id, student_id) DO UPDATE SET
-                                    firstname = excluded.firstname,
-                                    date_of_birth = excluded.date_of_birth,
-                                    gender = excluded.gender,
-                                    classname = excluded.classname,
-                                    first_year_class = excluded.first_year_class,
-                                    term = excluded.term,
-                                    stream = excluded.stream,
-                                    number_of_subject = excluded.number_of_subject,
-                                   subjects = excluded.subjects,
-                                   scores = excluded.scores,
-                                   promoted = excluded.promoted,
-                                   parent_phone = excluded.parent_phone,
-                                   parent_password_hash = excluded.parent_password_hash""",
-                           (user_id, school_id, student_id, firstname, date_of_birth, gender, student_data['classname'],
-                            first_year_class, term, stream, number_of_subject,
-                            subjects_str, scores_str, normalize_promoted_db_value(student_data.get('promoted', 0)),
-                            parent_phone, parent_password_hash))
-            else:
-                db_execute(c, """INSERT INTO students
-                                 (user_id, school_id, student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects, scores, promoted)
-                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                 ON CONFLICT(school_id, student_id) DO UPDATE SET
-                                    firstname = excluded.firstname,
-                                    date_of_birth = excluded.date_of_birth,
-                                    gender = excluded.gender,
-                                    classname = excluded.classname,
-                                    first_year_class = excluded.first_year_class,
-                                    term = excluded.term,
-                                    stream = excluded.stream,
-                                    number_of_subject = excluded.number_of_subject,
-                                   subjects = excluded.subjects,
-                                   scores = excluded.scores,
-                                   promoted = excluded.promoted""",
-                           (user_id, school_id, student_id, firstname, date_of_birth, gender, student_data['classname'],
-                            first_year_class, term, stream, number_of_subject,
-                            subjects_str, scores_str, normalize_promoted_db_value(student_data.get('promoted', 0))))
-        else:
-            if has_parent_cols:
-                db_execute(c, """INSERT INTO students
-                                 (school_id, student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects, scores, promoted, parent_phone, parent_password_hash)
-                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                 ON CONFLICT(school_id, student_id) DO UPDATE SET
-                                    firstname = excluded.firstname,
-                                    date_of_birth = excluded.date_of_birth,
-                                    gender = excluded.gender,
-                                    classname = excluded.classname,
-                                    first_year_class = excluded.first_year_class,
-                                    term = excluded.term,
-                                    stream = excluded.stream,
-                                    number_of_subject = excluded.number_of_subject,
-                                   subjects = excluded.subjects,
-                                   scores = excluded.scores,
-                                   promoted = excluded.promoted,
-                                   parent_phone = excluded.parent_phone,
-                                   parent_password_hash = excluded.parent_password_hash""",
-                           (school_id, student_id, firstname, date_of_birth, gender, student_data['classname'],
-                            first_year_class, term, stream, number_of_subject,
-                            subjects_str, scores_str, normalize_promoted_db_value(student_data.get('promoted', 0)),
-                            parent_phone, parent_password_hash))
-            else:
-                db_execute(c, """INSERT INTO students
-                                 (school_id, student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects, scores, promoted)
-                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                 ON CONFLICT(school_id, student_id) DO UPDATE SET
-                                    firstname = excluded.firstname,
-                                    date_of_birth = excluded.date_of_birth,
-                                    gender = excluded.gender,
-                                    classname = excluded.classname,
-                                    first_year_class = excluded.first_year_class,
-                                    term = excluded.term,
-                                    stream = excluded.stream,
-                                    number_of_subject = excluded.number_of_subject,
-                                   subjects = excluded.subjects,
-                                   scores = excluded.scores,
-                                   promoted = excluded.promoted""",
-                           (school_id, student_id, firstname, date_of_birth, gender, student_data['classname'],
-                            first_year_class, term, stream, number_of_subject,
-                            subjects_str, scores_str, normalize_promoted_db_value(student_data.get('promoted', 0))))
+        save_student_with_cursor(c, school_id, student_id, student_data)
 
 def delete_student(school_id, student_id):
     """Delete a student."""
@@ -7531,17 +7622,38 @@ def get_linked_parent_count(school_id):
     """Get number of unique parent accounts linked by students in one school."""
     if not students_has_parent_access_columns():
         return 0
+    has_parent_multi_cols = students_has_parent_multi_access_columns()
     with db_connection() as conn:
         c = conn.cursor()
-        db_execute(
-            c,
-            """SELECT COUNT(DISTINCT parent_phone)
-               FROM students
-               WHERE school_id = ?
-                 AND TRIM(COALESCE(parent_phone, '')) <> ''
-                 AND TRIM(COALESCE(parent_password_hash, '')) <> ''""",
-            (school_id,),
-        )
+        if has_parent_multi_cols:
+            db_execute(
+                c,
+                """SELECT COUNT(DISTINCT phone)
+                   FROM (
+                     SELECT parent_phone AS phone
+                     FROM students
+                     WHERE school_id = ?
+                       AND TRIM(COALESCE(parent_phone, '')) <> ''
+                       AND TRIM(COALESCE(parent_password_hash, '')) <> ''
+                     UNION
+                     SELECT parent_phone_2 AS phone
+                     FROM students
+                     WHERE school_id = ?
+                       AND TRIM(COALESCE(parent_phone_2, '')) <> ''
+                       AND TRIM(COALESCE(parent_password_hash_2, '')) <> ''
+                   ) AS parent_union""",
+                (school_id, school_id),
+            )
+        else:
+            db_execute(
+                c,
+                """SELECT COUNT(DISTINCT parent_phone)
+                   FROM students
+                   WHERE school_id = ?
+                     AND TRIM(COALESCE(parent_phone, '')) <> ''
+                     AND TRIM(COALESCE(parent_password_hash, '')) <> ''""",
+                (school_id,),
+            )
         row = c.fetchone()
         return int(row[0] or 0) if row else 0
 
@@ -7549,18 +7661,37 @@ def get_school_parent_links(school_id):
     """List students in one school that have parent access linked."""
     if not students_has_parent_access_columns():
         return []
+    has_parent_multi_cols = students_has_parent_multi_access_columns()
     with db_connection() as conn:
         c = conn.cursor()
-        db_execute(
-            c,
-            """SELECT student_id, firstname, classname, term, stream, parent_phone
-               FROM students
-               WHERE school_id = ?
-                 AND TRIM(COALESCE(parent_phone, '')) <> ''
-                 AND TRIM(COALESCE(parent_password_hash, '')) <> ''
-               ORDER BY LOWER(parent_phone), LOWER(classname), LOWER(firstname), LOWER(student_id)""",
-            (school_id,),
-        )
+        if has_parent_multi_cols:
+            db_execute(
+                c,
+                """SELECT student_id, firstname, classname, term, stream, parent_phone, parent_gender
+                   FROM students
+                   WHERE school_id = ?
+                     AND TRIM(COALESCE(parent_phone, '')) <> ''
+                     AND TRIM(COALESCE(parent_password_hash, '')) <> ''
+                   UNION ALL
+                   SELECT student_id, firstname, classname, term, stream, parent_phone_2 AS parent_phone, parent_gender_2 AS parent_gender
+                   FROM students
+                   WHERE school_id = ?
+                     AND TRIM(COALESCE(parent_phone_2, '')) <> ''
+                     AND TRIM(COALESCE(parent_password_hash_2, '')) <> ''
+                   ORDER BY LOWER(parent_phone), LOWER(classname), LOWER(firstname), LOWER(student_id)""",
+                (school_id, school_id),
+            )
+        else:
+            db_execute(
+                c,
+                """SELECT student_id, firstname, classname, term, stream, parent_phone, '' AS parent_gender
+                   FROM students
+                   WHERE school_id = ?
+                     AND TRIM(COALESCE(parent_phone, '')) <> ''
+                     AND TRIM(COALESCE(parent_password_hash, '')) <> ''
+                   ORDER BY LOWER(parent_phone), LOWER(classname), LOWER(firstname), LOWER(student_id)""",
+                (school_id,),
+            )
         rows = []
         for row in c.fetchall():
             rows.append({
@@ -7570,6 +7701,7 @@ def get_school_parent_links(school_id):
                 'term': row[3] or '',
                 'stream': row[4] or '',
                 'parent_phone': row[5] or '',
+                'parent_gender': row[6] or '',
             })
         return rows
 
@@ -10901,6 +11033,7 @@ def apply_pwa_and_cache_headers(response):
     return response
 
 @app.route('/login', methods=['GET', 'POST'])
+@require_rate_limit('login', RATE_LIMIT_LOGIN_PER_MIN, 60, redirect_endpoint='login', methods=('POST',))
 def login():
     """Single login for all users - no role selection."""
     terms_read = request.args.get('terms_read') == '1'
@@ -10985,6 +11118,41 @@ def login():
             clear_failed_login('login', username, client_ip)
             return _complete_authenticated_login(user, user_school_id)
         else:
+            # Unified parent login path on /login:
+            # parents enter parent phone in the username field.
+            parent_phone = normalize_parent_phone(username)
+            if parent_phone:
+                candidates = get_parent_students_by_phone(parent_phone)
+                matched = []
+                for row in candidates:
+                    password_hash = (row.get('parent_password_hash') or '').strip()
+                    if not password_hash:
+                        continue
+                    if check_password(password_hash, password):
+                        matched.append(row)
+                if matched:
+                    clear_failed_login('login', username, client_ip)
+                    session.clear()
+                    session.permanent = True
+                    session['role'] = 'parent'
+                    session['parent_phone'] = parent_phone
+                    session['parent_student_keys'] = sorted(
+                        {f"{row.get('school_id', '')}::{row.get('student_id', '')}" for row in matched},
+                        key=lambda v: v.lower(),
+                    )
+                    if not has_parent_seen_first_login_tutorial(parent_phone):
+                        session['show_first_login_tutorial'] = True
+                        session['first_login_tutorial_role'] = 'parent'
+                    record_login_audit(
+                        parent_phone,
+                        'parent',
+                        (matched[0].get('school_id', '') if matched else ''),
+                        'login',
+                        True,
+                        '',
+                    )
+                    flash('Security warning: change your parent password now to a private password only you know.', 'error')
+                    return redirect(url_for('parent_dashboard'))
             register_failed_login('login', username, client_ip)
             record_login_audit(username, '', None, 'login', False, 'invalid_credentials')
             flash('Invalid username or password.', 'error')
@@ -11548,6 +11716,7 @@ def school_admin_messages():
     )
 
 @app.route('/school-admin/publish-results')
+@require_roles('school_admin')
 def school_admin_publish_results():
     if session.get('role') != 'school_admin':
         return redirect(url_for('login'))
@@ -15596,6 +15765,8 @@ def teacher_submit_to_class_teacher():
     return redirect(url_for('teacher_dashboard'))
 
 @app.route('/school-admin/approve-results', methods=['POST'])
+@require_roles('school_admin')
+@require_rate_limit('school_admin_approve_results', RATE_LIMIT_MUTATION_PER_MIN, 60, redirect_endpoint='school_admin_publish_results', methods=('POST',))
 def school_admin_approve_results():
     if session.get('role') != 'school_admin':
         return redirect(url_for('login'))
@@ -15652,6 +15823,8 @@ def school_admin_approve_results():
     return redirect(url_for('school_admin_publish_results'))
 
 @app.route('/school-admin/reject-results', methods=['POST'])
+@require_roles('school_admin')
+@require_rate_limit('school_admin_reject_results', RATE_LIMIT_MUTATION_PER_MIN, 60, redirect_endpoint='school_admin_publish_results', methods=('POST',))
 def school_admin_reject_results():
     if session.get('role') != 'school_admin':
         return redirect(url_for('login'))
@@ -15922,6 +16095,7 @@ def teacher_allocate_stream():
     )
 
 @app.route('/teacher/enter-scores', methods=['GET', 'POST'])
+@require_roles('teacher')
 def teacher_enter_scores():
     if session.get('role') != 'teacher':
         return redirect(url_for('login'))
@@ -15964,8 +16138,10 @@ def teacher_enter_scores():
 
     grade_cfg = get_grade_config(school_id)
     if student.get('term') != current_term:
-        # New term starts with empty score entry for this student.
+        # New term starts with fresh term-scoped fields.
         student['scores'] = {}
+        student['teacher_comment'] = ''
+        student['principal_comment'] = ''
     is_locked = is_result_published(school_id, student.get('classname', ''), current_term, current_year)
     exam_config = get_assessment_config_for_class(school_id, student.get('classname', ''))
     all_subjects = sorted(student.get('subjects', []), key=lambda x: str(x).lower())
@@ -16308,6 +16484,7 @@ def teacher_enter_subject_scores():
     return teacher_enter_scores()
 
 @app.route('/teacher/upload-csv', methods=['GET', 'POST'])
+@require_roles('teacher')
 def teacher_upload_csv():
     if session.get('role') != 'teacher':
         return redirect(url_for('login'))
@@ -16393,6 +16570,7 @@ def teacher_upload_csv():
             staged_original_scores = {}
             staged_changed_subjects = {}
             touched_classes = set()
+            skipped_teacher_comment_overwrites = set()
             for idx, row in enumerate(rows, start=2):
                 current_row_num = idx
                 current_row_data = row
@@ -16437,7 +16615,10 @@ def teacher_upload_csv():
                     )
 
                 if student.get('term') != current_term:
+                    # Prevent prior term comments from leaking into the new term snapshot.
                     student['scores'] = {}
+                    student['teacher_comment'] = ''
+                    student['principal_comment'] = ''
                     student['term'] = current_term
 
                 exam_config = get_assessment_config_for_class(school_id, classname)
@@ -16523,7 +16704,19 @@ def teacher_upload_csv():
                 if comment_col:
                     comment = (row.get(comment_col, '') or '').strip()
                     if comment:
-                        student['teacher_comment'] = comment
+                        can_edit_class_comment = teacher_has_class_access(
+                            school_id,
+                            teacher_id,
+                            classname,
+                            term=current_term,
+                            academic_year=current_year,
+                        )
+                        existing_comment = (student.get('teacher_comment', '') or '').strip()
+                        if can_edit_class_comment and not existing_comment:
+                            # CSV/automation may seed comment only when class teacher comment is empty.
+                            student['teacher_comment'] = comment
+                        elif existing_comment and existing_comment != comment:
+                            skipped_teacher_comment_overwrites.add(student_id)
 
                 staged_students[student_id] = student
                 staged_changed_subjects.setdefault(student_id, set()).add(subject_key)
@@ -16599,9 +16792,15 @@ def teacher_upload_csv():
                             (school_id, classname, current_term, current_year or '', teacher_id, teacher_name, principal_name, 0, None),
                         )
 
+            csv_message = f'CSV uploaded successfully. Updated {len(updated_students)} student(s).'
+            if skipped_teacher_comment_overwrites:
+                csv_message += (
+                    f' Preserved existing class teacher comment for '
+                    f'{len(skipped_teacher_comment_overwrites)} student(s).'
+                )
             csv_result.update({
                 'success': True,
-                'message': f'CSV uploaded successfully. Updated {len(updated_students)} student(s).',
+                'message': csv_message,
                 'processed_rows': processed_rows,
                 'updated_students': len(updated_students),
                 'updated_classes': len(touched_classes),
@@ -16904,7 +17103,13 @@ def student_dashboard():
         else:
             dashboard_notice = 'Current term results are hidden while operations are OFF. Only previous published results are available.'
     parent_phone = (student.get('parent_phone', '') or '').strip()
-    has_parent_access = bool(parent_phone and (student.get('parent_password_hash', '') or '').strip())
+    parent_phone_2 = (student.get('parent_phone_2', '') or '').strip()
+    parent_gender = (student.get('parent_gender', '') or '').strip()
+    parent_gender_2 = (student.get('parent_gender_2', '') or '').strip()
+    has_parent_access = bool(
+        (parent_phone and (student.get('parent_password_hash', '') or '').strip())
+        or (parent_phone_2 and (student.get('parent_password_hash_2', '') or '').strip())
+    )
     student_messages = get_student_messages_for_student(
         school_id=school_id,
         classname=student.get('classname', ''),
@@ -16919,6 +17124,9 @@ def student_dashboard():
         student=my_data,
         dashboard_notice=dashboard_notice,
         parent_phone=parent_phone,
+        parent_phone_2=parent_phone_2,
+        parent_gender=parent_gender,
+        parent_gender_2=parent_gender_2,
         has_parent_access=has_parent_access,
         student_messages=student_messages,
         unread_student_messages=unread_student_messages,
@@ -17057,6 +17265,8 @@ def student_change_password():
 
 
 @app.route('/student/parent-access', methods=['POST'])
+@require_roles('student')
+@require_rate_limit('student_parent_access', RATE_LIMIT_MUTATION_PER_MIN, 60, redirect_endpoint='student_dashboard', methods=('POST',))
 def student_update_parent_access():
     if session.get('role') != 'student':
         return redirect(url_for('login'))
@@ -17069,35 +17279,83 @@ def student_update_parent_access():
     if not students_has_parent_access_columns():
         flash('Parent access is not available yet. Ask admin to run latest database migration.', 'error')
         return redirect(url_for('student_dashboard'))
+    has_parent_multi_cols = students_has_parent_multi_access_columns()
 
-    raw_phone = request.form.get('parent_phone', '')
-    parent_phone = normalize_parent_phone(raw_phone)
-    parent_password = (request.form.get('parent_password', '') or '').strip()
-    confirm_password = (request.form.get('confirm_parent_password', '') or '').strip()
-    has_existing_parent = bool((student.get('parent_phone', '') or '').strip() and (student.get('parent_password_hash', '') or '').strip())
+    parent1_phone = normalize_parent_phone(request.form.get('parent_phone', ''))
+    parent1_gender = normalize_parent_gender(request.form.get('parent_gender', ''))
+    parent1_password = (request.form.get('parent_password', '') or '').strip()
+    parent1_confirm = (request.form.get('confirm_parent_password', '') or '').strip()
 
-    if not parent_phone and not parent_password and not confirm_password:
-        if has_existing_parent:
+    parent2_phone = normalize_parent_phone(request.form.get('parent_phone_2', ''))
+    parent2_gender = normalize_parent_gender(request.form.get('parent_gender_2', ''))
+    parent2_password = (request.form.get('parent_password_2', '') or '').strip()
+    parent2_confirm = (request.form.get('confirm_parent_password_2', '') or '').strip()
+
+    has_existing_parent1 = bool((student.get('parent_phone', '') or '').strip() and (student.get('parent_password_hash', '') or '').strip())
+    has_existing_parent2 = bool((student.get('parent_phone_2', '') or '').strip() and (student.get('parent_password_hash_2', '') or '').strip())
+
+    if not parent1_phone and not parent1_password and not parent1_confirm and not parent2_phone and not parent2_password and not parent2_confirm:
+        if has_existing_parent1 or has_existing_parent2:
             flash('Parent access cannot be removed once it has been added. You can only update phone/password.', 'error')
         else:
             flash('No parent access details were submitted.', 'error')
         return redirect(url_for('student_dashboard'))
 
-    if not parent_phone or not parent_password:
-        flash('Parent phone and password are both required to enable parent access.', 'error')
+    # Parent 1 is required.
+    if not parent1_phone or not parent1_password:
+        flash('Parent 1 phone and password are required.', 'error')
         return redirect(url_for('student_dashboard'))
-    if not is_valid_parent_phone(parent_phone):
-        flash('Enter a valid parent phone number.', 'error')
+    if not is_valid_parent_phone(parent1_phone):
+        flash('Enter a valid Parent 1 phone number.', 'error')
         return redirect(url_for('student_dashboard'))
-    if len(parent_password) < 6:
-        flash('Parent password must be at least 6 characters.', 'error')
+    if not parent1_gender:
+        flash('Select Parent 1 gender.', 'error')
         return redirect(url_for('student_dashboard'))
-    if parent_password != confirm_password:
-        flash('Parent passwords do not match.', 'error')
+    if len(parent1_password) < 6:
+        flash('Parent 1 password must be at least 6 characters.', 'error')
+        return redirect(url_for('student_dashboard'))
+    if parent1_password != parent1_confirm:
+        flash('Parent 1 passwords do not match.', 'error')
         return redirect(url_for('student_dashboard'))
 
-    student['parent_phone'] = parent_phone
-    student['parent_password_hash'] = hash_password(parent_password)
+    # Parent 2 is optional but must be complete if provided.
+    parent2_any = bool(parent2_phone or parent2_password or parent2_confirm or parent2_gender)
+    if parent2_any:
+        if not has_parent_multi_cols:
+            flash('Secondary parent access is not available yet. Run migration/startup schema updates and retry.', 'error')
+            return redirect(url_for('student_dashboard'))
+        if not parent2_phone or not parent2_password:
+            flash('Parent 2 phone and password are both required when adding Parent 2.', 'error')
+            return redirect(url_for('student_dashboard'))
+        if not is_valid_parent_phone(parent2_phone):
+            flash('Enter a valid Parent 2 phone number.', 'error')
+            return redirect(url_for('student_dashboard'))
+        if not parent2_gender:
+            flash('Select Parent 2 gender.', 'error')
+            return redirect(url_for('student_dashboard'))
+        if len(parent2_password) < 6:
+            flash('Parent 2 password must be at least 6 characters.', 'error')
+            return redirect(url_for('student_dashboard'))
+        if parent2_password != parent2_confirm:
+            flash('Parent 2 passwords do not match.', 'error')
+            return redirect(url_for('student_dashboard'))
+        if parent1_phone == parent2_phone:
+            flash('Parent 1 and Parent 2 phone numbers must be different.', 'error')
+            return redirect(url_for('student_dashboard'))
+
+    student['parent_phone'] = parent1_phone
+    student['parent_password_hash'] = hash_password(parent1_password)
+    student['parent_gender'] = parent1_gender
+    if has_parent_multi_cols:
+        if parent2_any:
+            student['parent_phone_2'] = parent2_phone
+            student['parent_password_hash_2'] = hash_password(parent2_password)
+            student['parent_gender_2'] = parent2_gender
+        else:
+            # Keep existing Parent 2 if already linked; do not allow removal.
+            student['parent_phone_2'] = (student.get('parent_phone_2', '') or '').strip()
+            student['parent_password_hash_2'] = (student.get('parent_password_hash_2', '') or '').strip()
+            student['parent_gender_2'] = (student.get('parent_gender_2', '') or '').strip()
     save_student(school_id, student_id, student)
     flash('Parent access saved successfully.', 'success')
     return redirect(url_for('student_dashboard'))
@@ -17259,13 +17517,13 @@ def _parent_allowed_student_keys():
 
 
 @app.route('/parent-portal', methods=['GET', 'POST'])
+@require_rate_limit('parent_portal', RATE_LIMIT_PARENT_PORTAL_PER_MIN, 60, redirect_endpoint='parent_portal', methods=('POST',))
 def parent_portal():
     if request.method == 'GET' and session.get('role') == 'parent':
         return redirect(url_for('parent_dashboard'))
     if request.method == 'POST':
         parent_phone = normalize_parent_phone(request.form.get('parent_phone', ''))
         parent_password = (request.form.get('password', '') or '').strip()
-        requested_student_id = (request.form.get('student_id', '') or '').strip()
         client_ip = get_client_ip()
         if not parent_phone or not parent_password:
             flash('Enter parent phone and password.', 'error')
@@ -17277,9 +17535,6 @@ def parent_portal():
         candidates = get_parent_students_by_phone(parent_phone)
         matched = []
         for row in candidates:
-            sid = (row.get('student_id', '') or '').strip()
-            if requested_student_id and sid.lower() != requested_student_id.lower():
-                continue
             password_hash = (row.get('parent_password_hash') or '').strip()
             if not password_hash:
                 continue
@@ -17289,9 +17544,6 @@ def parent_portal():
             register_failed_login('parent_portal', parent_phone, client_ip)
             record_login_audit(parent_phone, 'parent', None, 'parent_portal', False, 'invalid_credentials')
             flash('Invalid parent phone or password.', 'error')
-            return redirect(url_for('parent_portal'))
-        if len(matched) > 1 and not requested_student_id:
-            flash('Multiple student profiles are linked. Enter Student ID to continue.', 'error')
             return redirect(url_for('parent_portal'))
         clear_failed_login('parent_portal', parent_phone, client_ip)
         session.clear()
@@ -17312,6 +17564,7 @@ def parent_portal():
 
 
 @app.route('/parent/change-password', methods=['POST'])
+@require_roles('parent', redirect_endpoint='login')
 def parent_change_password():
     if session.get('role') != 'parent':
         return redirect(url_for('parent_portal'))
@@ -17329,6 +17582,8 @@ def parent_change_password():
         return redirect(url_for('parent_dashboard'))
 
     allowed_keys = _parent_allowed_student_keys()
+    parent_phone = normalize_parent_phone(session.get('parent_phone', ''))
+    has_parent_multi_cols = students_has_parent_multi_access_columns()
     if not allowed_keys:
         flash('Parent session expired. Please login again.', 'error')
         return redirect(url_for('parent_portal'))
@@ -17341,7 +17596,15 @@ def parent_change_password():
         student = load_student(school_id, student_id)
         if not student:
             continue
-        current_hash = (student.get('parent_password_hash', '') or '').strip()
+        primary_phone = normalize_parent_phone(student.get('parent_phone', ''))
+        secondary_phone = normalize_parent_phone(student.get('parent_phone_2', '')) if has_parent_multi_cols else ''
+        if parent_phone == primary_phone:
+            current_hash = (student.get('parent_password_hash', '') or '').strip()
+        elif has_parent_multi_cols and parent_phone == secondary_phone:
+            current_hash = (student.get('parent_password_hash_2', '') or '').strip()
+        else:
+            flash('Parent session is not linked to this student profile.', 'error')
+            return redirect(url_for('parent_dashboard'))
         if not current_hash or not check_password(current_hash, old_password):
             flash('Current parent password is incorrect for one or more linked students.', 'error')
             return redirect(url_for('parent_dashboard'))
@@ -17353,18 +17616,31 @@ def parent_change_password():
     with db_connection(commit=True) as conn:
         c = conn.cursor()
         for school_id, student_id in matched_keys:
-            db_execute(
-                c,
-                """UPDATE students
-                   SET parent_password_hash = ?
-                   WHERE school_id = ? AND student_id = ?""",
-                (new_hash, school_id, student_id),
-            )
+            student = load_student(school_id, student_id) or {}
+            primary_phone = normalize_parent_phone(student.get('parent_phone', ''))
+            secondary_phone = normalize_parent_phone(student.get('parent_phone_2', '')) if has_parent_multi_cols else ''
+            if parent_phone == primary_phone:
+                db_execute(
+                    c,
+                    """UPDATE students
+                       SET parent_password_hash = ?
+                       WHERE school_id = ? AND student_id = ?""",
+                    (new_hash, school_id, student_id),
+                )
+            elif has_parent_multi_cols and parent_phone == secondary_phone:
+                db_execute(
+                    c,
+                    """UPDATE students
+                       SET parent_password_hash_2 = ?
+                       WHERE school_id = ? AND student_id = ?""",
+                    (new_hash, school_id, student_id),
+                )
     flash('Parent password changed successfully.', 'success')
     return redirect(url_for('parent_dashboard'))
 
 
 @app.route('/parent')
+@require_roles('parent', redirect_endpoint='login')
 def parent_dashboard():
     if session.get('role') != 'parent':
         return redirect(url_for('parent_portal'))
@@ -18418,6 +18694,7 @@ def school_admin_student_result():
     )
 
 @app.route('/school-admin/correct-result', methods=['GET', 'POST'])
+@require_roles('school_admin')
 def school_admin_correct_result():
     """Allow school admin to correct a published student result and republish."""
     if session.get('role') != 'school_admin':
@@ -18628,6 +18905,8 @@ def school_admin_correct_result():
     )
 
 @app.route('/school-admin/unpublish-results', methods=['POST'])
+@require_roles('school_admin')
+@require_rate_limit('school_admin_unpublish_results', RATE_LIMIT_MUTATION_PER_MIN, 60, redirect_endpoint='view_students', methods=('POST',))
 def school_admin_unpublish_results():
     """Allow school admin to unpublish a class result after password confirmation."""
     if session.get('role') != 'school_admin':
@@ -18778,6 +19057,7 @@ def student_portal():
     return render_template('student/student_portal.html')
 
 @app.route('/check-result', methods=['POST'])
+@require_rate_limit('check_result', RATE_LIMIT_CHECK_RESULT_PER_MIN, 60, redirect_endpoint='student_portal', methods=('POST',))
 def check_result():
     """Check student result by student ID and password."""
     student_id = request.form.get('student_id', '').strip()
@@ -18991,6 +19271,7 @@ def change_password():
     return redirect(url_for('menu'))
 
 @app.route('/view_students')
+@require_roles('teacher', 'school_admin')
 def view_students():
     if 'user_id' not in session:
         return redirect(url_for('login'))
@@ -19276,6 +19557,10 @@ def run_db_health_check(apply_fixes=False, include_startup_ddl=False):
                 db_execute(c, "UPDATE users SET password_changed_at = COALESCE(password_changed_at, CURRENT_TIMESTAMP)")
                 db_execute(c, "ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_phone TEXT")
                 db_execute(c, "ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_password_hash TEXT")
+                db_execute(c, "ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_gender TEXT DEFAULT ''")
+                db_execute(c, "ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_phone_2 TEXT DEFAULT ''")
+                db_execute(c, "ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_password_hash_2 TEXT DEFAULT ''")
+                db_execute(c, "ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_gender_2 TEXT DEFAULT ''")
             add_check('fix_users_password_changed_at', True, 'Ensured users.password_changed_at exists.')
         except Exception as exc:
             add_check('fix_users_password_changed_at', False, str(exc))

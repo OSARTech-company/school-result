@@ -664,7 +664,25 @@
                 <div class="card">
                     <h2><i class="fas fa-user-graduate"></i> Recent Students</h2>
                     <p><strong>Current Term:</strong> {{ current_term }}</p>
-                    <table>
+                    {% set viewed_count = 0 %}
+                    {% set pending_view_count = 0 %}
+                    {% for student_id, student in recent_students %}
+                        {% if student_id in viewed_student_ids %}
+                            {% set viewed_count = viewed_count + 1 %}
+                        {% else %}
+                            {% set pending_view_count = pending_view_count + 1 %}
+                        {% endif %}
+                    {% endfor %}
+                    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:10px;">
+                        <button type="button" id="view-filter-all" class="btn btn-secondary btn-xs">
+                            All ({{ recent_students|length }})
+                        </button>
+                        <button type="button" id="view-filter-pending" class="btn btn-warning btn-xs">
+                            Not Viewed ({{ pending_view_count }})
+                        </button>
+                        <span class="chip chip-info">Viewed: {{ viewed_count }}</span>
+                    </div>
+                    <table id="recent-students-table">
                         <thead>
                             <tr>
                                 <th>Student ID</th>
@@ -675,9 +693,9 @@
                                 <th>Action</th>
                             </tr>
                         </thead>
-                        <tbody>
+                        <tbody id="recent-students-tbody">
                             {% for student_id, student in recent_students %}
-                                <tr class="student-row">
+                                <tr class="student-row" data-viewed="{{ '1' if student_id in viewed_student_ids else '0' }}">
                                     <td>{{ student_id }}</td>
                                     <td>
                                         {{ student.firstname }}
@@ -932,6 +950,38 @@
     </div>
     {% endif %}
     <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260303c') }}"></script>
+    <script>
+        (function () {
+            const allBtn = document.getElementById('view-filter-all');
+            const pendingBtn = document.getElementById('view-filter-pending');
+            const tbody = document.getElementById('recent-students-tbody');
+            if (!allBtn || !pendingBtn || !tbody) return;
+
+            const rows = Array.from(tbody.querySelectorAll('tr[data-viewed]'));
+            function applyFilter(mode) {
+                rows.forEach((row) => {
+                    const viewed = row.getAttribute('data-viewed') === '1';
+                    const show = (mode === 'all') || (mode === 'pending' && !viewed);
+                    row.style.display = show ? '' : 'none';
+                });
+                if (mode === 'pending') {
+                    pendingBtn.classList.remove('btn-secondary');
+                    pendingBtn.classList.add('btn-warning');
+                    allBtn.classList.remove('btn-primary');
+                    allBtn.classList.add('btn-secondary');
+                } else {
+                    allBtn.classList.remove('btn-secondary');
+                    allBtn.classList.add('btn-primary');
+                    pendingBtn.classList.remove('btn-primary');
+                    pendingBtn.classList.add('btn-warning');
+                }
+            }
+
+            allBtn.addEventListener('click', function () { applyFilter('all'); });
+            pendingBtn.addEventListener('click', function () { applyFilter('pending'); });
+            applyFilter('all');
+        })();
+    </script>
     {% if unread_teacher_messages %}
     <script>
         (function () {

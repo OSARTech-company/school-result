@@ -409,6 +409,7 @@ def test_get_school_publication_statuses_uses_approval_columns_when_present(app_
                 (
                     "JSS1",
                     "T1",
+                    "Mr T",
                     1,
                     "2026-02-26T10:00:00",
                     "approved",
@@ -432,6 +433,7 @@ def test_get_school_publication_statuses_uses_approval_columns_when_present(app_
     monkeypatch.setattr(m, "result_publication_has_approval_columns", lambda: True)
     monkeypatch.setattr(m, "db_connection", fake_db_connection)
     monkeypatch.setattr(m, "db_execute", lambda *args, **kwargs: None)
+    monkeypatch.setattr(m, "get_term_edit_lock_status", lambda *args, **kwargs: {"enabled": True, "locked": False})
     monkeypatch.setattr(
         m,
         "get_class_published_view_counts",
@@ -452,7 +454,7 @@ def test_get_school_publication_statuses_fallback_when_approval_columns_missing(
 
     class FakeCursor:
         def fetchall(self):
-            return [("JSS2", "T2", 0, "")]
+            return [("JSS2", "T2", "Mrs T", 0, "")]
 
     class FakeConn:
         def cursor(self):
@@ -466,6 +468,7 @@ def test_get_school_publication_statuses_fallback_when_approval_columns_missing(
     monkeypatch.setattr(m, "result_publication_has_approval_columns", lambda: False)
     monkeypatch.setattr(m, "db_connection", fake_db_connection)
     monkeypatch.setattr(m, "db_execute", lambda *args, **kwargs: None)
+    monkeypatch.setattr(m, "get_term_edit_lock_status", lambda *args, **kwargs: {"enabled": True, "locked": False})
     monkeypatch.setattr(m, "get_class_published_view_counts", lambda *args, **kwargs: {})
 
     assignments = [{"classname": "JSS2", "teacher_name": "Mrs T", "teacher_id": "T2", "term": "First Term", "academic_year": "2025-2026"}]
@@ -540,7 +543,7 @@ def test_school_admin_approve_results_route_calls_review(client, app_module, mon
 
     resp = client.post("/school-admin/approve-results", data={"classname": "JSS1", "review_note": "ok"})
     assert resp.status_code == 302
-    assert resp.headers["Location"].endswith("/school-admin")
+    assert resp.headers["Location"].endswith("/school-admin/publish-results")
     assert called["approve"] is True
     assert called["classname"] == "JSS1"
     assert called["admin_user_id"] == "A1"
@@ -566,7 +569,7 @@ def test_school_admin_reject_results_route_calls_review(client, app_module, monk
 
     resp = client.post("/school-admin/reject-results", data={"classname": "JSS1", "review_note": "needs fix"})
     assert resp.status_code == 302
-    assert resp.headers["Location"].endswith("/school-admin")
+    assert resp.headers["Location"].endswith("/school-admin/publish-results")
     assert called["approve"] is False
     assert called["classname"] == "JSS1"
     assert called["admin_user_id"] == "A1"
@@ -581,7 +584,7 @@ def test_school_admin_dashboard_passes_assignments_to_publication_statuses(clien
     monkeypatch.setattr(m, "get_school", lambda school_id: {"academic_year": "2025-2026", "principal_signature_image": ""})
     monkeypatch.setattr(m, "get_current_term", lambda school: "First Term")
     monkeypatch.setattr(m, "get_total_student_count", lambda school_id: 1)
-    monkeypatch.setattr(m, "get_teachers", lambda school_id: {})
+    monkeypatch.setattr(m, "get_teachers", lambda school_id, include_archived=False: {})
     monkeypatch.setattr(m, "get_student_count_by_class", lambda school_id: {})
     monkeypatch.setattr(m, "get_class_assignments", lambda school_id: assignments)
     monkeypatch.setattr(m, "get_last_login_at", lambda user_id: None)
@@ -720,11 +723,11 @@ def test_publish_results_behaviour_uses_publish_year(app_module, monkeypatch):
     )
     monkeypatch.setattr(m, "get_class_attendance_publish_readiness", lambda **kwargs: {"ready": True, "missing_rows": [], "days_open": 0, "message": ""})
 
-    def fake_behaviour(school_id, student_id, term, academic_year=''):
+    def fake_behaviour(school_id, classname, term, academic_year=''):
         captured["year"] = academic_year
-        return {}
+        return {"ST1": {}}
 
-    monkeypatch.setattr(m, "get_student_behaviour_assessment", fake_behaviour)
+    monkeypatch.setattr(m, "get_class_behaviour_assessments", fake_behaviour)
 
     def fake_db_connection(commit=False):
         class FakeCursor:
@@ -759,3 +762,31 @@ def test_filter_visible_terms_for_student_hides_current_term_when_operations_off
     assert "2025-2026::Second Term" not in visible_tokens
     assert "2025-2026::First Term" in visible_tokens
     assert "2024-2025::Third Term" in visible_tokens
+
+
+def test_rate_limit_consume_blocks_after_limit(app_module, monkeypatch):
+    m = app_module
+    m._RATE_LIMIT_EVENTS.clear()
+    monkeypatch.setattr(m.time, "time", lambda: 1000.0)
+
+    ok1, retry1 = m._rate_limit_consume("login:1.2.3.4", 2, 60)
+    ok2, retry2 = m._rate_limit_consume("login:1.2.3.4", 2, 60)
+    ok3, retry3 = m._rate_limit_consume("login:1.2.3.4", 2, 60)
+
+    assert ok1 is True and retry1 == 0
+    assert ok2 is True and retry2 == 0
+    assert ok3 is False
+    assert retry3 >= 1
+
+
+def test_rate_limit_consume_allows_after_window(app_module, monkeypatch):
+    m = app_module
+    m._RATE_LIMIT_EVENTS.clear()
+    now = {"t": 1000.0}
+    monkeypatch.setattr(m.time, "time", lambda: now["t"])
+
+    assert m._rate_limit_consume("check_result:1.2.3.4", 1, 60)[0] is True
+    assert m._rate_limit_consume("check_result:1.2.3.4", 1, 60)[0] is False
+
+    now["t"] = 1062.0
+    assert m._rate_limit_consume("check_result:1.2.3.4", 1, 60)[0] is True

@@ -455,7 +455,7 @@
         <aside class="right-pane" id="loginPanel">
             <section class="login-card">
                 <h2>Sign In</h2>
-                <p class="sub">Use your assigned username and password.</p>
+                <p class="sub">Use your assigned username and password, or parent phone and password.</p>
 
                 {% with messages = get_flashed_messages(with_categories=true) %}
                     {% if messages %}
@@ -468,7 +468,7 @@
                 <form method="post" action="{{ url_for('login') }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="field">
-                        <label for="username">Username</label>
+                        <label for="username">Username / Parent Phone</label>
                         <input type="text" id="username" name="username" autocomplete="username" required>
                     </div>
                     <div class="field">
