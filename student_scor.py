@@ -761,6 +761,8 @@ def db_connection(commit=False):
 _STUDENTS_PROMOTED_IS_BOOL = None
 _STUDENTS_HAS_USER_ID = None
 _STUDENTS_HAS_PARENT_ACCESS_COLS = None
+_STUDENTS_HAS_ARCHIVE_COLS = None
+_TEACHERS_HAS_ARCHIVE_COLS = None
 _USERS_HAS_PASSWORD_CHANGED_AT = None
 _USERS_HAS_TUTORIAL_SEEN_AT = None
 
@@ -810,6 +812,52 @@ def students_has_parent_access_columns():
     except Exception:
         _STUDENTS_HAS_PARENT_ACCESS_COLS = False
     return _STUDENTS_HAS_PARENT_ACCESS_COLS
+
+def students_has_archive_columns():
+    """Detect whether students.is_archived + students.archived_at exist."""
+    global _STUDENTS_HAS_ARCHIVE_COLS
+    if _STUDENTS_HAS_ARCHIVE_COLS is not None:
+        return _STUDENTS_HAS_ARCHIVE_COLS
+    try:
+        with db_connection() as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """SELECT column_name
+                   FROM information_schema.columns
+                   WHERE table_schema = 'public'
+                     AND table_name = 'students'
+                     AND column_name = ANY(%s)""",
+                (['is_archived', 'archived_at'],),
+            )
+            cols = {str(row[0]) for row in c.fetchall() if row and row[0]}
+            _STUDENTS_HAS_ARCHIVE_COLS = ('is_archived' in cols and 'archived_at' in cols)
+    except Exception:
+        _STUDENTS_HAS_ARCHIVE_COLS = False
+    return _STUDENTS_HAS_ARCHIVE_COLS
+
+def teachers_has_archive_columns():
+    """Detect whether teachers.is_archived + teachers.archived_at exist."""
+    global _TEACHERS_HAS_ARCHIVE_COLS
+    if _TEACHERS_HAS_ARCHIVE_COLS is not None:
+        return _TEACHERS_HAS_ARCHIVE_COLS
+    try:
+        with db_connection() as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """SELECT column_name
+                   FROM information_schema.columns
+                   WHERE table_schema = 'public'
+                     AND table_name = 'teachers'
+                     AND column_name = ANY(%s)""",
+                (['is_archived', 'archived_at'],),
+            )
+            cols = {str(row[0]) for row in c.fetchall() if row and row[0]}
+            _TEACHERS_HAS_ARCHIVE_COLS = ('is_archived' in cols and 'archived_at' in cols)
+    except Exception:
+        _TEACHERS_HAS_ARCHIVE_COLS = False
+    return _TEACHERS_HAS_ARCHIVE_COLS
 
 def users_has_password_changed_at_column():
     """Detect whether users.password_changed_at exists on this DB."""
@@ -1429,6 +1477,8 @@ def init_db():
     safe_exec_ignore("ALTER TABLE students ADD COLUMN gender TEXT")
     safe_exec_ignore("ALTER TABLE students ADD COLUMN parent_phone TEXT")
     safe_exec_ignore("ALTER TABLE students ADD COLUMN parent_password_hash TEXT")
+    safe_exec_ignore("ALTER TABLE students ADD COLUMN is_archived INTEGER DEFAULT 0")
+    safe_exec_ignore("ALTER TABLE students ADD COLUMN archived_at TIMESTAMP")
     
     # Teachers table
     db_execute(c, """CREATE TABLE IF NOT EXISTS teachers (
@@ -1450,6 +1500,8 @@ def init_db():
     safe_exec_ignore("ALTER TABLE teachers ADD COLUMN signature_image TEXT")
     safe_exec_ignore("ALTER TABLE teachers ADD COLUMN profile_image TEXT")
     safe_exec_ignore("ALTER TABLE teachers ADD COLUMN subjects_taught TEXT")
+    safe_exec_ignore("ALTER TABLE teachers ADD COLUMN is_archived INTEGER DEFAULT 0")
+    safe_exec_ignore("ALTER TABLE teachers ADD COLUMN archived_at TIMESTAMP")
     
     # Class assignments
     db_execute(c, """CREATE TABLE IF NOT EXISTS class_assignments (
@@ -1684,6 +1736,19 @@ def init_db():
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         UNIQUE(school_id, student_id, attendance_date, period_label)
                     )""")
+    db_execute(c, """CREATE TABLE IF NOT EXISTS term_edit_locks (
+                        id SERIAL PRIMARY KEY,
+                        school_id TEXT NOT NULL,
+                        classname TEXT NOT NULL,
+                        term TEXT NOT NULL,
+                        academic_year TEXT DEFAULT '',
+                        is_locked INTEGER NOT NULL DEFAULT 1,
+                        unlocked_until TIMESTAMP,
+                        unlock_reason TEXT DEFAULT '',
+                        unlocked_by TEXT DEFAULT '',
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(school_id, classname, term, academic_year)
+                    )""")
     safe_exec_ignore("ALTER TABLE period_attendance ADD COLUMN subject TEXT DEFAULT ''")
     db_execute(c, """CREATE TABLE IF NOT EXISTS promotion_audit_logs (
                         id SERIAL PRIMARY KEY,
@@ -1779,11 +1844,13 @@ def init_db():
         logging.warning("Could not enforce case-insensitive username uniqueness: %s", exc)
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_students_school ON students(school_id)')
+    db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_students_school_archived ON students(school_id, is_archived)')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_students_student_id_lower ON students(LOWER(student_id))')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_students_class ON students(school_id, classname)')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_students_school_class_term ON students(school_id, classname, term)')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_students_school_term ON students(school_id, term)')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_teachers_school ON teachers(school_id)')
+    db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_teachers_school_archived ON teachers(school_id, is_archived)')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_teachers_school_user ON teachers(school_id, user_id)')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_teacher_subject_assignments_lookup ON teacher_subject_assignments(school_id, teacher_id, classname, term, academic_year)')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_class_subject_configs_school_class ON class_subject_configs(school_id, classname)')
@@ -1812,6 +1879,7 @@ def init_db():
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_result_publications_school_class_term_year ON result_publications(school_id, classname, term, academic_year)')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_published_school_class_term_year ON published_student_results(school_id, classname, term, academic_year)')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_published_school_student_term_year ON published_student_results(school_id, student_id, term, academic_year)')
+    db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_term_edit_locks_scope ON term_edit_locks(school_id, classname, term, academic_year)')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_score_audit_school_student_changed ON score_audit_logs(school_id, student_id, changed_at)')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_score_audit_school_class_term_year ON score_audit_logs(school_id, classname, term, academic_year)')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_attendance_school_class_date ON student_attendance(school_id, classname, attendance_date)')
@@ -2133,12 +2201,70 @@ def normalize_all_student_passwords(target_school_id=''):
             (default_hash, scoped_school_id),
         )
 
+def reset_student_passwords_for_class(school_id, classname, default_password, reset_by=''):
+    """Reset active student login passwords for one class in one school."""
+    scoped_school_id = (school_id or '').strip()
+    scoped_class = (classname or '').strip()
+    if not scoped_school_id or not scoped_class:
+        raise ValueError('school_id and classname are required.')
+    if not default_password:
+        raise ValueError('default_password is required.')
+    reset_hash = hash_password(default_password)
+    touched = 0
+    skipped = 0
+    with db_connection(commit=True) as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """SELECT student_id
+               FROM students
+               WHERE school_id = ?
+                 AND LOWER(classname) = LOWER(?)
+                 AND COALESCE(is_archived, 0) = 0
+               ORDER BY student_id""",
+            (scoped_school_id, scoped_class),
+        )
+        student_ids = [str(r[0] or '').strip() for r in (c.fetchall() or []) if str(r[0] or '').strip()]
+        for sid in student_ids:
+            db_execute(
+                c,
+                """SELECT role, school_id
+                   FROM users
+                   WHERE LOWER(username) = LOWER(?)
+                   LIMIT 1""",
+                (sid,),
+            )
+            existing = c.fetchone()
+            if existing:
+                existing_role = (existing[0] or '').strip().lower()
+                existing_school = (existing[1] or '').strip()
+                if existing_role != 'student' or existing_school != scoped_school_id:
+                    skipped += 1
+                    continue
+            upsert_user_with_cursor(c, sid, reset_hash, role='student', school_id=scoped_school_id, overwrite_identity=False)
+            touched += 1
+    if reset_by:
+        logging.info(
+            "Class student password reset by %s school_id=%s classname=%s touched=%s skipped=%s",
+            reset_by,
+            scoped_school_id,
+            scoped_class,
+            touched,
+            skipped,
+        )
+    return {'touched': touched, 'skipped': skipped}
+
 if os.environ.get('RESET_STUDENT_PASSWORDS_ON_STARTUP', '').strip().lower() in ('1', 'true', 'yes'):
     reset_school_id = (os.environ.get('RESET_STUDENT_PASSWORDS_SCHOOL_ID', '') or '').strip()
     if not reset_school_id:
         raise RuntimeError(
             "RESET_STUDENT_PASSWORDS_ON_STARTUP requires RESET_STUDENT_PASSWORDS_SCHOOL_ID for multi-school safety."
         )
+    logging.warning(
+        "RESET_STUDENT_PASSWORDS_ON_STARTUP is enabled for school_id=%s. "
+        "Disable it after this one-time reset to avoid repeated password resets on each restart.",
+        reset_school_id,
+    )
     normalize_all_student_passwords(reset_school_id)
 
 def get_user(username):
@@ -5636,6 +5762,75 @@ def is_result_published(school_id, classname, term, academic_year=''):
         row = c.fetchone()
         return bool(row and int(row[0]) == 1)
 
+def set_term_edit_lock(school_id, classname, term, academic_year='', is_locked=True, unlocked_minutes=0, unlock_reason='', unlocked_by=''):
+    """Set or temporarily relax edit lock for one published class-term."""
+    with db_connection(commit=True) as conn:
+        c = conn.cursor()
+        unlock_until = None
+        if not is_locked and int(unlocked_minutes or 0) > 0:
+            unlock_until = datetime.now() + timedelta(minutes=int(unlocked_minutes))
+        try:
+            db_execute(
+                c,
+                """INSERT INTO term_edit_locks
+                   (school_id, classname, term, academic_year, is_locked, unlocked_until, unlock_reason, unlocked_by, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                   ON CONFLICT(school_id, classname, term, academic_year) DO UPDATE SET
+                     is_locked = excluded.is_locked,
+                     unlocked_until = excluded.unlocked_until,
+                     unlock_reason = excluded.unlock_reason,
+                     unlocked_by = excluded.unlocked_by,
+                     updated_at = CURRENT_TIMESTAMP""",
+                (
+                    school_id,
+                    classname,
+                    term,
+                    academic_year or '',
+                    1 if is_locked else 0,
+                    unlock_until,
+                    (unlock_reason or '').strip()[:400],
+                    (unlocked_by or '').strip(),
+                ),
+            )
+        except Exception as exc:
+            if 'term_edit_locks' in str(exc).lower():
+                raise ValueError('Term edit lock schema is unavailable. Run migration/startup DDL and retry.')
+            raise
+
+def get_term_edit_lock_status(school_id, classname, term, academic_year=''):
+    """Return lock status for a published class-term."""
+    if not is_result_published(school_id, classname, term, academic_year):
+        return {'locked': False, 'reason': '', 'unlocked_until': None}
+    try:
+        with db_connection() as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """SELECT is_locked, unlocked_until, unlock_reason
+                   FROM term_edit_locks
+                   WHERE school_id = ? AND classname = ? AND term = ?
+                     AND COALESCE(academic_year, '') = COALESCE(?, '')
+                   LIMIT 1""",
+                (school_id, classname, term, academic_year or ''),
+            )
+            row = c.fetchone()
+    except Exception as exc:
+        if 'term_edit_locks' in str(exc).lower():
+            return {'locked': True, 'reason': 'Published term lock (schema pending migration).', 'unlocked_until': None}
+        raise
+    if not row:
+        return {'locked': True, 'reason': 'Published term lock (default).', 'unlocked_until': None}
+    lock_flag = bool(int(row[0] or 0))
+    unlocked_until = row[1]
+    if not lock_flag and unlocked_until:
+        if unlocked_until > datetime.now():
+            return {'locked': False, 'reason': row[2] or '', 'unlocked_until': unlocked_until}
+        set_term_edit_lock(school_id, classname, term, academic_year, is_locked=True)
+        return {'locked': True, 'reason': 'Temporary unlock expired.', 'unlocked_until': None}
+    if not lock_flag and not unlocked_until:
+        return {'locked': False, 'reason': row[2] or '', 'unlocked_until': None}
+    return {'locked': True, 'reason': row[2] or '', 'unlocked_until': unlocked_until}
+
 _RESULT_PUBLICATION_APPROVAL_COLS = (
     'approval_status',
     'submitted_at',
@@ -6061,6 +6256,20 @@ def publish_results_for_class_atomic(school_id, classname, term, teacher_id, aca
                     datetime.now().isoformat(),
                 ),
             )
+        try:
+            db_execute(
+                c,
+                """INSERT INTO term_edit_locks
+                   (school_id, classname, term, academic_year, is_locked, unlocked_until, unlock_reason, unlocked_by, updated_at)
+                   VALUES (?, ?, ?, ?, 1, NULL, '', ?, CURRENT_TIMESTAMP)
+                   ON CONFLICT(school_id, classname, term, academic_year) DO UPDATE SET
+                     is_locked = 1,
+                     unlocked_until = NULL,
+                     updated_at = CURRENT_TIMESTAMP""",
+                (school_id, classname, term, publish_year, reviewed_by or teacher_id or ''),
+            )
+        except Exception as exc:
+            logging.warning("Failed to enforce term edit lock on publish: %s", exc)
 
 def review_result_approval_request(school_id, classname, term, academic_year, admin_user_id, approve, review_note=''):
     ensure_result_publication_approval_columns()
@@ -6616,6 +6825,7 @@ def get_school_publication_statuses(school_id, term, academic_year='', assignmen
         classname = a.get('classname', '')
         pub = publication_rows.get(classname, {})
         cnt = counts_by_class.get(classname, {})
+        lock_status = get_term_edit_lock_status(school_id, classname, term, academic_year or '')
         seen_classes.add(classname)
         out.append({
             'classname': classname,
@@ -6633,11 +6843,15 @@ def get_school_publication_statuses(school_id, term, academic_year='', assignmen
             'review_note': pub.get('review_note', ''),
             'published_count': int(cnt.get('published_count', 0)),
             'viewed_count': int(cnt.get('viewed_count', 0)),
+            'term_locked': bool(lock_status.get('locked', False)),
+            'term_unlock_reason': lock_status.get('reason', ''),
+            'term_unlocked_until': lock_status.get('unlocked_until'),
         })
     for classname, pub in publication_rows.items():
         if not classname or classname in seen_classes:
             continue
         cnt = counts_by_class.get(classname, {})
+        lock_status = get_term_edit_lock_status(school_id, classname, term, academic_year or '')
         out.append({
             'classname': classname,
             'teacher_name': pub.get('teacher_name', ''),
@@ -6654,6 +6868,9 @@ def get_school_publication_statuses(school_id, term, academic_year='', assignmen
             'review_note': pub.get('review_note', ''),
             'published_count': int(cnt.get('published_count', 0)),
             'viewed_count': int(cnt.get('viewed_count', 0)),
+            'term_locked': bool(lock_status.get('locked', False)),
+            'term_unlock_reason': lock_status.get('reason', ''),
+            'term_unlocked_until': lock_status.get('unlocked_until'),
         })
     out.sort(key=lambda x: (x.get('classname', ''), x.get('teacher_name', '')))
     return out
@@ -6834,15 +7051,18 @@ def build_positions_from_published_results(school, classname, term, class_result
 
 # ==================== STUDENT FUNCTIONS ====================
 
-def load_students(school_id, class_filter='', term_filter=''):
+def load_students(school_id, class_filter='', term_filter='', include_archived=False):
     """Load students for a school."""
     has_parent_cols = students_has_parent_access_columns()
+    has_archive_cols = students_has_archive_columns()
     with db_connection() as conn:
         c = conn.cursor()
         if has_parent_cols:
-            query = 'SELECT student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects, scores, promoted, parent_phone, parent_password_hash FROM students WHERE school_id = ?'
+            archive_col = ', COALESCE(is_archived, 0)' if has_archive_cols else ''
+            query = f'SELECT student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects, scores, promoted, parent_phone, parent_password_hash{archive_col} FROM students WHERE school_id = ?'
         else:
-            query = 'SELECT student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects, scores, promoted FROM students WHERE school_id = ?'
+            archive_col = ', COALESCE(is_archived, 0)' if has_archive_cols else ''
+            query = f'SELECT student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects, scores, promoted{archive_col} FROM students WHERE school_id = ?'
         params = [school_id]
         
         if class_filter:
@@ -6851,6 +7071,8 @@ def load_students(school_id, class_filter='', term_filter=''):
         if term_filter:
             query += ' AND term = ?'
             params.append(term_filter)
+        if has_archive_cols and not include_archived:
+            query += ' AND COALESCE(is_archived, 0) = 0'
         
         query += ' ORDER BY student_id'
         
@@ -6858,9 +7080,17 @@ def load_students(school_id, class_filter='', term_filter=''):
         students_data = {}
         for row in c.fetchall():
             if has_parent_cols:
-                student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted, parent_phone, parent_password_hash = row
+                if has_archive_cols:
+                    student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted, parent_phone, parent_password_hash, is_archived = row
+                else:
+                    student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted, parent_phone, parent_password_hash = row
+                    is_archived = 0
             else:
-                student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted = row
+                if has_archive_cols:
+                    student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted, is_archived = row
+                else:
+                    student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted = row
+                    is_archived = 0
                 parent_phone, parent_password_hash = '', ''
             subjects = json.loads(subjects_str) if subjects_str else []
             scores = json.loads(scores_str) if scores_str else {}
@@ -6878,42 +7108,56 @@ def load_students(school_id, class_filter='', term_filter=''):
                 'promoted': promoted,
                 'parent_phone': (parent_phone or '').strip(),
                 'parent_password_hash': (parent_password_hash or '').strip(),
+                'is_archived': int(is_archived or 0),
             }
         return students_data
 
-def load_students_for_classes(school_id, classnames, term_filter=''):
+def load_students_for_classes(school_id, classnames, term_filter='', include_archived=False):
     """Load students for a school limited to a class list."""
     class_list = [str(c).strip() for c in (classnames or []) if str(c).strip()]
     if not class_list:
         return {}
     has_parent_cols = students_has_parent_access_columns()
+    has_archive_cols = students_has_archive_columns()
     with db_connection() as conn:
         c = conn.cursor()
         placeholders = ','.join(['?'] * len(class_list))
         if has_parent_cols:
+            archive_col = ', COALESCE(is_archived, 0)' if has_archive_cols else ''
             query = (
                 'SELECT student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, '
-                'number_of_subject, subjects, scores, promoted, parent_phone, parent_password_hash '
+                f'number_of_subject, subjects, scores, promoted, parent_phone, parent_password_hash{archive_col} '
                 f'FROM students WHERE school_id = ? AND classname IN ({placeholders})'
             )
         else:
+            archive_col = ', COALESCE(is_archived, 0)' if has_archive_cols else ''
             query = (
                 'SELECT student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, '
-                'number_of_subject, subjects, scores, promoted '
+                f'number_of_subject, subjects, scores, promoted{archive_col} '
                 f'FROM students WHERE school_id = ? AND classname IN ({placeholders})'
             )
         params = [school_id] + class_list
         if term_filter:
             query += ' AND term = ?'
             params.append(term_filter)
+        if has_archive_cols and not include_archived:
+            query += ' AND COALESCE(is_archived, 0) = 0'
         query += ' ORDER BY student_id'
         db_execute(c, query, tuple(params))
         students_data = {}
         for row in c.fetchall():
             if has_parent_cols:
-                student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted, parent_phone, parent_password_hash = row
+                if has_archive_cols:
+                    student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted, parent_phone, parent_password_hash, is_archived = row
+                else:
+                    student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted, parent_phone, parent_password_hash = row
+                    is_archived = 0
             else:
-                student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted = row
+                if has_archive_cols:
+                    student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted, is_archived = row
+                else:
+                    student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted = row
+                    is_archived = 0
                 parent_phone, parent_password_hash = '', ''
             students_data[student_id] = {
                 'firstname': firstname,
@@ -6929,6 +7173,7 @@ def load_students_for_classes(school_id, classnames, term_filter=''):
                 'promoted': promoted,
                 'parent_phone': (parent_phone or '').strip(),
                 'parent_password_hash': (parent_password_hash or '').strip(),
+                'is_archived': int(is_archived or 0),
             }
         return students_data
 
@@ -6982,26 +7227,32 @@ def get_student_filter_options(school_id, classnames=None):
 
     return available_classes, available_terms
 
-def load_student(school_id, student_id):
+def load_student(school_id, student_id, include_archived=False):
     """Load a single student."""
     has_parent_cols = students_has_parent_access_columns()
+    has_archive_cols = students_has_archive_columns()
     with db_connection() as conn:
         c = conn.cursor()
         if has_parent_cols:
-            db_execute(c, """SELECT student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, 
-                           number_of_subject, subjects, scores, promoted, parent_phone, parent_password_hash FROM students 
-                           WHERE school_id = ? AND student_id = ?""",
+            archived_sql = '' if (include_archived or not has_archive_cols) else ' AND COALESCE(is_archived, 0) = 0'
+            archive_col = ', COALESCE(is_archived, 0)' if has_archive_cols else ''
+            db_execute(c, f"""SELECT student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, 
+                           number_of_subject, subjects, scores, promoted, parent_phone, parent_password_hash{archive_col} FROM students 
+                           WHERE school_id = ? AND student_id = ?{archived_sql}""",
                        (school_id, student_id))
         else:
-            db_execute(c, """SELECT student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, 
-                           number_of_subject, subjects, scores, promoted FROM students 
-                           WHERE school_id = ? AND student_id = ?""",
+            archived_sql = '' if (include_archived or not has_archive_cols) else ' AND COALESCE(is_archived, 0) = 0'
+            archive_col = ', COALESCE(is_archived, 0)' if has_archive_cols else ''
+            db_execute(c, f"""SELECT student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, 
+                           number_of_subject, subjects, scores, promoted{archive_col} FROM students 
+                           WHERE school_id = ? AND student_id = ?{archived_sql}""",
                        (school_id, student_id))
         row = c.fetchone()
         if not row:
             return None
         parent_phone = (row[12] or '').strip() if has_parent_cols else ''
         parent_password_hash = (row[13] or '').strip() if has_parent_cols else ''
+        archived_idx = (14 if has_parent_cols else 12) if has_archive_cols else None
         return {
             'student_id': row[0],
             'firstname': row[1],
@@ -7017,6 +7268,7 @@ def load_student(school_id, student_id):
             'promoted': row[11],
             'parent_phone': parent_phone,
             'parent_password_hash': parent_password_hash,
+            'is_archived': int(row[archived_idx] or 0) if archived_idx is not None else 0,
         }
 
 def find_student_school_id(student_id):
@@ -7181,12 +7433,48 @@ def delete_student(school_id, student_id):
         c = conn.cursor()
         db_execute(c, 'DELETE FROM students WHERE school_id = ? AND student_id = ?', (school_id, student_id))
 
+def archive_student_account(school_id, student_id, archived_by=''):
+    """Soft archive one student within one school."""
+    if not students_has_archive_columns():
+        raise ValueError('Student archive schema is unavailable. Run migration/startup DDL and retry.')
+    with db_connection(commit=True) as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """UPDATE students
+               SET is_archived = 1,
+                   archived_at = CURRENT_TIMESTAMP
+               WHERE school_id = ? AND student_id = ?""",
+            (school_id, student_id),
+        )
+    if archived_by:
+        logging.info("Student archived by=%s school_id=%s student_id=%s", archived_by, school_id, student_id)
+
+def restore_student_account(school_id, student_id, restored_by=''):
+    """Restore one archived student within one school."""
+    if not students_has_archive_columns():
+        raise ValueError('Student archive schema is unavailable. Run migration/startup DDL and retry.')
+    with db_connection(commit=True) as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """UPDATE students
+               SET is_archived = 0,
+                   archived_at = NULL
+               WHERE school_id = ? AND student_id = ?""",
+            (school_id, student_id),
+        )
+    if restored_by:
+        logging.info("Student restored by=%s school_id=%s student_id=%s", restored_by, school_id, student_id)
+
 def get_student_count_by_class(school_id):
     """Get student count by class."""
+    has_archive_cols = students_has_archive_columns()
     with db_connection() as conn:
         c = conn.cursor()
-        db_execute(c, """SELECT classname, COUNT(*) as count FROM students 
-                       WHERE school_id = ? GROUP BY classname""", (school_id,))
+        archived_where = " AND COALESCE(is_archived, 0) = 0" if has_archive_cols else ""
+        db_execute(c, f"""SELECT classname, COUNT(*) as count FROM students 
+                       WHERE school_id = ?{archived_where} GROUP BY classname""", (school_id,))
         return {row[0]: row[1] for row in c.fetchall()}
 
 def get_school_classnames(school_id):
@@ -7231,9 +7519,11 @@ def get_school_classnames(school_id):
 
 def get_total_student_count(school_id):
     """Get total student count for one school."""
+    has_archive_cols = students_has_archive_columns()
     with db_connection() as conn:
         c = conn.cursor()
-        db_execute(c, 'SELECT COUNT(*) FROM students WHERE school_id = ?', (school_id,))
+        archived_where = ' AND COALESCE(is_archived, 0) = 0' if has_archive_cols else ''
+        db_execute(c, f'SELECT COUNT(*) FROM students WHERE school_id = ?{archived_where}', (school_id,))
         row = c.fetchone()
         return int(row[0] or 0) if row else 0
 
@@ -9506,22 +9796,27 @@ def get_teacher(school_id, teacher_id):
         'subjects_taught': subjects_taught,
     }
 
-def get_teachers(school_id):
+def get_teachers(school_id, include_archived=False):
     """Get all teachers for a school."""
+    has_archive_cols = teachers_has_archive_columns()
     with db_connection() as conn:
         c = conn.cursor()
         has_profile_image_col = True
         try:
-            db_execute(c, """SELECT user_id, firstname, lastname, phone, gender, signature_image, profile_image, assigned_classes, subjects_taught FROM teachers 
-                           WHERE school_id = ?""", (school_id,))
+            archived_where = '' if (include_archived or not has_archive_cols) else ' AND COALESCE(is_archived, 0) = 0'
+            archive_col = ', COALESCE(is_archived, 0)' if has_archive_cols else ''
+            db_execute(c, f"""SELECT user_id, firstname, lastname, phone, gender, signature_image, profile_image, assigned_classes, subjects_taught{archive_col} FROM teachers 
+                           WHERE school_id = ?{archived_where}""", (school_id,))
         except Exception:
             has_profile_image_col = False
             try:
                 conn.rollback()
             except Exception:
                 pass
-            db_execute(c, """SELECT user_id, firstname, lastname, phone, gender, signature_image, assigned_classes, subjects_taught FROM teachers 
-                           WHERE school_id = ?""", (school_id,))
+            archived_where = '' if (include_archived or not has_archive_cols) else ' AND COALESCE(is_archived, 0) = 0'
+            archive_col = ', COALESCE(is_archived, 0)' if has_archive_cols else ''
+            db_execute(c, f"""SELECT user_id, firstname, lastname, phone, gender, signature_image, assigned_classes, subjects_taught{archive_col} FROM teachers 
+                           WHERE school_id = ?{archived_where}""", (school_id,))
         teachers = {}
         for row in c.fetchall():
             raw_subjects = row[8] if has_profile_image_col and len(row) > 8 else (row[7] if len(row) > 7 else '')
@@ -9530,6 +9825,7 @@ def get_teachers(school_id):
             except Exception:
                 subjects_taught = normalize_subjects_list(raw_subjects or '')
             assigned_classes_raw = row[7] if has_profile_image_col and len(row) > 7 else (row[6] if len(row) > 6 else '')
+            archive_idx = (9 if has_profile_image_col else 8) if has_archive_cols else None
             teachers[row[0]] = {
                 'firstname': row[1],
                 'lastname': row[2],
@@ -9539,6 +9835,7 @@ def get_teachers(school_id):
                 'profile_image': (row[6] or '') if has_profile_image_col and len(row) > 6 else '',
                 'assigned_classes': json.loads(assigned_classes_raw) if assigned_classes_raw else [],
                 'subjects_taught': subjects_taught,
+                'is_archived': int(row[archive_idx] or 0) if archive_idx is not None else 0,
             }
         return teachers
 
@@ -9570,6 +9867,42 @@ def save_teacher(school_id, user_id, firstname, lastname, assigned_classes, subj
                     pass
                 db_execute(c, 'INSERT INTO teachers (school_id, user_id, firstname, lastname, phone, gender, signature_image, assigned_classes, subjects_taught) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
                            (school_id, user_id, firstname, lastname, phone, gender, '', classes_str, subjects_str))
+
+def archive_teacher_account(school_id, teacher_id, archived_by=''):
+    """Soft archive one teacher and clear active assignments."""
+    if not teachers_has_archive_columns():
+        raise ValueError('Teacher archive schema is unavailable. Run migration/startup DDL and retry.')
+    with db_connection(commit=True) as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """UPDATE teachers
+               SET is_archived = 1,
+                   archived_at = CURRENT_TIMESTAMP
+               WHERE school_id = ? AND user_id = ?""",
+            (school_id, teacher_id),
+        )
+        db_execute(c, 'DELETE FROM class_assignments WHERE school_id = ? AND teacher_id = ?', (school_id, teacher_id))
+        db_execute(c, 'DELETE FROM teacher_subject_assignments WHERE school_id = ? AND teacher_id = ?', (school_id, teacher_id))
+    if archived_by:
+        logging.info("Teacher archived by=%s school_id=%s teacher_id=%s", archived_by, school_id, teacher_id)
+
+def restore_teacher_account(school_id, teacher_id, restored_by=''):
+    """Restore one archived teacher."""
+    if not teachers_has_archive_columns():
+        raise ValueError('Teacher archive schema is unavailable. Run migration/startup DDL and retry.')
+    with db_connection(commit=True) as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """UPDATE teachers
+               SET is_archived = 0,
+                   archived_at = NULL
+               WHERE school_id = ? AND user_id = ?""",
+            (school_id, teacher_id),
+        )
+    if restored_by:
+        logging.info("Teacher restored by=%s school_id=%s teacher_id=%s", restored_by, school_id, teacher_id)
 
 def assign_teacher_to_class(school_id, teacher_id, classname, term, academic_year):
     """Assign teacher to a class."""
@@ -10636,6 +10969,18 @@ def login():
                 record_login_audit(username, role, user_school_id, 'login', False, 'invalid_school_assignment')
                 flash('Account is linked to an invalid school. Contact administrator.', 'error')
                 return render_template('shared/login.html', terms_read=terms_read)
+            if role == 'student':
+                student_row = load_student(user_school_id, username)
+                if not student_row:
+                    record_login_audit(username, role, user_school_id, 'login', False, 'student_archived_or_missing')
+                    flash('Student account is inactive. Contact school admin.', 'error')
+                    return render_template('shared/login.html', terms_read=terms_read)
+            if role == 'teacher':
+                teacher_rows = get_teachers(user_school_id)
+                if username not in teacher_rows:
+                    record_login_audit(username, role, user_school_id, 'login', False, 'teacher_archived_or_missing')
+                    flash('Teacher account is inactive. Contact school admin.', 'error')
+                    return render_template('shared/login.html', terms_read=terms_read)
 
             clear_failed_login('login', username, client_ip)
             return _complete_authenticated_login(user, user_school_id)
@@ -11006,7 +11351,9 @@ def school_admin_dashboard():
         })
     total_students = get_total_student_count(school_id)
     parent_count = get_linked_parent_count(school_id)
-    teachers = get_teachers(school_id)
+    teachers_all = get_teachers(school_id, include_archived=True)
+    teachers = {tid: t for tid, t in (teachers_all or {}).items() if not int(t.get('is_archived', 0) or 0)}
+    archived_teachers = {tid: t for tid, t in (teachers_all or {}).items() if int(t.get('is_archived', 0) or 0)}
     class_counts = get_student_count_by_class(school_id)
     assignments = get_class_assignments(school_id)
     teacher_class_map = {}
@@ -11115,6 +11462,7 @@ def school_admin_dashboard():
                          total_students=total_students,
                          parent_count=parent_count,
                          teachers=teachers,
+                         archived_teachers=archived_teachers,
                          class_counts=class_counts,
                          assignments=assignments,
                          teacher_class_map=teacher_class_map,
@@ -12514,7 +12862,8 @@ def school_admin_revert_score_audit():
     classname = row.get('classname', '')
     term = row.get('term', '')
     academic_year = row.get('academic_year', '')
-    if is_result_published(school_id, classname, term, academic_year):
+    lock_status = get_term_edit_lock_status(school_id, classname, term, academic_year)
+    if lock_status.get('locked'):
         flash(f'Cannot revert: {classname} ({term}) is published and locked.', 'error')
         return redirect(url_for('school_admin_score_audit'))
 
@@ -13843,7 +14192,7 @@ def school_admin_add_students_by_class():
             return redirect(f'{url_for("school_admin_add_students_by_class")}?class={urllib.parse.quote(classname)}')
 
     # Always build listing from fresh DB state so ordering and new additions are correct.
-    all_students = load_students(school_id)
+    all_students = load_students(school_id, include_archived=True)
     class_options = sorted(set(s.get('classname') for s in all_students.values() if s.get('classname')))
     class_students = [
         {
@@ -13853,6 +14202,7 @@ def school_admin_add_students_by_class():
             'gender': data.get('gender', ''),
             'term': data.get('term', ''),
             'stream': data.get('stream', ''),
+            'is_archived': int(data.get('is_archived', 0) or 0),
         }
         for sid, data in all_students.items()
         if selected_class and data.get('classname') == selected_class
@@ -15359,6 +15709,141 @@ def school_admin_reject_results():
             break
     flash(message, 'success' if ok else 'error')
     return redirect(url_for('school_admin_publish_results'))
+
+@app.route('/school-admin/unlock-term-edit', methods=['POST'])
+def school_admin_unlock_term_edit():
+    if session.get('role') != 'school_admin':
+        return redirect(url_for('login'))
+    school_id = session.get('school_id')
+    admin_user_id = session.get('user_id')
+    classname = (request.form.get('classname', '') or '').strip()
+    term = (request.form.get('term', '') or '').strip()
+    academic_year = (request.form.get('academic_year', '') or '').strip()
+    reason = (request.form.get('unlock_reason', '') or '').strip()
+    try:
+        minutes = max(5, min(240, int(request.form.get('unlock_minutes', 30) or 30)))
+    except Exception:
+        minutes = 30
+    if not classname or not term:
+        flash('Class and term are required.', 'error')
+        return redirect(url_for('school_admin_publish_results'))
+    if not reason:
+        flash('Unlock reason is required.', 'error')
+        return redirect(url_for('school_admin_publish_results'))
+    if not is_result_published(school_id, classname, term, academic_year):
+        flash('This class-term is not published, so lock override is not needed.', 'info')
+        return redirect(url_for('school_admin_publish_results'))
+    set_term_edit_lock(
+        school_id=school_id,
+        classname=classname,
+        term=term,
+        academic_year=academic_year,
+        is_locked=False,
+        unlocked_minutes=minutes,
+        unlock_reason=reason,
+        unlocked_by=admin_user_id,
+    )
+    flash(f'Edit lock unlocked for {classname} ({term}) for {minutes} minute(s).', 'success')
+    return redirect(url_for('school_admin_publish_results'))
+
+@app.route('/school-admin/relock-term-edit', methods=['POST'])
+def school_admin_relock_term_edit():
+    if session.get('role') != 'school_admin':
+        return redirect(url_for('login'))
+    school_id = session.get('school_id')
+    admin_user_id = session.get('user_id')
+    classname = (request.form.get('classname', '') or '').strip()
+    term = (request.form.get('term', '') or '').strip()
+    academic_year = (request.form.get('academic_year', '') or '').strip()
+    if not classname or not term:
+        flash('Class and term are required.', 'error')
+        return redirect(url_for('school_admin_publish_results'))
+    set_term_edit_lock(
+        school_id=school_id,
+        classname=classname,
+        term=term,
+        academic_year=academic_year,
+        is_locked=True,
+        unlocked_minutes=0,
+        unlock_reason='',
+        unlocked_by=admin_user_id,
+    )
+    flash(f'Edit lock restored for {classname} ({term}).', 'success')
+    return redirect(url_for('school_admin_publish_results'))
+
+@app.route('/school-admin/reset-class-student-passwords', methods=['POST'])
+def school_admin_reset_class_student_passwords():
+    if session.get('role') != 'school_admin':
+        return redirect(url_for('login'))
+    school_id = session.get('school_id')
+    admin_user_id = session.get('user_id')
+    classname = (request.form.get('classname', '') or '').strip()
+    if not classname:
+        flash('Class is required for password reset.', 'error')
+        return redirect(request.referrer or url_for('school_admin_add_students_by_class'))
+    result = reset_student_passwords_for_class(
+        school_id=school_id,
+        classname=classname,
+        default_password=DEFAULT_STUDENT_PASSWORD,
+        reset_by=admin_user_id,
+    )
+    flash(
+        f'Class password reset completed for {classname}: reset={result.get("touched", 0)}, skipped={result.get("skipped", 0)}.',
+        'success' if int(result.get('touched', 0)) > 0 else 'info',
+    )
+    return redirect(request.referrer or url_for('school_admin_add_students_by_class', **{'class': classname}))
+
+@app.route('/school-admin/student/archive', methods=['POST'])
+def school_admin_archive_student():
+    if session.get('role') != 'school_admin':
+        return redirect(url_for('login'))
+    school_id = session.get('school_id')
+    student_id = (request.form.get('student_id', '') or '').strip()
+    if not student_id:
+        flash('Student ID is required.', 'error')
+        return redirect(request.referrer or url_for('school_admin_add_students_by_class'))
+    archive_student_account(school_id, student_id, archived_by=session.get('user_id', '') or '')
+    flash(f'Student {student_id} archived.', 'success')
+    return redirect(request.referrer or url_for('school_admin_add_students_by_class'))
+
+@app.route('/school-admin/student/restore', methods=['POST'])
+def school_admin_restore_student():
+    if session.get('role') != 'school_admin':
+        return redirect(url_for('login'))
+    school_id = session.get('school_id')
+    student_id = (request.form.get('student_id', '') or '').strip()
+    if not student_id:
+        flash('Student ID is required.', 'error')
+        return redirect(request.referrer or url_for('school_admin_add_students_by_class'))
+    restore_student_account(school_id, student_id, restored_by=session.get('user_id', '') or '')
+    flash(f'Student {student_id} restored.', 'success')
+    return redirect(request.referrer or url_for('school_admin_add_students_by_class'))
+
+@app.route('/school-admin/teacher/archive', methods=['POST'])
+def school_admin_archive_teacher():
+    if session.get('role') != 'school_admin':
+        return redirect(url_for('login'))
+    school_id = session.get('school_id')
+    teacher_id = (request.form.get('teacher_id', '') or '').strip().lower()
+    if not teacher_id:
+        flash('Teacher ID is required.', 'error')
+        return redirect(request.referrer or url_for('school_admin_dashboard'))
+    archive_teacher_account(school_id, teacher_id, archived_by=session.get('user_id', '') or '')
+    flash(f'Teacher {teacher_id} archived.', 'success')
+    return redirect(request.referrer or url_for('school_admin_dashboard'))
+
+@app.route('/school-admin/teacher/restore', methods=['POST'])
+def school_admin_restore_teacher():
+    if session.get('role') != 'school_admin':
+        return redirect(url_for('login'))
+    school_id = session.get('school_id')
+    teacher_id = (request.form.get('teacher_id', '') or '').strip().lower()
+    if not teacher_id:
+        flash('Teacher ID is required.', 'error')
+        return redirect(request.referrer or url_for('school_admin_dashboard'))
+    restore_teacher_account(school_id, teacher_id, restored_by=session.get('user_id', '') or '')
+    flash(f'Teacher {teacher_id} restored.', 'success')
+    return redirect(request.referrer or url_for('school_admin_dashboard'))
 
 @app.route('/teacher/allocate-stream', methods=['GET', 'POST'])
 def teacher_allocate_stream():
@@ -17977,6 +18462,11 @@ def school_admin_correct_result():
     exam_config = get_assessment_config_for_class(school_id, snapshot.get('classname', ''))
 
     if request.method == 'POST':
+        classname_for_lock = snapshot.get('classname', student.get('classname', ''))
+        term_lock = get_term_edit_lock_status(school_id, classname_for_lock, target_term, target_year)
+        if term_lock.get('locked'):
+            flash('Published term is locked for edits. Unlock it temporarily from Publish Results page.', 'error')
+            return redirect(url_for('school_admin_correct_result', student_id=sid, term=target_token))
         correction_reason = (request.form.get('correction_reason', '') or '').strip()
         if not correction_reason:
             flash('Reason is required before changing a published result.', 'error')
@@ -18212,6 +18702,22 @@ def school_admin_unpublish_results():
                      AND COALESCE(academic_year, '') = COALESCE(?, '')""",
                 (school_id, classname, target_term, target_year or ''),
             )
+            try:
+                db_execute(
+                    c,
+                    """INSERT INTO term_edit_locks
+                       (school_id, classname, term, academic_year, is_locked, unlocked_until, unlock_reason, unlocked_by, updated_at)
+                       VALUES (?, ?, ?, ?, 0, NULL, 'Unpublished', ?, CURRENT_TIMESTAMP)
+                       ON CONFLICT(school_id, classname, term, academic_year) DO UPDATE SET
+                         is_locked = 0,
+                         unlocked_until = NULL,
+                         unlock_reason = 'Unpublished',
+                         unlocked_by = excluded.unlocked_by,
+                         updated_at = CURRENT_TIMESTAMP""",
+                    (school_id, classname, target_term, target_year or '', session.get('user_id', '') or ''),
+                )
+            except Exception as lock_exc:
+                logging.warning("Failed to update term_edit_locks during unpublish: %s", lock_exc)
     except Exception as exc:
         flash(f'Failed to unpublish result: {exc}', 'error')
         return redirect(fallback)
@@ -18810,12 +19316,12 @@ def run_db_health_check(apply_fixes=False, include_startup_ddl=False):
 
     ok_count = sum(1 for x in checks if x['ok'])
     fail_count = len(checks) - ok_count
-    print('DB Health Report')
-    print(f'Checks: {len(checks)} | Passed: {ok_count} | Failed: {fail_count}')
+    logging.info('DB Health Report')
+    logging.info('Checks: %s | Passed: %s | Failed: %s', len(checks), ok_count, fail_count)
     for item in checks:
         status = 'PASS' if item['ok'] else 'FAIL'
         detail = f" - {item['detail']}" if item['detail'] else ''
-        print(f'[{status}] {item["name"]}{detail}')
+        logging.info('[%s] %s%s', status, item["name"], detail)
 
     return 0 if fail_count == 0 else 1
 

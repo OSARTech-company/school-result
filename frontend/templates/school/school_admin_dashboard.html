@@ -632,11 +632,37 @@
               <br /><small>Gender: {{ (teacher.gender or 'Not set')|title }}</small>
               <br /><small>Phone: {{ teacher.phone or 'Not set' }}</small>
               <br /><small>Subjects: {{ teacher.subjects_taught|join(', ') if teacher.subjects_taught else 'Not set' }}</small>
+              <form action="{{ url_for('school_admin_archive_teacher') }}" method="POST" class="mt-10" onsubmit="return confirm('Archive this teacher and clear current assignments?');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                <input type="hidden" name="teacher_id" value="{{ teacher_id }}" />
+                <button type="submit" class="btn btn-danger btn-sm">Archive</button>
+              </form>
             </div>
             {% endfor %}
             </div>
             {% else %}
             <p>No teachers added yet.</p>
+            {% endif %}
+          </div>
+
+          <div class="card">
+            <h2><i class="fas fa-box-archive"></i> Archived Teachers</h2>
+            {% if archived_teachers %}
+            <div class="teacher-grid">
+            {% for teacher_id, teacher in archived_teachers.items() %}
+            <div class="teacher-card">
+              <strong>{{ teacher.firstname }} {{ teacher.lastname }}</strong>
+              <br /><small>Username: {{ teacher_id }}</small>
+              <form action="{{ url_for('school_admin_restore_teacher') }}" method="POST" class="mt-10">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                <input type="hidden" name="teacher_id" value="{{ teacher_id }}" />
+                <button type="submit" class="btn btn-success btn-sm">Restore</button>
+              </form>
+            </div>
+            {% endfor %}
+            </div>
+            {% else %}
+            <p>No archived teachers.</p>
             {% endif %}
           </div>
 

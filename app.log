@@ -25809,3 +25809,45 @@ LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
 2026-03-05 07:19:22,450 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
 2026-03-05 07:19:22,577 - WARNING -  * Debugger is active!
 2026-03-05 07:19:22,580 - INFO -  * Debugger PIN: 541-365-780
+2026-03-05 17:47:41,873 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-05 17:47:41,874 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-05 17:47:41,875 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-05 17:54:44,700 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-05 17:54:44,701 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-05 17:54:44,701 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-05 17:54:44,825 - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.1.112:5000
+2026-03-05 17:54:44,826 - INFO - [33mPress CTRL+C to quit[0m
+2026-03-05 17:57:08,193 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-05 17:57:08,193 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-05 17:57:08,193 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-05 17:57:08,374 - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.1.112:5000
+2026-03-05 17:57:08,374 - INFO - [33mPress CTRL+C to quit[0m
+2026-03-05 17:57:08,378 - INFO -  * Restarting with stat
+2026-03-05 17:57:10,386 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-05 17:57:10,387 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-05 17:57:10,387 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-05 17:57:10,576 - WARNING -  * Debugger is active!
+2026-03-05 17:57:10,581 - INFO -  * Debugger PIN: 541-365-780
+2026-03-05 17:57:29,492 - INFO - 127.0.0.1 - - [05/Mar/2026 17:57:29] "GET / HTTP/1.1" 200 -
+2026-03-05 17:57:30,018 - INFO - 127.0.0.1 - - [05/Mar/2026 17:57:30] "[33mGET /favicon.ico HTTP/1.1[0m" 404 -
+2026-03-05 20:55:17,811 - INFO - 127.0.0.1 - - [05/Mar/2026 20:55:17] "GET /sw.js HTTP/1.1" 200 -
+2026-03-05 20:58:11,309 - INFO - The CSRF session token is missing.
+2026-03-05 20:58:11,310 - INFO - 127.0.0.1 - - [05/Mar/2026 20:58:11] "[32mPOST /login HTTP/1.1[0m" 302 -
+2026-03-05 20:58:11,324 - INFO - 127.0.0.1 - - [05/Mar/2026 20:58:11] "GET /login HTTP/1.1" 200 -
+2026-03-05 20:58:13,072 - INFO - 127.0.0.1 - - [05/Mar/2026 20:58:13] "[36mGET /sw.js HTTP/1.1[0m" 304 -
+2026-03-05 21:01:31,811 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-05 21:01:31,811 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-05 21:01:31,811 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-05 21:32:49,331 - INFO -  * Detected change in 'C:\\Aka\\School_Result\\migrate.py', reloading
+2026-03-05 21:32:49,644 - INFO -  * Restarting with stat
+2026-03-05 21:32:53,274 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-05 21:32:53,274 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-05 21:32:53,275 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-05 21:32:53,555 - WARNING -  * Debugger is active!
+2026-03-05 21:32:53,560 - INFO -  * Debugger PIN: 541-365-780

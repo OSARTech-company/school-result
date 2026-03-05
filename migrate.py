@@ -11,7 +11,31 @@ import os
 import sys
 
 
+def _load_local_env_file():
+    """Best-effort .env loader for local migrations without python-dotenv."""
+    env_path = os.path.join(os.path.dirname(__file__), '.env')
+    if not os.path.isfile(env_path):
+        return
+    try:
+        with open(env_path, 'r', encoding='utf-8') as fh:
+            for raw in fh:
+                line = (raw or '').strip()
+                if not line or line.startswith('#') or '=' not in line:
+                    continue
+                key, value = line.split('=', 1)
+                key = (key or '').strip()
+                if not key:
+                    continue
+                value = (value or '').strip().strip('"').strip("'")
+                os.environ.setdefault(key, value)
+    except Exception:
+        # Keep migration runner resilient; missing/malformed .env can still be
+        # handled by explicit environment variables.
+        return
+
+
 def main():
+    _load_local_env_file()
     # Keep app startup hooks disabled
     os.environ['RUN_STARTUP_DDL'] = '0'
     os.environ['RUN_STARTUP_BOOTSTRAP'] = '0'

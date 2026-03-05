@@ -106,12 +106,38 @@
                         <button type="submit" class="btn btn-danger btn-sm">Reject</button>
                       </form>
                       {% elif p.is_published %}
+                      <div class="mb-8">
+                        {% if p.term_locked %}
+                        <span class="chip chip-danger">Edit Locked</span>
+                        {% else %}
+                        <span class="chip chip-success">Edit Unlocked</span>
+                        {% endif %}
+                      </div>
                       <a
                         href="{{ url_for('school_admin_publish_results_corrections', classname=p.classname, term=p.term, academic_year=p.academic_year) }}"
                         class="btn btn-primary btn-sm"
                       >
                         Correct Result
                       </a>
+                      {% if p.term_locked %}
+                      <form action="{{ url_for('school_admin_unlock_term_edit') }}" method="POST" class="inline-form">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                        <input type="hidden" name="classname" value="{{ p.classname }}" />
+                        <input type="hidden" name="term" value="{{ p.term }}" />
+                        <input type="hidden" name="academic_year" value="{{ p.academic_year }}" />
+                        <input type="number" name="unlock_minutes" min="5" max="240" value="30" style="width:90px;" />
+                        <input type="text" name="unlock_reason" placeholder="Unlock reason (required)" required class="review-note-input" />
+                        <button type="submit" class="btn btn-warning btn-sm">Unlock Edit</button>
+                      </form>
+                      {% else %}
+                      <form action="{{ url_for('school_admin_relock_term_edit') }}" method="POST" class="inline-form">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                        <input type="hidden" name="classname" value="{{ p.classname }}" />
+                        <input type="hidden" name="term" value="{{ p.term }}" />
+                        <input type="hidden" name="academic_year" value="{{ p.academic_year }}" />
+                        <button type="submit" class="btn btn-warning btn-sm">Re-Lock Edit</button>
+                      </form>
+                      {% endif %}
                       <form action="{{ url_for('school_admin_unpublish_results') }}" method="POST" class="inline-form">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
                         <input type="hidden" name="classname" value="{{ p.classname }}" />
@@ -122,6 +148,11 @@
                       {% else %}
                       <span class="chip chip-muted">-</span>
                       {% endif %}
+                      <form action="{{ url_for('school_admin_reset_class_student_passwords') }}" method="POST" class="inline-form" onsubmit="return confirm('Reset all ACTIVE student passwords in {{ p.classname }} to default student password?');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                        <input type="hidden" name="classname" value="{{ p.classname }}" />
+                        <button type="submit" class="btn btn-warning btn-sm">Reset Class Passwords</button>
+                      </form>
                     </td>
                   </tr>
                   {% endfor %}

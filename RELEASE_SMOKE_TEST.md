@@ -4,6 +4,8 @@
 1. Set `DATABASE_URL` and `SECRET_KEY`.
 2. Start app with debug off:
    - PowerShell: `$env:FLASK_DEBUG="0"; python student_scor.py`
+3. Run route smoke script:
+   - `python smoke_test_paths.py`
 
 ## Core Login
 1. Login as `super_admin`.
@@ -25,6 +27,10 @@
    - Expected: both can be added if IDs are unique.
 2. Add student with duplicate manual Reg No.
    - Expected: duplicate ID is rejected.
+3. Archive one student from class list page and restore.
+   - Expected: archived student is hidden from active workflows and can be restored.
+4. Use "Reset Class Student Passwords" button on class list page.
+   - Expected: active students in selected class get reset to configured default password.
 
 ## Teacher Workflow
 1. Teacher sees only assigned classes.
@@ -34,6 +40,10 @@
 4. Publish results for one class.
 5. Edit score after publish.
    - Expected: blocked until unpublished by flow.
+6. On Publish Results page, use "Unlock Edit" for a published class and provide reason.
+   - Expected: correction/revert operations allowed during unlock window.
+7. Use "Re-Lock Edit".
+   - Expected: correction/revert operations blocked again.
 
 ## Super Admin Controls
 1. Turn School A operations OFF.
