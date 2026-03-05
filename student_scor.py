@@ -704,15 +704,26 @@ def db_connection(commit=False):
     """Context manager for PostgreSQL pooled connections with optional commit."""
     pool = _get_db_pool()
     conn = pool.getconn()
+    discard_conn = False
     try:
         yield conn
         if commit:
             conn.commit()
     except Exception:
-        conn.rollback()
+        # Preserve original DB/network exception; rollback best-effort only.
+        discard_conn = True
+        try:
+            if conn and not getattr(conn, 'closed', 1):
+                conn.rollback()
+        except Exception as rollback_exc:
+            logging.warning("db_connection rollback skipped/failed: %s", rollback_exc)
         raise
     finally:
-        pool.putconn(conn)
+        try:
+            is_closed = bool(getattr(conn, 'closed', 1))
+            pool.putconn(conn, close=(discard_conn or is_closed))
+        except Exception as put_exc:
+            logging.warning("db_connection putconn failed: %s", put_exc)
 
 _STUDENTS_PROMOTED_IS_BOOL = None
 _STUDENTS_HAS_USER_ID = None
@@ -10410,7 +10421,11 @@ def enforce_school_operations_toggle():
     school_id = session.get('school_id')
     if not school_id:
         return None
-    school = get_school(school_id)
+    try:
+        school = get_school(school_id)
+    except Exception as exc:
+        logging.warning("Skipping operations toggle check due transient DB error: %s", exc)
+        return None
     if not school:
         return None
     if safe_int(school.get('operations_enabled', 1), 1):
