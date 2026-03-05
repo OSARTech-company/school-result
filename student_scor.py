@@ -687,7 +687,16 @@ def get_db():
         from psycopg2.extras import DictCursor
     except ImportError as exc:
         raise RuntimeError("PostgreSQL backend requires psycopg2-binary") from exc
-    return psycopg2.connect(DATABASE_URL, cursor_factory=DictCursor, connect_timeout=10)
+    return psycopg2.connect(
+        DATABASE_URL,
+        cursor_factory=DictCursor,
+        connect_timeout=10,
+        keepalives=1,
+        keepalives_idle=30,
+        keepalives_interval=10,
+        keepalives_count=5,
+        options="-c statement_timeout=25000 -c lock_timeout=8000 -c idle_in_transaction_session_timeout=20000",
+    )
 
 def _get_db_pool():
     """Lazily initialize a PostgreSQL connection pool for request-time DB access."""
@@ -707,6 +716,11 @@ def _get_db_pool():
         dsn=DATABASE_URL,
         cursor_factory=DictCursor,
         connect_timeout=10,
+        keepalives=1,
+        keepalives_idle=30,
+        keepalives_interval=10,
+        keepalives_count=5,
+        options="-c statement_timeout=25000 -c lock_timeout=8000 -c idle_in_transaction_session_timeout=20000",
     )
     return _DB_POOL
 
@@ -5908,7 +5922,7 @@ def submit_result_approval_request(school_id, classname, term, academic_year, te
                 (school_id, classname, term, academic_year or '', teacher_id, resolved_teacher_name, resolved_principal_name),
             )
 
-def publish_results_for_class_atomic(school_id, classname, term, teacher_id, academic_year='', reviewed_by='', review_note=''):
+def publish_results_for_class_atomic(school_id, classname, term, teacher_id, academic_year='', reviewed_by='', review_note='', attendance_gate=None):
     """Publish class results in a single transaction (snapshot + publish flag)."""
     ensure_result_publication_approval_columns()
     has_approval_cols = result_publication_has_approval_columns()
@@ -5919,7 +5933,7 @@ def publish_results_for_class_atomic(school_id, classname, term, teacher_id, aca
     teacher_profile = get_teachers(school_id).get(teacher_id, {})
     teacher_name = f"{teacher_profile.get('firstname', '')} {teacher_profile.get('lastname', '')}".strip() or str(teacher_id)
     class_students = load_students(school_id, class_filter=classname, term_filter=term)
-    attendance_gate = get_class_attendance_publish_readiness(
+    attendance_gate = attendance_gate if isinstance(attendance_gate, dict) else get_class_attendance_publish_readiness(
         school_id=school_id,
         classname=classname,
         term=term,
@@ -5944,6 +5958,7 @@ def publish_results_for_class_atomic(school_id, classname, term, teacher_id, aca
 
     with db_connection(commit=True) as conn:
         c = conn.cursor()
+        behaviour_by_student = get_class_behaviour_assessments(school_id, classname, term, publish_year)
         existing_principal_comment_by_student = {}
         db_execute(
             c,
@@ -5957,7 +5972,7 @@ def publish_results_for_class_atomic(school_id, classname, term, teacher_id, aca
             existing_principal_comment_by_student[_sid] = (_comment or '').strip()
         for sid, student in class_students.items():
             scores = student.get('scores', {}) if isinstance(student.get('scores', {}), dict) else {}
-            behaviour_payload = get_student_behaviour_assessment(school_id, sid, term, publish_year)
+            behaviour_payload = behaviour_by_student.get(sid, _default_behaviour_assessment())
             average_marks = compute_average_marks_from_scores(scores, subjects=student.get('subjects', []))
             grade = grade_from_score(average_marks, grade_cfg)
             status = status_from_score(average_marks, grade_cfg)
@@ -6126,8 +6141,11 @@ def review_result_approval_request(school_id, classname, term, academic_year, ad
                 academic_year=(academic_year or ''),
                 reviewed_by=admin_user_id,
                 review_note=clean_note,
+                attendance_gate=gate,
             )
         except Exception as exc:
+            if _is_transient_db_transport_error(exc):
+                raise
             return False, f'Failed to publish: {exc}'
         return True, 'Results approved and published.'
 
