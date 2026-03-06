@@ -18189,12 +18189,21 @@ def parent_period_attendance():
 
     selected_term = (request.args.get('term', '') or '').strip()
     selected_year = (request.args.get('academic_year', '') or '').strip()
-    attendance_rows = get_period_attendance_for_student(
+    all_attendance_rows = get_period_attendance_for_student(
         selected_school_id,
         selected_student_id,
-        term=selected_term or None,
-        academic_year=selected_year or None,
+        term=None,
+        academic_year=None,
     )
+    attendance_rows = []
+    for row in all_attendance_rows:
+        row_term = (row.get('term') or '').strip()
+        row_year = (row.get('academic_year') or '').strip()
+        if selected_term and row_term != selected_term:
+            continue
+        if selected_year and row_year != selected_year:
+            continue
+        attendance_rows.append(row)
     default_term = ''
     default_year = ''
     if attendance_rows:
@@ -18244,13 +18253,57 @@ def parent_period_attendance():
     subject_teacher_comments.sort(key=lambda row: (row.get('subject') or '').lower())
 
     term_options = sorted(
-        {(row.get('term') or '').strip() for row in attendance_rows if (row.get('term') or '').strip()},
+        {(row.get('term') or '').strip() for row in all_attendance_rows if (row.get('term') or '').strip()},
         key=lambda t: (term_sort_value(t), t),
     )
     year_options = sorted(
-        {(row.get('academic_year') or '').strip() for row in attendance_rows if (row.get('academic_year') or '').strip()},
+        {(row.get('academic_year') or '').strip() for row in all_attendance_rows if (row.get('academic_year') or '').strip()},
         key=lambda y: ((_academic_year_start(y) or 0), y),
         reverse=True,
+    )
+    attendance_term_map = {}
+    for row in all_attendance_rows:
+        row_term = (row.get('term') or '').strip()
+        row_year = (row.get('academic_year') or '').strip()
+        if not row_term:
+            continue
+        token = _term_token(row_year, row_term)
+        if token in attendance_term_map:
+            continue
+        attendance_term_map[token] = {
+            'token': token,
+            'term': row_term,
+            'academic_year': row_year,
+            'label': f'{row_term} ({row_year})' if row_year else row_term,
+        }
+    available_attendance_terms = sorted(
+        attendance_term_map.values(),
+        key=lambda item: (
+            (_academic_year_start(item.get('academic_year', '')) or 0),
+            term_sort_value(item.get('term', '')),
+            (item.get('term', '') or '').lower(),
+        ),
+    )
+    current_attendance_term = None
+    if selected_term:
+        requested_token = _term_token(selected_year, selected_term)
+        current_attendance_term = attendance_term_map.get(requested_token)
+    if not current_attendance_term and available_attendance_terms:
+        current_attendance_term = available_attendance_terms[-1]
+    current_attendance_term_token = (current_attendance_term or {}).get('token', '')
+    current_attendance_index = next(
+        (i for i, item in enumerate(available_attendance_terms) if item.get('token') == current_attendance_term_token),
+        0,
+    )
+    prev_attendance_term = (
+        available_attendance_terms[current_attendance_index - 1]
+        if available_attendance_terms and current_attendance_index > 0
+        else None
+    )
+    next_attendance_term = (
+        available_attendance_terms[current_attendance_index + 1]
+        if available_attendance_terms and current_attendance_index < len(available_attendance_terms) - 1
+        else None
     )
 
     parent_theme_accent = '#1F7A8C'
@@ -18282,6 +18335,10 @@ def parent_period_attendance():
         selected_student=selected_student,
         selected_school=selected_school,
         attendance_rows=attendance_rows,
+        available_attendance_terms=available_attendance_terms,
+        current_attendance_term_token=current_attendance_term_token,
+        prev_attendance_term=prev_attendance_term,
+        next_attendance_term=next_attendance_term,
         unread_parent_messages=unread_parent_messages,
     )
 

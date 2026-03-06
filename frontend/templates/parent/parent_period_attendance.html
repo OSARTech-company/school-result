@@ -16,6 +16,10 @@
         .filters { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; align-items: end; }
         .filters label { display: block; font-weight: 600; margin-bottom: 4px; }
         .filters select { width: 100%; }
+        .term-nav { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+        .term-nav .chip { display: inline-block; padding: 8px 12px; border-radius: 999px; text-decoration: none; font-weight: 700; border: 1px solid rgba(31,122,140,.28); color: var(--accent, #1F7A8C); background: #fff; }
+        .term-nav .chip.active { background: var(--accent, #1F7A8C); color: #fff; border-color: transparent; }
+        .term-nav .chip.disabled { opacity: .5; pointer-events: none; }
         @media (max-width: 860px) {
             .filters { grid-template-columns: 1fr; }
         }
@@ -125,6 +129,38 @@
 
                 <div class="card">
                     <h3 class="no-margin"><i class="fas fa-list-check"></i> Period Attendance Records</h3>
+                    {% if available_attendance_terms %}
+                    <div class="term-nav">
+                        {% if prev_attendance_term %}
+                        <a
+                            href="{{ url_for('parent_period_attendance', student_key=selected_key, term=prev_attendance_term.term, academic_year=prev_attendance_term.academic_year) }}"
+                            class="chip"
+                        >
+                            <i class="fas fa-chevron-left"></i> Prev
+                        </a>
+                        {% else %}
+                        <span class="chip disabled"><i class="fas fa-chevron-left"></i> Prev</span>
+                        {% endif %}
+                        {% for item in available_attendance_terms %}
+                        <a
+                            href="{{ url_for('parent_period_attendance', student_key=selected_key, term=item.term, academic_year=item.academic_year) }}"
+                            class="chip {% if item.token == current_attendance_term_token %}active{% endif %}"
+                        >
+                            {{ item.label }}
+                        </a>
+                        {% endfor %}
+                        {% if next_attendance_term %}
+                        <a
+                            href="{{ url_for('parent_period_attendance', student_key=selected_key, term=next_attendance_term.term, academic_year=next_attendance_term.academic_year) }}"
+                            class="chip"
+                        >
+                            Next <i class="fas fa-chevron-right"></i>
+                        </a>
+                        {% else %}
+                        <span class="chip disabled">Next <i class="fas fa-chevron-right"></i></span>
+                        {% endif %}
+                    </div>
+                    {% endif %}
                     {% if attendance_rows %}
                     <table class="mt-10">
                         <thead>
