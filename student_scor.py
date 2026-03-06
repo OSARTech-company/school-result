@@ -916,14 +916,16 @@ def students_has_parent_multi_access_columns():
                    WHERE table_schema = 'public'
                      AND table_name = 'students'
                      AND column_name = ANY(%s)""",
-                (['parent_gender', 'parent_phone_2', 'parent_password_hash_2', 'parent_gender_2'],),
+                (['parent_name', 'parent_gender', 'parent_phone_2', 'parent_password_hash_2', 'parent_gender_2', 'parent_name_2'],),
             )
             cols = {str(row[0]) for row in c.fetchall() if row and row[0]}
             _STUDENTS_HAS_PARENT_MULTI_COLS = (
-                'parent_gender' in cols
+                'parent_name' in cols
+                and 'parent_gender' in cols
                 and 'parent_phone_2' in cols
                 and 'parent_password_hash_2' in cols
                 and 'parent_gender_2' in cols
+                and 'parent_name_2' in cols
             )
     except Exception:
         _STUDENTS_HAS_PARENT_MULTI_COLS = False
@@ -1588,7 +1590,9 @@ def init_db():
                         promoted INTEGER DEFAULT 0,
                         parent_phone TEXT,
                         parent_password_hash TEXT,
+                        parent_name TEXT DEFAULT '',
                         parent_gender TEXT DEFAULT '',
+                        parent_name_2 TEXT DEFAULT '',
                         parent_phone_2 TEXT DEFAULT '',
                         parent_password_hash_2 TEXT DEFAULT '',
                         parent_gender_2 TEXT DEFAULT '',
@@ -1599,7 +1603,9 @@ def init_db():
     safe_exec_ignore("ALTER TABLE students ADD COLUMN gender TEXT")
     safe_exec_ignore("ALTER TABLE students ADD COLUMN parent_phone TEXT")
     safe_exec_ignore("ALTER TABLE students ADD COLUMN parent_password_hash TEXT")
+    safe_exec_ignore("ALTER TABLE students ADD COLUMN parent_name TEXT DEFAULT ''")
     safe_exec_ignore("ALTER TABLE students ADD COLUMN parent_gender TEXT DEFAULT ''")
+    safe_exec_ignore("ALTER TABLE students ADD COLUMN parent_name_2 TEXT DEFAULT ''")
     safe_exec_ignore("ALTER TABLE students ADD COLUMN parent_phone_2 TEXT DEFAULT ''")
     safe_exec_ignore("ALTER TABLE students ADD COLUMN parent_password_hash_2 TEXT DEFAULT ''")
     safe_exec_ignore("ALTER TABLE students ADD COLUMN parent_gender_2 TEXT DEFAULT ''")
@@ -2722,7 +2728,9 @@ def save_student_with_cursor(c, school_id, student_id, student_data):
     gender = normalize_student_gender(student_data.get('gender', ''))
     parent_phone = (student_data.get('parent_phone', '') or '').strip()
     parent_password_hash = (student_data.get('parent_password_hash', '') or '').strip()
+    parent_name = normalize_person_name(student_data.get('parent_name', ''))
     parent_gender = normalize_parent_gender(student_data.get('parent_gender', ''))
+    parent_name_2 = normalize_person_name(student_data.get('parent_name_2', ''))
     parent_phone_2 = (student_data.get('parent_phone_2', '') or '').strip()
     parent_password_hash_2 = (student_data.get('parent_password_hash_2', '') or '').strip()
     parent_gender_2 = normalize_parent_gender(student_data.get('parent_gender_2', ''))
@@ -2731,16 +2739,18 @@ def save_student_with_cursor(c, school_id, student_id, student_data):
     promoted_value = normalize_promoted_db_value(student_data.get('promoted', 0))
     if has_parent_cols:
         if has_parent_multi_cols:
-            parent_insert_cols = ", parent_phone, parent_password_hash, parent_gender, parent_phone_2, parent_password_hash_2, parent_gender_2"
+            parent_insert_cols = ", parent_phone, parent_password_hash, parent_name, parent_gender, parent_name_2, parent_phone_2, parent_password_hash_2, parent_gender_2"
             parent_update_cols = """
                      parent_phone = excluded.parent_phone,
                      parent_password_hash = excluded.parent_password_hash,
+                     parent_name = excluded.parent_name,
                      parent_gender = excluded.parent_gender,
+                     parent_name_2 = excluded.parent_name_2,
                      parent_phone_2 = excluded.parent_phone_2,
                      parent_password_hash_2 = excluded.parent_password_hash_2,
                      parent_gender_2 = excluded.parent_gender_2,"""
-            parent_values = [parent_phone, parent_password_hash, parent_gender, parent_phone_2, parent_password_hash_2, parent_gender_2]
-            parent_placeholders = ", ?, ?, ?, ?, ?, ?"
+            parent_values = [parent_phone, parent_password_hash, parent_name, parent_gender, parent_name_2, parent_phone_2, parent_password_hash_2, parent_gender_2]
+            parent_placeholders = ", ?, ?, ?, ?, ?, ?, ?, ?"
         else:
             parent_insert_cols = ", parent_phone, parent_password_hash"
             parent_update_cols = """
@@ -4387,7 +4397,9 @@ def ensure_extended_features_schema():
             db_execute(c, "ALTER TABLE users ADD COLUMN IF NOT EXISTS tutorial_seen_at TIMESTAMP")
             db_execute(c, "ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_phone TEXT")
             db_execute(c, "ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_password_hash TEXT")
+            db_execute(c, "ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_name TEXT DEFAULT ''")
             db_execute(c, "ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_gender TEXT DEFAULT ''")
+            db_execute(c, "ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_name_2 TEXT DEFAULT ''")
             db_execute(c, "ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_phone_2 TEXT DEFAULT ''")
             db_execute(c, "ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_password_hash_2 TEXT DEFAULT ''")
             db_execute(c, "ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_gender_2 TEXT DEFAULT ''")
@@ -7156,8 +7168,8 @@ def load_students(school_id, class_filter='', term_filter='', include_archived=F
             archive_col = ', COALESCE(is_archived, 0)' if has_archive_cols else ''
             if has_parent_multi_cols:
                 query = f"""SELECT student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream,
-                            number_of_subject, subjects, scores, promoted, parent_phone, parent_password_hash, parent_gender,
-                            parent_phone_2, parent_password_hash_2, parent_gender_2{archive_col}
+                            number_of_subject, subjects, scores, promoted, parent_phone, parent_password_hash, parent_name, parent_gender,
+                            parent_name_2, parent_phone_2, parent_password_hash_2, parent_gender_2{archive_col}
                             FROM students WHERE school_id = ?"""
             else:
                 query = f'SELECT student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects, scores, promoted, parent_phone, parent_password_hash{archive_col} FROM students WHERE school_id = ?'
@@ -7183,9 +7195,9 @@ def load_students(school_id, class_filter='', term_filter='', include_archived=F
             if has_parent_cols:
                 if has_parent_multi_cols:
                     if has_archive_cols:
-                        student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted, parent_phone, parent_password_hash, parent_gender, parent_phone_2, parent_password_hash_2, parent_gender_2, is_archived = row
+                        student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted, parent_phone, parent_password_hash, parent_name, parent_gender, parent_name_2, parent_phone_2, parent_password_hash_2, parent_gender_2, is_archived = row
                     else:
-                        student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted, parent_phone, parent_password_hash, parent_gender, parent_phone_2, parent_password_hash_2, parent_gender_2 = row
+                        student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted, parent_phone, parent_password_hash, parent_name, parent_gender, parent_name_2, parent_phone_2, parent_password_hash_2, parent_gender_2 = row
                         is_archived = 0
                 else:
                     if has_archive_cols:
@@ -7193,15 +7205,15 @@ def load_students(school_id, class_filter='', term_filter='', include_archived=F
                     else:
                         student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted, parent_phone, parent_password_hash = row
                         is_archived = 0
-                    parent_gender, parent_phone_2, parent_password_hash_2, parent_gender_2 = '', '', '', ''
+                    parent_name, parent_gender, parent_name_2, parent_phone_2, parent_password_hash_2, parent_gender_2 = '', '', '', '', '', ''
             else:
                 if has_archive_cols:
                     student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted, is_archived = row
                 else:
                     student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted = row
                     is_archived = 0
-                parent_phone, parent_password_hash, parent_gender = '', '', ''
-                parent_phone_2, parent_password_hash_2, parent_gender_2 = '', '', ''
+                parent_phone, parent_password_hash, parent_name, parent_gender = '', '', '', ''
+                parent_name_2, parent_phone_2, parent_password_hash_2, parent_gender_2 = '', '', '', ''
             subjects = json.loads(subjects_str) if subjects_str else []
             scores = json.loads(scores_str) if scores_str else {}
             students_data[student_id] = {
@@ -7218,7 +7230,9 @@ def load_students(school_id, class_filter='', term_filter='', include_archived=F
                 'promoted': promoted,
                 'parent_phone': (parent_phone or '').strip(),
                 'parent_password_hash': (parent_password_hash or '').strip(),
+                'parent_name': (parent_name or '').strip(),
                 'parent_gender': (parent_gender or '').strip(),
+                'parent_name_2': (parent_name_2 or '').strip(),
                 'parent_phone_2': (parent_phone_2 or '').strip(),
                 'parent_password_hash_2': (parent_password_hash_2 or '').strip(),
                 'parent_gender_2': (parent_gender_2 or '').strip(),
@@ -7242,7 +7256,7 @@ def load_students_for_classes(school_id, classnames, term_filter='', include_arc
             if has_parent_multi_cols:
                 query = (
                     'SELECT student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, '
-                    f'number_of_subject, subjects, scores, promoted, parent_phone, parent_password_hash, parent_gender, parent_phone_2, parent_password_hash_2, parent_gender_2{archive_col} '
+                    f'number_of_subject, subjects, scores, promoted, parent_phone, parent_password_hash, parent_name, parent_gender, parent_name_2, parent_phone_2, parent_password_hash_2, parent_gender_2{archive_col} '
                     f'FROM students WHERE school_id = ? AND classname IN ({placeholders})'
                 )
             else:
@@ -7271,9 +7285,9 @@ def load_students_for_classes(school_id, classnames, term_filter='', include_arc
             if has_parent_cols:
                 if has_parent_multi_cols:
                     if has_archive_cols:
-                        student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted, parent_phone, parent_password_hash, parent_gender, parent_phone_2, parent_password_hash_2, parent_gender_2, is_archived = row
+                        student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted, parent_phone, parent_password_hash, parent_name, parent_gender, parent_name_2, parent_phone_2, parent_password_hash_2, parent_gender_2, is_archived = row
                     else:
-                        student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted, parent_phone, parent_password_hash, parent_gender, parent_phone_2, parent_password_hash_2, parent_gender_2 = row
+                        student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted, parent_phone, parent_password_hash, parent_name, parent_gender, parent_name_2, parent_phone_2, parent_password_hash_2, parent_gender_2 = row
                         is_archived = 0
                 else:
                     if has_archive_cols:
@@ -7281,15 +7295,15 @@ def load_students_for_classes(school_id, classnames, term_filter='', include_arc
                     else:
                         student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted, parent_phone, parent_password_hash = row
                         is_archived = 0
-                    parent_gender, parent_phone_2, parent_password_hash_2, parent_gender_2 = '', '', '', ''
+                    parent_name, parent_gender, parent_name_2, parent_phone_2, parent_password_hash_2, parent_gender_2 = '', '', '', '', '', ''
             else:
                 if has_archive_cols:
                     student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted, is_archived = row
                 else:
                     student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects_str, scores_str, promoted = row
                     is_archived = 0
-                parent_phone, parent_password_hash, parent_gender = '', '', ''
-                parent_phone_2, parent_password_hash_2, parent_gender_2 = '', '', ''
+                parent_phone, parent_password_hash, parent_name, parent_gender = '', '', '', ''
+                parent_name_2, parent_phone_2, parent_password_hash_2, parent_gender_2 = '', '', '', ''
             students_data[student_id] = {
                 'firstname': firstname,
                 'date_of_birth': (date_of_birth or '').strip(),
@@ -7304,7 +7318,9 @@ def load_students_for_classes(school_id, classnames, term_filter='', include_arc
                 'promoted': promoted,
                 'parent_phone': (parent_phone or '').strip(),
                 'parent_password_hash': (parent_password_hash or '').strip(),
+                'parent_name': (parent_name or '').strip(),
                 'parent_gender': (parent_gender or '').strip(),
+                'parent_name_2': (parent_name_2 or '').strip(),
                 'parent_phone_2': (parent_phone_2 or '').strip(),
                 'parent_password_hash_2': (parent_password_hash_2 or '').strip(),
                 'parent_gender_2': (parent_gender_2 or '').strip(),
@@ -7374,8 +7390,8 @@ def load_student(school_id, student_id, include_archived=False):
             archive_col = ', COALESCE(is_archived, 0)' if has_archive_cols else ''
             if has_parent_multi_cols:
                 db_execute(c, f"""SELECT student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream,
-                               number_of_subject, subjects, scores, promoted, parent_phone, parent_password_hash, parent_gender,
-                               parent_phone_2, parent_password_hash_2, parent_gender_2{archive_col} FROM students
+                               number_of_subject, subjects, scores, promoted, parent_phone, parent_password_hash, parent_name, parent_gender,
+                               parent_name_2, parent_phone_2, parent_password_hash_2, parent_gender_2{archive_col} FROM students
                                WHERE school_id = ? AND student_id = ?{archived_sql}""",
                            (school_id, student_id))
             else:
@@ -7397,13 +7413,17 @@ def load_student(school_id, student_id, include_archived=False):
             parent_phone = (row[12] or '').strip()
             parent_password_hash = (row[13] or '').strip()
             if has_parent_multi_cols:
-                parent_gender = (row[14] or '').strip()
-                parent_phone_2 = (row[15] or '').strip()
-                parent_password_hash_2 = (row[16] or '').strip()
-                parent_gender_2 = (row[17] or '').strip()
-                archived_idx = 18 if has_archive_cols else None
+                parent_name = (row[14] or '').strip()
+                parent_gender = (row[15] or '').strip()
+                parent_name_2 = (row[16] or '').strip()
+                parent_phone_2 = (row[17] or '').strip()
+                parent_password_hash_2 = (row[18] or '').strip()
+                parent_gender_2 = (row[19] or '').strip()
+                archived_idx = 20 if has_archive_cols else None
             else:
+                parent_name = ''
                 parent_gender = ''
+                parent_name_2 = ''
                 parent_phone_2 = ''
                 parent_password_hash_2 = ''
                 parent_gender_2 = ''
@@ -7411,7 +7431,9 @@ def load_student(school_id, student_id, include_archived=False):
         else:
             parent_phone = ''
             parent_password_hash = ''
+            parent_name = ''
             parent_gender = ''
+            parent_name_2 = ''
             parent_phone_2 = ''
             parent_password_hash_2 = ''
             parent_gender_2 = ''
@@ -7431,7 +7453,9 @@ def load_student(school_id, student_id, include_archived=False):
             'promoted': row[11],
             'parent_phone': parent_phone,
             'parent_password_hash': parent_password_hash,
+            'parent_name': parent_name,
             'parent_gender': parent_gender,
+            'parent_name_2': parent_name_2,
             'parent_phone_2': parent_phone_2,
             'parent_password_hash_2': parent_password_hash_2,
             'parent_gender_2': parent_gender_2,
@@ -17103,7 +17127,9 @@ def student_dashboard():
         else:
             dashboard_notice = 'Current term results are hidden while operations are OFF. Only previous published results are available.'
     parent_phone = (student.get('parent_phone', '') or '').strip()
+    parent_name = (student.get('parent_name', '') or '').strip()
     parent_phone_2 = (student.get('parent_phone_2', '') or '').strip()
+    parent_name_2 = (student.get('parent_name_2', '') or '').strip()
     parent_gender = (student.get('parent_gender', '') or '').strip()
     parent_gender_2 = (student.get('parent_gender_2', '') or '').strip()
     has_parent_access = bool(
@@ -17124,7 +17150,9 @@ def student_dashboard():
         student=my_data,
         dashboard_notice=dashboard_notice,
         parent_phone=parent_phone,
+        parent_name=parent_name,
         parent_phone_2=parent_phone_2,
+        parent_name_2=parent_name_2,
         parent_gender=parent_gender,
         parent_gender_2=parent_gender_2,
         has_parent_access=has_parent_access,
@@ -17281,11 +17309,13 @@ def student_update_parent_access():
         return redirect(url_for('student_dashboard'))
     has_parent_multi_cols = students_has_parent_multi_access_columns()
 
+    parent1_name = normalize_person_name(request.form.get('parent_name', ''))
     parent1_phone = normalize_parent_phone(request.form.get('parent_phone', ''))
     parent1_gender = normalize_parent_gender(request.form.get('parent_gender', ''))
     parent1_password = (request.form.get('parent_password', '') or '').strip()
     parent1_confirm = (request.form.get('confirm_parent_password', '') or '').strip()
 
+    parent2_name = normalize_person_name(request.form.get('parent_name_2', ''))
     parent2_phone = normalize_parent_phone(request.form.get('parent_phone_2', ''))
     parent2_gender = normalize_parent_gender(request.form.get('parent_gender_2', ''))
     parent2_password = (request.form.get('parent_password_2', '') or '').strip()
@@ -17294,7 +17324,7 @@ def student_update_parent_access():
     has_existing_parent1 = bool((student.get('parent_phone', '') or '').strip() and (student.get('parent_password_hash', '') or '').strip())
     has_existing_parent2 = bool((student.get('parent_phone_2', '') or '').strip() and (student.get('parent_password_hash_2', '') or '').strip())
 
-    if not parent1_phone and not parent1_password and not parent1_confirm and not parent2_phone and not parent2_password and not parent2_confirm:
+    if not parent1_name and not parent1_phone and not parent1_password and not parent1_confirm and not parent2_name and not parent2_phone and not parent2_password and not parent2_confirm:
         if has_existing_parent1 or has_existing_parent2:
             flash('Parent access cannot be removed once it has been added. You can only update phone/password.', 'error')
         else:
@@ -17302,6 +17332,9 @@ def student_update_parent_access():
         return redirect(url_for('student_dashboard'))
 
     # Parent 1 is required.
+    if not parent1_name:
+        flash('Parent 1 name is required.', 'error')
+        return redirect(url_for('student_dashboard'))
     if not parent1_phone or not parent1_password:
         flash('Parent 1 phone and password are required.', 'error')
         return redirect(url_for('student_dashboard'))
@@ -17319,10 +17352,13 @@ def student_update_parent_access():
         return redirect(url_for('student_dashboard'))
 
     # Parent 2 is optional but must be complete if provided.
-    parent2_any = bool(parent2_phone or parent2_password or parent2_confirm or parent2_gender)
+    parent2_any = bool(parent2_name or parent2_phone or parent2_password or parent2_confirm or parent2_gender)
     if parent2_any:
         if not has_parent_multi_cols:
             flash('Secondary parent access is not available yet. Run migration/startup schema updates and retry.', 'error')
+            return redirect(url_for('student_dashboard'))
+        if not parent2_name:
+            flash('Parent 2 name is required when adding Parent 2.', 'error')
             return redirect(url_for('student_dashboard'))
         if not parent2_phone or not parent2_password:
             flash('Parent 2 phone and password are both required when adding Parent 2.', 'error')
@@ -17343,16 +17379,19 @@ def student_update_parent_access():
             flash('Parent 1 and Parent 2 phone numbers must be different.', 'error')
             return redirect(url_for('student_dashboard'))
 
+    student['parent_name'] = parent1_name
     student['parent_phone'] = parent1_phone
     student['parent_password_hash'] = hash_password(parent1_password)
     student['parent_gender'] = parent1_gender
     if has_parent_multi_cols:
         if parent2_any:
+            student['parent_name_2'] = parent2_name
             student['parent_phone_2'] = parent2_phone
             student['parent_password_hash_2'] = hash_password(parent2_password)
             student['parent_gender_2'] = parent2_gender
         else:
             # Keep existing Parent 2 if already linked; do not allow removal.
+            student['parent_name_2'] = (student.get('parent_name_2', '') or '').strip()
             student['parent_phone_2'] = (student.get('parent_phone_2', '') or '').strip()
             student['parent_password_hash_2'] = (student.get('parent_password_hash_2', '') or '').strip()
             student['parent_gender_2'] = (student.get('parent_gender_2', '') or '').strip()
@@ -17513,7 +17552,20 @@ def student_view_result():
 
 def _parent_allowed_student_keys():
     keys = session.get('parent_student_keys') or []
-    return {str(k) for k in keys if isinstance(k, str) and '::' in k}
+    session_keys = {str(k) for k in keys if isinstance(k, str) and '::' in k}
+    if not session_keys:
+        return set()
+    parent_phone = normalize_parent_phone(session.get('parent_phone', ''))
+    if not parent_phone:
+        return set()
+    # Defense-in-depth: only keep students still linked to this parent phone.
+    # This blocks stale session keys after parent unlink/relink changes.
+    linked_keys = {
+        f"{(row.get('school_id') or '').strip()}::{(row.get('student_id') or '').strip()}"
+        for row in get_parent_students_by_phone(parent_phone)
+        if (row.get('school_id') or '').strip() and (row.get('student_id') or '').strip()
+    }
+    return session_keys.intersection(linked_keys)
 
 
 @app.route('/parent-portal', methods=['GET', 'POST'])
@@ -18074,13 +18126,14 @@ def parent_view_result():
 def download_result_pdf():
     """Server-side PDF download for published result."""
     role = (session.get('role') or '').strip().lower()
-    if role not in {'student', 'school_admin', 'parent'}:
+    if role not in {'student', 'school_admin', 'parent', 'teacher'}:
         flash('Login required to download PDF.', 'error')
         return redirect(url_for('login'))
 
     requested_term = (request.args.get('term', '') or '').strip()
     selected_class = (request.args.get('class_name', '') or '').strip()
     sid = ''
+    teacher_id = ''
     school_id = (session.get('school_id') or '').strip()
     if role == 'student':
         sid = (session.get('user_id') or '').strip()
@@ -18097,6 +18150,16 @@ def download_result_pdf():
             if not load_student(school_id, sid):
                 flash('Student not found in your school.', 'error')
                 return redirect(url_for('school_admin_dashboard'))
+        elif role == 'teacher':
+            teacher_id = (session.get('user_id') or '').strip()
+            if not school_id or not teacher_id:
+                return redirect(url_for('login'))
+            if not sid:
+                flash('Student ID is required.', 'error')
+                return redirect(url_for('teacher_dashboard'))
+            if not load_student(school_id, sid):
+                flash('Student not found in your school.', 'error')
+                return redirect(url_for('teacher_dashboard'))
         else:
             student_key = (request.args.get('student_key', '') or '').strip()
             allowed = _parent_allowed_student_keys()
@@ -18117,7 +18180,11 @@ def download_result_pdf():
             get_published_terms_for_student(school_id, sid, classname=selected_class),
         )
     else:
-        published_terms = get_published_terms_for_student(school_id, sid)
+        published_terms = get_published_terms_for_student(
+            school_id,
+            sid,
+            classname=selected_class if selected_class else '',
+        )
     if not published_terms:
         flash('No published result available for PDF download.', 'error')
         return redirect(url_for('menu'))
@@ -18145,11 +18212,20 @@ def download_result_pdf():
         sid,
         target_term,
         target_year,
-        classname=selected_class if role == 'student' else '',
+        classname=selected_class if selected_class else '',
     )
     if not snapshot:
         flash('Published result snapshot not found.', 'error')
         return redirect(url_for('menu'))
+    if role == 'teacher' and not teacher_has_class_access(
+        school_id,
+        teacher_id,
+        snapshot.get('classname', ''),
+        term=target_term,
+        academic_year=target_year,
+    ):
+        flash('You can only download results for classes assigned to you.', 'error')
+        return redirect(url_for('teacher_dashboard'))
 
     class_results = load_published_class_results(
         school_id,
@@ -18197,7 +18273,7 @@ def download_result_pdf():
             total_exam = _coerce_number(s.get('exam_score', s.get('total_exam', 0)), 0.0)
         else:
             total_exam = _coerce_number(s.get('objective', 0), 0.0) + _coerce_number(s.get('theory', 0), 0.0)
-        total_score = _coerce_number(s.get('overall_mark', s.get('total', 0)), 0.0)
+        total_score = _coerce_number(s.get('overall_mark', s.get('total', s.get('total_score', 0))), 0.0)
         grade = (s.get('grade') or '').strip() or grade_from_score(total_score, get_grade_config(school_id))
         sp = subject_positions.get(subject) if isinstance(subject_positions, dict) else None
         pos = f"{sp.get('pos', '-')}/{sp.get('size', '-')}" if isinstance(sp, dict) else '-'
@@ -18247,7 +18323,12 @@ def download_result_pdf():
     return Response(
         pdf_bytes,
         mimetype='application/pdf',
-        headers={'Content-Disposition': f'attachment; filename=\"{filename}\"'},
+        headers={
+            'Content-Disposition': f'attachment; filename=\"{filename}\"',
+            'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+            'Pragma': 'no-cache',
+            'Expires': '0',
+        },
     )
 
 @app.route('/teacher/student-result')
@@ -19557,7 +19638,9 @@ def run_db_health_check(apply_fixes=False, include_startup_ddl=False):
                 db_execute(c, "UPDATE users SET password_changed_at = COALESCE(password_changed_at, CURRENT_TIMESTAMP)")
                 db_execute(c, "ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_phone TEXT")
                 db_execute(c, "ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_password_hash TEXT")
+                db_execute(c, "ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_name TEXT DEFAULT ''")
                 db_execute(c, "ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_gender TEXT DEFAULT ''")
+                db_execute(c, "ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_name_2 TEXT DEFAULT ''")
                 db_execute(c, "ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_phone_2 TEXT DEFAULT ''")
                 db_execute(c, "ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_password_hash_2 TEXT DEFAULT ''")
                 db_execute(c, "ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_gender_2 TEXT DEFAULT ''")

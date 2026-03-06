@@ -178,13 +178,14 @@
                     {% if has_parent_access %}
                     <p class="chip chip-success">
                         <strong>Active:</strong>
-                        Parent 1: {{ parent_phone or '-' }}{% if parent_gender %} ({{ parent_gender }}){% endif %}
-                        {% if parent_phone_2 %} | Parent 2: {{ parent_phone_2 }}{% if parent_gender_2 %} ({{ parent_gender_2 }}){% endif %}{% endif %}
+                        Parent 1: {{ parent_name or '-' }}{% if parent_gender %} ({{ parent_gender }}){% endif %} - {{ parent_phone or '-' }}
+                        {% if parent_phone_2 %} | Parent 2: {{ parent_name_2 or '-' }}{% if parent_gender_2 %} ({{ parent_gender_2 }}){% endif %} - {{ parent_phone_2 }}{% endif %}
                     </p>
                     {% endif %}
                     <form method="post" action="{{ url_for('student_update_parent_access') }}">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <div class="grid">
+                            <input type="text" name="parent_name" value="{{ parent_name or '' }}" placeholder="Parent 1 full name" required>
                             <select name="parent_gender" required>
                                 <option value="">Parent 1 Gender</option>
                                 <option value="Male" {% if (parent_gender or '') == 'Male' %}selected{% endif %}>Male</option>
@@ -195,6 +196,7 @@
                             <input type="password" name="confirm_parent_password" placeholder="Confirm Parent 1 password" autocomplete="new-password" required>
                         </div>
                         <div class="grid mt-10">
+                            <input type="text" name="parent_name_2" value="{{ parent_name_2 or '' }}" placeholder="Parent 2 full name (optional)">
                             <select name="parent_gender_2">
                                 <option value="">Parent 2 Gender (Optional)</option>
                                 <option value="Male" {% if (parent_gender_2 or '') == 'Male' %}selected{% endif %}>Male</option>
@@ -205,7 +207,7 @@
                             <input type="password" name="confirm_parent_password_2" placeholder="Confirm Parent 2 password" autocomplete="new-password">
                         </div>
                         <p class="note mt-10">
-                            Once added, parent access cannot be removed. You can only update phone/password.
+                            Once added, parent access cannot be removed. You can only update name/phone/password.
                         </p>
                         <div class="mt-12">
                             <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Save Parent Access</button>

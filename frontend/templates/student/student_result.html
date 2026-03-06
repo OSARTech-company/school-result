@@ -1099,10 +1099,11 @@
     </div>
 
     <div class="action-buttons">
-        {% if session.get('role') == 'student' or session.get('role') == 'school_admin' or session.get('role') == 'parent' %}
+        {% if session.get('role') == 'student' or session.get('role') == 'school_admin' or session.get('role') == 'parent' or session.get('role') == 'teacher' %}
         <a
-            href="{{ url_for('download_result_pdf', student_id=student.student_id, term=current_term_token, class_name=selected_result_class, student_key=student_key if session.get('role') == 'parent' else None) }}"
+            href="{{ url_for('download_result_pdf', student_id=student.student_id, term=current_term_token, class_name=(student.class_name or selected_result_class), student_key=student_key if session.get('role') == 'parent' else None) }}"
             class="btn btn-back"
+            id="download-exact-pdf"
         >
             <i class="fas fa-file-pdf"></i>
             Download PDF
@@ -1141,6 +1142,74 @@
             Back to Home
         </a>
     </div>
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+    <script>
+        (function () {
+            const downloadBtn = document.getElementById('download-exact-pdf');
+            if (!downloadBtn) return;
+
+            function fallbackDownload() {
+                window.location.href = downloadBtn.getAttribute('href');
+            }
+
+            async function exportExactLayoutPdf() {
+                const reportEl = document.querySelector('.report-card');
+                if (!reportEl || !window.html2canvas || !window.jspdf || !window.jspdf.jsPDF) {
+                    fallbackDownload();
+                    return;
+                }
+
+                const originalText = downloadBtn.innerHTML;
+                downloadBtn.style.pointerEvents = 'none';
+                downloadBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Preparing PDF...';
+                try {
+                    const canvas = await window.html2canvas(reportEl, {
+                        scale: 2,
+                        useCORS: true,
+                        backgroundColor: '#ffffff',
+                        logging: false,
+                        scrollX: 0,
+                        scrollY: -window.scrollY
+                    });
+                    const imgData = canvas.toDataURL('image/jpeg', 0.95);
+                    const { jsPDF } = window.jspdf;
+                    const pdf = new jsPDF('p', 'pt', 'a4');
+                    const pageWidth = pdf.internal.pageSize.getWidth();
+                    const pageHeight = pdf.internal.pageSize.getHeight();
+                    const margin = 16;
+                    const contentWidth = pageWidth - (margin * 2);
+                    const contentHeight = (canvas.height * contentWidth) / canvas.width;
+                    let heightLeft = contentHeight;
+                    let y = margin;
+
+                    pdf.addImage(imgData, 'JPEG', margin, y, contentWidth, contentHeight, undefined, 'FAST');
+                    heightLeft -= (pageHeight - (margin * 2));
+
+                    while (heightLeft > 0) {
+                        pdf.addPage();
+                        y = margin - (contentHeight - heightLeft);
+                        pdf.addImage(imgData, 'JPEG', margin, y, contentWidth, contentHeight, undefined, 'FAST');
+                        heightLeft -= (pageHeight - (margin * 2));
+                    }
+
+                    const nameToken = String('{{ student.student_id }}').replace(/[^A-Za-z0-9_-]+/g, '_');
+                    const termToken = String('{{ current_term_token }}').replace(/[^A-Za-z0-9_-]+/g, '_');
+                    pdf.save('result_' + nameToken + '_' + termToken + '.pdf');
+                } catch (e) {
+                    fallbackDownload();
+                } finally {
+                    downloadBtn.style.pointerEvents = '';
+                    downloadBtn.innerHTML = originalText;
+                }
+            }
+
+            downloadBtn.addEventListener('click', function (e) {
+                e.preventDefault();
+                exportExactLayoutPdf();
+            });
+        })();
+    </script>
     {% if session.get('role') == 'school_admin' %}
     <div id="unpublish-modal-overlay" class="center-modal-overlay" aria-hidden="true">
         <div class="center-modal-card" role="dialog" aria-modal="true" aria-labelledby="unpublish-modal-title">
