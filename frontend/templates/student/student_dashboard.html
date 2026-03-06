@@ -171,48 +171,67 @@
                 </div>
 
                 <div class="card">
-                    <h2><i class="fas fa-users"></i> Parent Access</h2>
-                    <p class="note no-margin">
-                        Add parent/guardian login details. Parent 2 is optional.
-                    </p>
-                    {% if has_parent_access %}
+                    <h2><i class="fas fa-user-plus"></i> Parent 1 Access</h2>
+                    {% if parent_phone %}
                     <p class="chip chip-success">
-                        <strong>Active:</strong>
-                        Parent 1: {{ parent_name or '-' }}{% if parent_gender %} ({{ parent_gender }}){% endif %} - {{ parent_phone or '-' }}
-                        {% if parent_phone_2 %} | Parent 2: {{ parent_name_2 or '-' }}{% if parent_gender_2 %} ({{ parent_gender_2 }}){% endif %} - {{ parent_phone_2 }}{% endif %}
+                        <strong>Added:</strong>
+                        {{ parent_name or '-' }}{% if parent_gender %} ({{ parent_gender }}){% endif %} - {{ parent_phone or '-' }}
                     </p>
-                    {% endif %}
+                    <p class="note mt-10">Parent 1 is already added. Students cannot edit parent details after adding.</p>
+                    {% else %}
                     <form method="post" action="{{ url_for('student_update_parent_access') }}">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="parent_slot" value="1">
                         <div class="grid">
-                            <input type="text" name="parent_name" value="{{ parent_name or '' }}" placeholder="Parent 1 full name" required>
+                            <input type="text" name="parent_name" value="" placeholder="Parent 1 full name" required>
                             <select name="parent_gender" required>
                                 <option value="">Parent 1 Gender</option>
-                                <option value="Male" {% if (parent_gender or '') == 'Male' %}selected{% endif %}>Male</option>
-                                <option value="Female" {% if (parent_gender or '') == 'Female' %}selected{% endif %}>Female</option>
+                                <option value="Male">Male</option>
+                                <option value="Female">Female</option>
                             </select>
-                            <input type="text" name="parent_phone" value="{{ parent_phone or '' }}" placeholder="Parent 1 phone number" required>
+                            <input type="text" name="parent_phone" value="" placeholder="Parent 1 phone number" required>
                             <input type="password" name="parent_password" placeholder="Parent 1 password (min 6 chars)" autocomplete="new-password" required>
                             <input type="password" name="confirm_parent_password" placeholder="Confirm Parent 1 password" autocomplete="new-password" required>
                         </div>
-                        <div class="grid mt-10">
-                            <input type="text" name="parent_name_2" value="{{ parent_name_2 or '' }}" placeholder="Parent 2 full name (optional)">
-                            <select name="parent_gender_2">
-                                <option value="">Parent 2 Gender (Optional)</option>
-                                <option value="Male" {% if (parent_gender_2 or '') == 'Male' %}selected{% endif %}>Male</option>
-                                <option value="Female" {% if (parent_gender_2 or '') == 'Female' %}selected{% endif %}>Female</option>
-                            </select>
-                            <input type="text" name="parent_phone_2" value="{{ parent_phone_2 or '' }}" placeholder="Parent 2 phone number (optional)">
-                            <input type="password" name="parent_password_2" placeholder="Parent 2 password (optional)" autocomplete="new-password">
-                            <input type="password" name="confirm_parent_password_2" placeholder="Confirm Parent 2 password" autocomplete="new-password">
-                        </div>
-                        <p class="note mt-10">
-                            Once added, parent access cannot be removed. You can only update name/phone/password.
-                        </p>
                         <div class="mt-12">
-                            <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Save Parent Access</button>
+                            <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Add Parent 1</button>
                         </div>
                     </form>
+                    {% endif %}
+                </div>
+
+                <div class="card">
+                    <h2><i class="fas fa-user-plus"></i> Parent 2 Access</h2>
+                    {% if not has_parent_multi_cols %}
+                    <p class="note">Parent 2 access is not available yet. Ask admin to run migration.</p>
+                    {% elif not parent_phone %}
+                    <p class="note">Add Parent 1 first before adding Parent 2.</p>
+                    {% elif parent_phone_2 %}
+                    <p class="chip chip-success">
+                        <strong>Added:</strong>
+                        {{ parent_name_2 or '-' }}{% if parent_gender_2 %} ({{ parent_gender_2 }}){% endif %} - {{ parent_phone_2 or '-' }}
+                    </p>
+                    <p class="note mt-10">Parent 2 is already added. Students cannot edit parent details after adding.</p>
+                    {% else %}
+                    <form method="post" action="{{ url_for('student_update_parent_access') }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="parent_slot" value="2">
+                        <div class="grid">
+                            <input type="text" name="parent_name_2" value="" placeholder="Parent 2 full name" required>
+                            <select name="parent_gender_2" required>
+                                <option value="">Parent 2 Gender</option>
+                                <option value="Male">Male</option>
+                                <option value="Female">Female</option>
+                            </select>
+                            <input type="text" name="parent_phone_2" value="" placeholder="Parent 2 phone number" required>
+                            <input type="password" name="parent_password_2" placeholder="Parent 2 password (min 6 chars)" autocomplete="new-password" required>
+                            <input type="password" name="confirm_parent_password_2" placeholder="Confirm Parent 2 password" autocomplete="new-password" required>
+                        </div>
+                        <div class="mt-12">
+                            <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Add Parent 2</button>
+                        </div>
+                    </form>
+                    {% endif %}
                 </div>
 
                 </div>

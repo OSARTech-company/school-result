@@ -15,6 +15,10 @@
             <span class="notif-badge">{{ unread_parent_messages }}</span>
             {% endif %}
         </a>
+        <a href="{{ url_for('parent_period_attendance') }}" class="side-link{% if active_page == 'attendance' %} active{% endif %}">
+            <i class="fas fa-calendar-check"></i>
+            <span>Attendance</span>
+        </a>
         {% for child in (children or []) %}
         <a href="{{ url_for('parent_view_result', student_key=child.key) }}" class="side-link">
             <i class="fas fa-user-graduate"></i>

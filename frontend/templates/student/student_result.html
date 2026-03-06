@@ -1131,6 +1131,11 @@
             <i class="fas fa-arrow-left"></i>
             Back to Dashboard
         </a>
+        {% elif session.get('role') == 'parent' %}
+        <a href="{{ url_for('parent_dashboard') }}" class="btn btn-back">
+            <i class="fas fa-arrow-left"></i>
+            Go to Dashboard
+        </a>
         {% else %}
         <a href="{{ url_for('student_portal') }}" class="btn btn-back">
             <i class="fas fa-search"></i>

@@ -54,6 +54,10 @@
                     <span class="notif-badge">{{ unread_parent_messages }}</span>
                     {% endif %}
                 </a>
+                <a href="{{ url_for('parent_period_attendance') }}" class="side-link">
+                    <i class="fas fa-calendar-check"></i>
+                    <span>Attendance</span>
+                </a>
                 {% for child in children %}
                 <a href="{{ url_for('parent_view_result', student_key=child.key) }}" class="side-link">
                     <i class="fas fa-user-graduate"></i>
@@ -198,6 +202,7 @@
                         <div class="mt-12">
                             <a class="btn" href="{{ url_for('parent_view_result', student_key=child.key) }}">View Results</a>
                             <a class="btn ml-10" href="{{ url_for('parent_compare_results', student_key=child.key) }}">Compare Terms</a>
+                            <a class="btn ml-10" href="{{ url_for('parent_period_attendance', student_key=child.key) }}">Attendance</a>
                             <a class="btn ml-10" href="{{ url_for('parent_submit_dispute', student_key=child.key) }}">Report Dispute</a>
                         </div>
                     </div>

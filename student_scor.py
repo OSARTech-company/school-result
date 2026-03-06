@@ -7692,16 +7692,19 @@ def get_school_parent_links(school_id):
             db_execute(
                 c,
                 """SELECT student_id, firstname, classname, term, stream, parent_phone, parent_gender
-                   FROM students
-                   WHERE school_id = ?
-                     AND TRIM(COALESCE(parent_phone, '')) <> ''
-                     AND TRIM(COALESCE(parent_password_hash, '')) <> ''
-                   UNION ALL
-                   SELECT student_id, firstname, classname, term, stream, parent_phone_2 AS parent_phone, parent_gender_2 AS parent_gender
-                   FROM students
-                   WHERE school_id = ?
-                     AND TRIM(COALESCE(parent_phone_2, '')) <> ''
-                     AND TRIM(COALESCE(parent_password_hash_2, '')) <> ''
+                   FROM (
+                     SELECT student_id, firstname, classname, term, stream, parent_phone, parent_gender
+                     FROM students
+                     WHERE school_id = ?
+                       AND TRIM(COALESCE(parent_phone, '')) <> ''
+                       AND TRIM(COALESCE(parent_password_hash, '')) <> ''
+                     UNION ALL
+                     SELECT student_id, firstname, classname, term, stream, parent_phone_2 AS parent_phone, parent_gender_2 AS parent_gender
+                     FROM students
+                     WHERE school_id = ?
+                       AND TRIM(COALESCE(parent_phone_2, '')) <> ''
+                       AND TRIM(COALESCE(parent_password_hash_2, '')) <> ''
+                   ) parent_rows
                    ORDER BY LOWER(parent_phone), LOWER(classname), LOWER(firstname), LOWER(student_id)""",
                 (school_id, school_id),
             )
@@ -8977,6 +8980,38 @@ def get_period_attendance_map_for_date(school_id, classname, attendance_date, pe
                 'note': (note or '').strip(),
             }
         return out
+
+def get_period_attendance_for_student(school_id, student_id, term='', academic_year=''):
+    """Return period attendance rows for one student."""
+    if not ensure_extended_features_schema():
+        return []
+    with db_connection() as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """SELECT attendance_date, period_label, subject, status, note, classname, term, academic_year, updated_at
+               FROM period_attendance
+               WHERE school_id = ?
+                 AND student_id = ?
+                 AND COALESCE(term, '') = COALESCE(?, COALESCE(term, ''))
+                 AND COALESCE(academic_year, '') = COALESCE(?, COALESCE(academic_year, ''))
+               ORDER BY attendance_date DESC, period_label ASC, updated_at DESC""",
+            (school_id, student_id, term or None, academic_year or None),
+        )
+        rows = []
+        for row in c.fetchall() or []:
+            rows.append({
+                'attendance_date': (row[0] or '').strip(),
+                'period_label': (row[1] or '').strip(),
+                'subject': (row[2] or '').strip(),
+                'status': normalize_attendance_status(row[3]),
+                'note': (row[4] or '').strip(),
+                'classname': (row[5] or '').strip(),
+                'term': (row[6] or '').strip(),
+                'academic_year': (row[7] or '').strip(),
+                'updated_at': row[8],
+            })
+        return rows
 
 def build_school_analytics_data(school_id, term, academic_year):
     class_pass_rows = []
@@ -13681,20 +13716,58 @@ def teacher_period_attendance():
         term=current_term,
         academic_year=current_year,
     )
-    class_subject_map = {}
+    assigned_subject_map = {}
     for row in subject_rows:
         classname = (row.get('classname') or '').strip()
         subject = normalize_subject_name(row.get('subject', ''))
         if not classname or not subject:
             continue
-        class_subject_map.setdefault(classname, set()).add(subject)
-    classes = sorted(class_subject_map.keys(), key=lambda x: str(x).lower())
+        assigned_subject_map.setdefault(classname, set()).add(subject)
+    classes = sorted(get_school_classnames(school_id), key=lambda x: str(x).lower())
     if not classes:
-        flash('No subject assignment found for period attendance.', 'error')
+        classes = sorted(
+            {
+                (r.get('classname') or '').strip()
+                for r in (subject_rows or [])
+                if (r.get('classname') or '').strip()
+            },
+            key=lambda x: str(x).lower(),
+        )
+    if not classes:
+        flash('No classes found for period attendance.', 'error')
         return redirect(url_for('teacher_dashboard'))
     requested_class = (request.values.get('classname', '') or '').strip()
     selected_class = requested_class if requested_class in classes else classes[0]
-    subject_options = sorted(class_subject_map.get(selected_class, set()), key=lambda x: str(x).lower())
+
+    subject_pool = set(assigned_subject_map.get(selected_class, set()))
+    for row in get_school_timetable_rows(school_id, classname=selected_class):
+        subject_name = normalize_subject_name(row.get('subject', ''))
+        if subject_name:
+            subject_pool.add(subject_name)
+    class_cfg = get_class_subject_config(school_id, selected_class) or {}
+    subject_pool.update(
+        normalize_subjects_list(
+            (class_cfg.get('core_subjects') or [])
+            + (class_cfg.get('science_subjects') or [])
+            + (class_cfg.get('art_subjects') or [])
+            + (class_cfg.get('commercial_subjects') or [])
+            + (class_cfg.get('optional_subjects') or [])
+        )
+    )
+    defaults = _catalog_defaults_for_class(selected_class)
+    subject_pool.update(
+        normalize_subjects_list(
+            (defaults.get('core') or [])
+            + (defaults.get('science') or [])
+            + (defaults.get('art') or [])
+            + (defaults.get('commercial') or [])
+            + (defaults.get('optional') or [])
+        )
+    )
+    students_for_subjects = load_students(school_id, class_filter=selected_class, term_filter=current_term)
+    for _, st in (students_for_subjects or {}).items():
+        subject_pool.update(normalize_subjects_list(st.get('subjects', [])))
+    subject_options = sorted(subject_pool, key=lambda x: str(x).lower())
     selected_subject = normalize_subject_name((request.values.get('subject', '') or '').strip())
     if selected_subject not in set(subject_options):
         selected_subject = subject_options[0] if subject_options else ''
@@ -13719,21 +13792,11 @@ def teacher_period_attendance():
         selected_date = sorted(valid_dates)[-1]
     if request.method == 'POST':
         if requested_class and requested_class not in classes:
-            flash('You are not assigned to this class/subject for the current term/year.', 'error')
+            flash('Select a valid class.', 'error')
             return redirect(url_for('teacher_dashboard'))
         if not selected_subject or selected_subject not in set(subject_options):
-            flash('Select one of your assigned subjects for this class.', 'error')
+            flash('Select a valid subject for this class.', 'error')
             return redirect(url_for('teacher_period_attendance', classname=selected_class, attendance_date=selected_date))
-        if not teacher_can_score_subject(
-            school_id,
-            teacher_id,
-            selected_class,
-            selected_subject,
-            term=current_term,
-            academic_year=current_year,
-        ):
-            flash('You are not assigned to mark attendance for this class/subject.', 'error')
-            return redirect(url_for('teacher_dashboard'))
         if selected_date not in valid_dates:
             flash('Select a valid instructional date.', 'error')
             return redirect(url_for('teacher_period_attendance', classname=selected_class, subject=selected_subject, period_label=selected_period, attendance_date=selected_date))
@@ -16246,6 +16309,11 @@ def teacher_enter_scores():
             current_term,
             current_year,
         )
+        class_students_for_handover = load_students(
+            school_id,
+            class_filter=class_name,
+            term_filter=current_term,
+        )
         protected_subjects = set()
         for row in class_subject_assignments:
             assigned_teacher = (row.get('teacher_id') or '').strip()
@@ -16253,7 +16321,21 @@ def teacher_enter_scores():
             if not subject_name:
                 continue
             if assigned_teacher and assigned_teacher != teacher_id and assigned_teacher not in submitted_teacher_ids:
-                protected_subjects.add(subject_name)
+                # Handover-safe: if inherited subject scores are already complete,
+                # do not lock editing just because teacher assignment changed.
+                target = (subject_name or '').strip().lower()
+                pending_count = 0
+                for _sid, st_now in (class_students_for_handover or {}).items():
+                    offered = normalize_subjects_list(st_now.get('subjects', []))
+                    offered_map = {x.lower(): x for x in offered}
+                    offered_key = offered_map.get(target, '')
+                    if not offered_key:
+                        continue
+                    score_block = get_subject_score_block((st_now.get('scores') or {}), offered_key)
+                    if not is_score_complete_for_subject(score_block, school):
+                        pending_count += 1
+                if pending_count > 0:
+                    protected_subjects.add(subject_name)
         locked_subjects_for_class = sorted(protected_subjects, key=lambda x: str(x).lower())
     locked_subjects_set = {s.lower() for s in locked_subjects_for_class}
     if class_access:
@@ -17186,6 +17268,7 @@ def student_dashboard():
     parent_name_2 = (student.get('parent_name_2', '') or '').strip()
     parent_gender = (student.get('parent_gender', '') or '').strip()
     parent_gender_2 = (student.get('parent_gender_2', '') or '').strip()
+    has_parent_multi_cols = students_has_parent_multi_access_columns()
     has_parent_access = bool(
         (parent_phone and (student.get('parent_password_hash', '') or '').strip())
         or (parent_phone_2 and (student.get('parent_password_hash_2', '') or '').strip())
@@ -17209,6 +17292,7 @@ def student_dashboard():
         parent_name_2=parent_name_2,
         parent_gender=parent_gender,
         parent_gender_2=parent_gender_2,
+        has_parent_multi_cols=has_parent_multi_cols,
         has_parent_access=has_parent_access,
         student_messages=student_messages,
         unread_student_messages=unread_student_messages,
@@ -17362,6 +17446,10 @@ def student_update_parent_access():
         flash('Parent access is not available yet. Ask admin to run latest database migration.', 'error')
         return redirect(url_for('student_dashboard'))
     has_parent_multi_cols = students_has_parent_multi_access_columns()
+    parent_slot = (request.form.get('parent_slot', '') or '').strip()
+    if parent_slot not in {'1', '2'}:
+        flash('Invalid parent access request.', 'error')
+        return redirect(url_for('student_dashboard'))
 
     parent1_name = normalize_person_name(request.form.get('parent_name', ''))
     parent1_phone = normalize_parent_phone(request.form.get('parent_phone', ''))
@@ -17377,80 +17465,77 @@ def student_update_parent_access():
 
     has_existing_parent1 = bool((student.get('parent_phone', '') or '').strip() and (student.get('parent_password_hash', '') or '').strip())
     has_existing_parent2 = bool((student.get('parent_phone_2', '') or '').strip() and (student.get('parent_password_hash_2', '') or '').strip())
-
-    if not parent1_name and not parent1_phone and not parent1_password and not parent1_confirm and not parent2_name and not parent2_phone and not parent2_password and not parent2_confirm:
-        if has_existing_parent1 or has_existing_parent2:
-            flash('Parent access cannot be removed once it has been added. You can only update phone/password.', 'error')
-        else:
-            flash('No parent access details were submitted.', 'error')
+    if parent_slot == '1':
+        if has_existing_parent1:
+            flash('Parent 1 is already added. Students cannot edit parent details after adding.', 'error')
+            return redirect(url_for('student_dashboard'))
+        if not parent1_name:
+            flash('Parent 1 name is required.', 'error')
+            return redirect(url_for('student_dashboard'))
+        if not parent1_phone or not parent1_password:
+            flash('Parent 1 phone and password are required.', 'error')
+            return redirect(url_for('student_dashboard'))
+        if not is_valid_parent_phone(parent1_phone):
+            flash('Enter a valid Parent 1 phone number.', 'error')
+            return redirect(url_for('student_dashboard'))
+        if not parent1_gender:
+            flash('Select Parent 1 gender.', 'error')
+            return redirect(url_for('student_dashboard'))
+        if len(parent1_password) < 6:
+            flash('Parent 1 password must be at least 6 characters.', 'error')
+            return redirect(url_for('student_dashboard'))
+        if parent1_password != parent1_confirm:
+            flash('Parent 1 passwords do not match.', 'error')
+            return redirect(url_for('student_dashboard'))
+        if has_existing_parent2 and parent1_phone == normalize_parent_phone(student.get('parent_phone_2', '')):
+            flash('Parent 1 phone cannot match Parent 2 phone.', 'error')
+            return redirect(url_for('student_dashboard'))
+        student['parent_name'] = parent1_name
+        student['parent_phone'] = parent1_phone
+        student['parent_password_hash'] = hash_password(parent1_password)
+        student['parent_gender'] = parent1_gender
+        save_student(school_id, student_id, student)
+        flash('Parent 1 added successfully.', 'success')
         return redirect(url_for('student_dashboard'))
 
-    # Parent 1 is required.
-    if not parent1_name:
-        flash('Parent 1 name is required.', 'error')
+    # Parent 2 add-only flow.
+    if not has_parent_multi_cols:
+        flash('Secondary parent access is not available yet. Run migration/startup schema updates and retry.', 'error')
         return redirect(url_for('student_dashboard'))
-    if not parent1_phone or not parent1_password:
-        flash('Parent 1 phone and password are required.', 'error')
+    if not has_existing_parent1:
+        flash('Add Parent 1 first before adding Parent 2.', 'error')
         return redirect(url_for('student_dashboard'))
-    if not is_valid_parent_phone(parent1_phone):
-        flash('Enter a valid Parent 1 phone number.', 'error')
+    if has_existing_parent2:
+        flash('Parent 2 is already added. Students cannot edit parent details after adding.', 'error')
         return redirect(url_for('student_dashboard'))
-    if not parent1_gender:
-        flash('Select Parent 1 gender.', 'error')
+    if not parent2_name:
+        flash('Parent 2 name is required.', 'error')
         return redirect(url_for('student_dashboard'))
-    if len(parent1_password) < 6:
-        flash('Parent 1 password must be at least 6 characters.', 'error')
+    if not parent2_phone or not parent2_password:
+        flash('Parent 2 phone and password are required.', 'error')
         return redirect(url_for('student_dashboard'))
-    if parent1_password != parent1_confirm:
-        flash('Parent 1 passwords do not match.', 'error')
+    if not is_valid_parent_phone(parent2_phone):
+        flash('Enter a valid Parent 2 phone number.', 'error')
         return redirect(url_for('student_dashboard'))
-
-    # Parent 2 is optional but must be complete if provided.
-    parent2_any = bool(parent2_name or parent2_phone or parent2_password or parent2_confirm or parent2_gender)
-    if parent2_any:
-        if not has_parent_multi_cols:
-            flash('Secondary parent access is not available yet. Run migration/startup schema updates and retry.', 'error')
-            return redirect(url_for('student_dashboard'))
-        if not parent2_name:
-            flash('Parent 2 name is required when adding Parent 2.', 'error')
-            return redirect(url_for('student_dashboard'))
-        if not parent2_phone or not parent2_password:
-            flash('Parent 2 phone and password are both required when adding Parent 2.', 'error')
-            return redirect(url_for('student_dashboard'))
-        if not is_valid_parent_phone(parent2_phone):
-            flash('Enter a valid Parent 2 phone number.', 'error')
-            return redirect(url_for('student_dashboard'))
-        if not parent2_gender:
-            flash('Select Parent 2 gender.', 'error')
-            return redirect(url_for('student_dashboard'))
-        if len(parent2_password) < 6:
-            flash('Parent 2 password must be at least 6 characters.', 'error')
-            return redirect(url_for('student_dashboard'))
-        if parent2_password != parent2_confirm:
-            flash('Parent 2 passwords do not match.', 'error')
-            return redirect(url_for('student_dashboard'))
-        if parent1_phone == parent2_phone:
-            flash('Parent 1 and Parent 2 phone numbers must be different.', 'error')
-            return redirect(url_for('student_dashboard'))
-
-    student['parent_name'] = parent1_name
-    student['parent_phone'] = parent1_phone
-    student['parent_password_hash'] = hash_password(parent1_password)
-    student['parent_gender'] = parent1_gender
-    if has_parent_multi_cols:
-        if parent2_any:
-            student['parent_name_2'] = parent2_name
-            student['parent_phone_2'] = parent2_phone
-            student['parent_password_hash_2'] = hash_password(parent2_password)
-            student['parent_gender_2'] = parent2_gender
-        else:
-            # Keep existing Parent 2 if already linked; do not allow removal.
-            student['parent_name_2'] = (student.get('parent_name_2', '') or '').strip()
-            student['parent_phone_2'] = (student.get('parent_phone_2', '') or '').strip()
-            student['parent_password_hash_2'] = (student.get('parent_password_hash_2', '') or '').strip()
-            student['parent_gender_2'] = (student.get('parent_gender_2', '') or '').strip()
+    if not parent2_gender:
+        flash('Select Parent 2 gender.', 'error')
+        return redirect(url_for('student_dashboard'))
+    if len(parent2_password) < 6:
+        flash('Parent 2 password must be at least 6 characters.', 'error')
+        return redirect(url_for('student_dashboard'))
+    if parent2_password != parent2_confirm:
+        flash('Parent 2 passwords do not match.', 'error')
+        return redirect(url_for('student_dashboard'))
+    existing_parent1_phone = normalize_parent_phone(student.get('parent_phone', ''))
+    if parent2_phone == existing_parent1_phone:
+        flash('Parent 2 phone must be different from Parent 1 phone.', 'error')
+        return redirect(url_for('student_dashboard'))
+    student['parent_name_2'] = parent2_name
+    student['parent_phone_2'] = parent2_phone
+    student['parent_password_hash_2'] = hash_password(parent2_password)
+    student['parent_gender_2'] = parent2_gender
     save_student(school_id, student_id, student)
-    flash('Parent access saved successfully.', 'success')
+    flash('Parent 2 added successfully.', 'success')
     return redirect(url_for('student_dashboard'))
 
 @app.route('/student/view-result')
@@ -18038,6 +18123,165 @@ def parent_messages():
         parent_theme_accent=parent_theme_accent,
         children=children,
         parent_messages=parent_messages,
+        unread_parent_messages=unread_parent_messages,
+    )
+
+
+@app.route('/parent/attendance')
+def parent_period_attendance():
+    if session.get('role') != 'parent':
+        return redirect(url_for('parent_portal'))
+    allowed_keys = _parent_allowed_student_keys()
+    if not allowed_keys:
+        flash('Parent session expired. Please login again.', 'error')
+        return redirect(url_for('parent_portal'))
+
+    key_pairs = []
+    student_ids_by_school = {}
+    for key in sorted(allowed_keys):
+        if '::' not in key:
+            continue
+        school_id, student_id = key.split('::', 1)
+        school_id = (school_id or '').strip()
+        student_id = (student_id or '').strip()
+        if not school_id or not student_id:
+            continue
+        key_pairs.append((key, school_id, student_id))
+        student_ids_by_school.setdefault(school_id, []).append(student_id)
+
+    schools_by_id = {sid: (get_school(sid) or {}) for sid in student_ids_by_school.keys()}
+    students_by_key = {}
+    for sid, student_ids in student_ids_by_school.items():
+        rows = load_students_for_student_ids(sid, student_ids)
+        for student_id, student in rows.items():
+            students_by_key[f'{sid}::{student_id}'] = student
+
+    children = []
+    for key, school_id, student_id in key_pairs:
+        student = students_by_key.get(key)
+        if not student:
+            continue
+        school = schools_by_id.get(school_id, {})
+        children.append({
+            'key': key,
+            'school_id': school_id,
+            'school_name': (school or {}).get('school_name', school_id),
+            'student_id': student_id,
+            'firstname': student.get('firstname', ''),
+            'classname': student.get('classname', ''),
+            'stream': student.get('stream', ''),
+        })
+    children.sort(key=lambda row: ((row.get('firstname') or '').lower(), (row.get('student_id') or '').lower()))
+
+    selected_key = (request.args.get('student_key', '') or '').strip()
+    if not selected_key and children:
+        selected_key = children[0].get('key', '')
+    if not selected_key or selected_key not in allowed_keys or '::' not in selected_key:
+        flash('Student access is not allowed for this parent account.', 'error')
+        return redirect(url_for('parent_dashboard'))
+
+    selected_school_id, selected_student_id = selected_key.split('::', 1)
+    selected_student = students_by_key.get(selected_key) or load_student(selected_school_id, selected_student_id)
+    if not selected_student:
+        flash('Student not found.', 'error')
+        return redirect(url_for('parent_dashboard'))
+    selected_school = schools_by_id.get(selected_school_id, {}) or {}
+
+    selected_term = (request.args.get('term', '') or '').strip()
+    selected_year = (request.args.get('academic_year', '') or '').strip()
+    attendance_rows = get_period_attendance_for_student(
+        selected_school_id,
+        selected_student_id,
+        term=selected_term or None,
+        academic_year=selected_year or None,
+    )
+    default_term = ''
+    default_year = ''
+    if attendance_rows:
+        default_term = (attendance_rows[0].get('term') or '').strip()
+        default_year = (attendance_rows[0].get('academic_year') or '').strip()
+    if not default_term:
+        default_term = get_current_term(selected_school)
+    if not default_year:
+        default_year = ((selected_school or {}).get('academic_year', '') or '').strip()
+    comment_term = selected_term or default_term
+    comment_year = selected_year or default_year
+
+    class_teacher_comment = ''
+    subject_teacher_comments = []
+    snapshot = None
+    if comment_term:
+        snapshot = load_published_student_result(
+            selected_school_id,
+            selected_student_id,
+            comment_term,
+            comment_year,
+        )
+    if snapshot:
+        class_teacher_comment = (snapshot.get('teacher_comment', '') or '').strip()
+        snap_scores = snapshot.get('scores', {}) if isinstance(snapshot.get('scores', {}), dict) else {}
+        for subject, block in snap_scores.items():
+            if not isinstance(block, dict):
+                continue
+            comment = (block.get('subject_teacher_comment', '') or '').strip()
+            if comment:
+                subject_teacher_comments.append({
+                    'subject': subject,
+                    'comment': comment,
+                })
+    else:
+        # Fallback for unpublished/current score-entry comments.
+        live_scores = selected_student.get('scores', {}) if isinstance(selected_student.get('scores', {}), dict) else {}
+        for subject, block in live_scores.items():
+            if not isinstance(block, dict):
+                continue
+            comment = (block.get('subject_teacher_comment', '') or '').strip()
+            if comment:
+                subject_teacher_comments.append({
+                    'subject': subject,
+                    'comment': comment,
+                })
+    subject_teacher_comments.sort(key=lambda row: (row.get('subject') or '').lower())
+
+    term_options = sorted(
+        {(row.get('term') or '').strip() for row in attendance_rows if (row.get('term') or '').strip()},
+        key=lambda t: (term_sort_value(t), t),
+    )
+    year_options = sorted(
+        {(row.get('academic_year') or '').strip() for row in attendance_rows if (row.get('academic_year') or '').strip()},
+        key=lambda y: ((_academic_year_start(y) or 0), y),
+        reverse=True,
+    )
+
+    parent_theme_accent = '#1F7A8C'
+    if children:
+        first_school_id = (children[0].get('school_id') or '').strip()
+        first_school = schools_by_id.get(first_school_id, {}) if first_school_id else {}
+        parent_theme_accent = normalize_hex_color(first_school.get('theme_accent_color', ''), '#1F7A8C')
+    parent_messages = get_parent_messages_for_children(
+        parent_phone=session.get('parent_phone', ''),
+        children=children,
+        limit_per_school=80,
+    )
+    unread_parent_messages = sum(1 for row in parent_messages if not row.get('is_read'))
+
+    return render_template(
+        'parent/parent_period_attendance.html',
+        parent_phone=session.get('parent_phone', ''),
+        parent_theme_accent=parent_theme_accent,
+        children=children,
+        selected_key=selected_key,
+        selected_term=selected_term,
+        selected_year=selected_year,
+        comment_term=comment_term,
+        comment_year=comment_year,
+        class_teacher_comment=class_teacher_comment,
+        subject_teacher_comments=subject_teacher_comments,
+        term_options=term_options,
+        year_options=year_options,
+        selected_student=selected_student,
+        selected_school=selected_school,
+        attendance_rows=attendance_rows,
         unread_parent_messages=unread_parent_messages,
     )
 
