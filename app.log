@@ -25851,3 +25851,1018 @@ LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
 2026-03-05 21:32:53,275 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
 2026-03-05 21:32:53,555 - WARNING -  * Debugger is active!
 2026-03-05 21:32:53,560 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 15:02:12,304 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 15:02:12,305 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 15:02:12,305 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 15:02:12,416 - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.0.3:5000
+2026-03-06 15:02:12,417 - INFO - [33mPress CTRL+C to quit[0m
+2026-03-06 15:20:27,541 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 15:20:27,541 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 15:20:27,541 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 15:20:27,656 - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.0.3:5000
+2026-03-06 15:20:27,656 - INFO - [33mPress CTRL+C to quit[0m
+2026-03-06 15:20:27,658 - INFO -  * Restarting with stat
+2026-03-06 15:20:28,858 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 15:20:28,859 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 15:20:28,859 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 15:20:28,934 - WARNING -  * Debugger is active!
+2026-03-06 15:20:28,942 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 15:21:04,872 - INFO - 127.0.0.1 - - [06/Mar/2026 15:21:04] "GET / HTTP/1.1" 200 -
+2026-03-06 15:21:05,004 - INFO - 127.0.0.1 - - [06/Mar/2026 15:21:05] "[33mGET /favicon.ico HTTP/1.1[0m" 404 -
+2026-03-06 15:21:31,592 - INFO - 127.0.0.1 - - [06/Mar/2026 15:21:31] "POST /login HTTP/1.1" 200 -
+2026-03-06 15:22:21,379 - INFO - 127.0.0.1 - - [06/Mar/2026 15:22:21] "[32mPOST /login HTTP/1.1[0m" 302 -
+2026-03-06 15:22:21,411 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-06 15:22:21,553 - INFO - 127.0.0.1 - - [06/Mar/2026 15:22:21] "GET /school-admin HTTP/1.1" 200 -
+2026-03-06 15:22:21,587 - INFO - 127.0.0.1 - - [06/Mar/2026 15:22:21] "GET /school-logo/2?v=2026-03-03+18:49:25.651100 HTTP/1.1" 200 -
+2026-03-06 15:22:21,921 - INFO - 127.0.0.1 - - [06/Mar/2026 15:22:21] "GET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1" 200 -
+2026-03-06 15:22:21,927 - INFO - 127.0.0.1 - - [06/Mar/2026 15:22:21] "GET /static/css/app-assistant.css?v=20260306a HTTP/1.1" 200 -
+2026-03-06 15:22:21,932 - INFO - 127.0.0.1 - - [06/Mar/2026 15:22:21] "GET /static/css/style.css?v=20260228b HTTP/1.1" 200 -
+2026-03-06 15:22:21,934 - INFO - 127.0.0.1 - - [06/Mar/2026 15:22:21] "GET /static/js/app-assistant.js?v=20260306a HTTP/1.1" 200 -
+2026-03-06 15:22:21,936 - INFO - 127.0.0.1 - - [06/Mar/2026 15:22:21] "GET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1" 200 -
+2026-03-06 15:23:35,352 - INFO - 127.0.0.1 - - [06/Mar/2026 15:23:35] "POST /assistant/guide HTTP/1.1" 200 -
+2026-03-06 15:24:19,029 - INFO - 127.0.0.1 - - [06/Mar/2026 15:24:19] "GET /help?role=school_admin HTTP/1.1" 200 -
+2026-03-06 15:24:19,065 - INFO - 127.0.0.1 - - [06/Mar/2026 15:24:19] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 15:24:23,546 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-06 15:24:23,566 - INFO - 127.0.0.1 - - [06/Mar/2026 15:24:23] "GET /school-admin HTTP/1.1" 200 -
+2026-03-06 15:24:23,591 - INFO - 127.0.0.1 - - [06/Mar/2026 15:24:23] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 15:24:23,599 - INFO - 127.0.0.1 - - [06/Mar/2026 15:24:23] "GET /school-logo/2?v=2026-03-03+18:49:25.651100 HTTP/1.1" 200 -
+2026-03-06 15:24:23,606 - INFO - 127.0.0.1 - - [06/Mar/2026 15:24:23] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:24:23,608 - INFO - 127.0.0.1 - - [06/Mar/2026 15:24:23] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:24:23,615 - INFO - 127.0.0.1 - - [06/Mar/2026 15:24:23] "[36mGET /static/css/app-assistant.css?v=20260306a HTTP/1.1[0m" 304 -
+2026-03-06 15:24:23,616 - INFO - 127.0.0.1 - - [06/Mar/2026 15:24:23] "[36mGET /static/js/app-assistant.js?v=20260306a HTTP/1.1[0m" 304 -
+2026-03-06 15:24:26,715 - INFO - 127.0.0.1 - - [06/Mar/2026 15:24:26] "POST /assistant/guide HTTP/1.1" 200 -
+2026-03-06 15:24:29,212 - INFO - 127.0.0.1 - - [06/Mar/2026 15:24:29] "POST /assistant/guide HTTP/1.1" 200 -
+2026-03-06 15:24:58,137 - INFO - 127.0.0.1 - - [06/Mar/2026 15:24:58] "POST /assistant/guide HTTP/1.1" 200 -
+2026-03-06 15:25:00,124 - INFO - 127.0.0.1 - - [06/Mar/2026 15:25:00] "POST /assistant/guide HTTP/1.1" 200 -
+2026-03-06 15:25:01,279 - INFO - 127.0.0.1 - - [06/Mar/2026 15:25:01] "POST /assistant/guide HTTP/1.1" 200 -
+2026-03-06 15:25:16,554 - INFO - 127.0.0.1 - - [06/Mar/2026 15:25:16] "POST /assistant/guide HTTP/1.1" 200 -
+2026-03-06 15:25:59,817 - INFO - 127.0.0.1 - - [06/Mar/2026 15:25:59] "GET /school-admin/messages HTTP/1.1" 200 -
+2026-03-06 15:25:59,849 - INFO - 127.0.0.1 - - [06/Mar/2026 15:25:59] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 15:25:59,859 - INFO - 127.0.0.1 - - [06/Mar/2026 15:25:59] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:25:59,870 - INFO - 127.0.0.1 - - [06/Mar/2026 15:25:59] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:26:02,832 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-06 15:26:02,848 - INFO - 127.0.0.1 - - [06/Mar/2026 15:26:02] "GET /school-admin HTTP/1.1" 200 -
+2026-03-06 15:26:02,872 - INFO - 127.0.0.1 - - [06/Mar/2026 15:26:02] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 15:26:02,877 - INFO - 127.0.0.1 - - [06/Mar/2026 15:26:02] "GET /school-logo/2?v=2026-03-03+18:49:25.651100 HTTP/1.1" 200 -
+2026-03-06 15:26:02,882 - INFO - 127.0.0.1 - - [06/Mar/2026 15:26:02] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:26:02,884 - INFO - 127.0.0.1 - - [06/Mar/2026 15:26:02] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:26:02,889 - INFO - 127.0.0.1 - - [06/Mar/2026 15:26:02] "GET /static/css/app-assistant.css?v=20260306a HTTP/1.1" 200 -
+2026-03-06 15:26:02,895 - INFO - 127.0.0.1 - - [06/Mar/2026 15:26:02] "GET /static/js/app-assistant.js?v=20260306a HTTP/1.1" 200 -
+2026-03-06 15:26:11,123 - INFO - 127.0.0.1 - - [06/Mar/2026 15:26:11] "POST /assistant/guide HTTP/1.1" 200 -
+2026-03-06 15:26:13,905 - INFO - 127.0.0.1 - - [06/Mar/2026 15:26:13] "POST /assistant/guide HTTP/1.1" 200 -
+2026-03-06 15:26:15,374 - INFO - 127.0.0.1 - - [06/Mar/2026 15:26:15] "POST /assistant/guide HTTP/1.1" 200 -
+2026-03-06 15:26:34,404 - INFO - 127.0.0.1 - - [06/Mar/2026 15:26:34] "POST /assistant/guide HTTP/1.1" 200 -
+2026-03-06 15:28:46,159 - INFO - 127.0.0.1 - - [06/Mar/2026 15:28:46] "GET /report_issue HTTP/1.1" 200 -
+2026-03-06 15:28:46,194 - INFO - 127.0.0.1 - - [06/Mar/2026 15:28:46] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 15:28:49,228 - INFO - 127.0.0.1 - - [06/Mar/2026 15:28:49] "[32mGET /menu HTTP/1.1[0m" 302 -
+2026-03-06 15:28:49,243 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-06 15:28:49,259 - INFO - 127.0.0.1 - - [06/Mar/2026 15:28:49] "GET /school-admin HTTP/1.1" 200 -
+2026-03-06 15:28:49,287 - INFO - 127.0.0.1 - - [06/Mar/2026 15:28:49] "GET /school-logo/2?v=2026-03-03+18:49:25.651100 HTTP/1.1" 200 -
+2026-03-06 15:28:49,294 - INFO - 127.0.0.1 - - [06/Mar/2026 15:28:49] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 15:28:49,295 - INFO - 127.0.0.1 - - [06/Mar/2026 15:28:49] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:28:49,299 - INFO - 127.0.0.1 - - [06/Mar/2026 15:28:49] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:28:49,302 - INFO - 127.0.0.1 - - [06/Mar/2026 15:28:49] "[36mGET /static/css/app-assistant.css?v=20260306a HTTP/1.1[0m" 304 -
+2026-03-06 15:28:49,306 - INFO - 127.0.0.1 - - [06/Mar/2026 15:28:49] "[36mGET /static/js/app-assistant.js?v=20260306a HTTP/1.1[0m" 304 -
+2026-03-06 15:33:20,387 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:20] "GET /school-admin/messages HTTP/1.1" 200 -
+2026-03-06 15:33:20,421 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:20] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 15:33:20,426 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:20] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:33:20,428 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:20] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:33:21,900 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:21] "GET /school-admin/publish-results HTTP/1.1" 200 -
+2026-03-06 15:33:21,923 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:21] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 15:33:21,940 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:21] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:33:21,941 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:21] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:33:22,645 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:22] "GET /view_students HTTP/1.1" 200 -
+2026-03-06 15:33:22,676 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:22] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 15:33:24,263 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:24] "[32mGET /menu HTTP/1.1[0m" 302 -
+2026-03-06 15:33:24,282 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-06 15:33:24,299 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:24] "GET /school-admin HTTP/1.1" 200 -
+2026-03-06 15:33:24,323 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:24] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 15:33:24,330 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:24] "GET /school-logo/2?v=2026-03-03+18:49:25.651100 HTTP/1.1" 200 -
+2026-03-06 15:33:24,336 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:24] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:33:24,337 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:24] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:33:24,341 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:24] "[36mGET /static/css/app-assistant.css?v=20260306a HTTP/1.1[0m" 304 -
+2026-03-06 15:33:24,343 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:24] "[36mGET /static/js/app-assistant.js?v=20260306a HTTP/1.1[0m" 304 -
+2026-03-06 15:33:26,333 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:26] "GET /school-admin/parents HTTP/1.1" 200 -
+2026-03-06 15:33:26,362 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:26] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 15:33:26,369 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:26] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:33:26,370 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:26] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:33:27,991 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:27] "GET /school-admin/add-students-by-class HTTP/1.1" 200 -
+2026-03-06 15:33:28,015 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:28] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 15:33:28,023 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:28] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:33:28,023 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:28] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:33:28,866 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:28] "GET /school-admin/class-subjects HTTP/1.1" 200 -
+2026-03-06 15:33:28,896 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:28] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 15:33:28,905 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:28] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:33:28,907 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:28] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:33:29,852 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:29] "GET /school-admin/settings HTTP/1.1" 200 -
+2026-03-06 15:33:29,876 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:29] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 15:33:29,887 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:29] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:33:29,888 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:29] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:33:30,513 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:30] "GET /school-admin/add-students-by-class HTTP/1.1" 200 -
+2026-03-06 15:33:30,544 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:30] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 15:33:30,554 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:30] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:33:30,554 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:30] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:33:31,892 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:31] "GET /school-admin/parents HTTP/1.1" 200 -
+2026-03-06 15:33:31,917 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:31] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 15:33:31,926 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:31] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:33:31,928 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:31] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:33:35,650 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:35] "GET /school-admin/add-students-by-class HTTP/1.1" 200 -
+2026-03-06 15:33:35,676 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:35] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 15:33:35,686 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:35] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:33:35,687 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:35] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:33:38,778 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:38] "GET /school-admin/parents HTTP/1.1" 200 -
+2026-03-06 15:33:38,801 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:38] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 15:33:38,810 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:38] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:33:38,812 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:38] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:33:44,375 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:44] "GET /school-admin/class-subjects HTTP/1.1" 200 -
+2026-03-06 15:33:44,405 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:44] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 15:33:44,413 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:44] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:33:44,414 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:44] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:33:49,298 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:49] "GET /school-admin/bulk-tools HTTP/1.1" 200 -
+2026-03-06 15:33:49,321 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:49] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 15:33:49,329 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:49] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:33:49,333 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:49] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:33:54,377 - INFO - 127.0.0.1 - - [06/Mar/2026 15:33:54] "GET /school-admin/export/teachers HTTP/1.1" 200 -
+2026-03-06 15:34:18,504 - INFO -  * Detected change in 'C:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 15:34:18,889 - INFO -  * Restarting with stat
+2026-03-06 15:34:21,539 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 15:34:21,540 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 15:34:21,540 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 15:34:21,667 - WARNING -  * Debugger is active!
+2026-03-06 15:34:21,669 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 15:35:11,075 - INFO - 127.0.0.1 - - [06/Mar/2026 15:35:11] "GET /school-admin/security HTTP/1.1" 200 -
+2026-03-06 15:35:11,358 - INFO - 127.0.0.1 - - [06/Mar/2026 15:35:11] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 15:35:11,364 - INFO - 127.0.0.1 - - [06/Mar/2026 15:35:11] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:35:11,366 - INFO - 127.0.0.1 - - [06/Mar/2026 15:35:11] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:35:20,000 - INFO - 127.0.0.1 - - [06/Mar/2026 15:35:20] "GET /report_issue HTTP/1.1" 200 -
+2026-03-06 15:35:20,029 - INFO - 127.0.0.1 - - [06/Mar/2026 15:35:20] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 15:35:22,847 - INFO - 127.0.0.1 - - [06/Mar/2026 15:35:22] "[32mGET /menu HTTP/1.1[0m" 302 -
+2026-03-06 15:35:22,907 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-06 15:35:23,161 - INFO - 127.0.0.1 - - [06/Mar/2026 15:35:23] "GET /school-admin HTTP/1.1" 200 -
+2026-03-06 15:35:23,192 - INFO - 127.0.0.1 - - [06/Mar/2026 15:35:23] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 15:35:23,202 - INFO - 127.0.0.1 - - [06/Mar/2026 15:35:23] "GET /school-logo/2?v=2026-03-03+18:49:25.651100 HTTP/1.1" 200 -
+2026-03-06 15:35:23,207 - INFO - 127.0.0.1 - - [06/Mar/2026 15:35:23] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:35:23,209 - INFO - 127.0.0.1 - - [06/Mar/2026 15:35:23] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:35:23,215 - INFO - 127.0.0.1 - - [06/Mar/2026 15:35:23] "[36mGET /static/css/app-assistant.css?v=20260306a HTTP/1.1[0m" 304 -
+2026-03-06 15:35:23,217 - INFO - 127.0.0.1 - - [06/Mar/2026 15:35:23] "[36mGET /static/js/app-assistant.js?v=20260306a HTTP/1.1[0m" 304 -
+2026-03-06 15:36:51,212 - INFO -  * Detected change in 'C:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 15:36:51,575 - INFO -  * Restarting with stat
+2026-03-06 15:36:53,961 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 15:36:53,961 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 15:36:53,961 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 15:36:54,067 - WARNING -  * Debugger is active!
+2026-03-06 15:36:54,070 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 15:37:22,659 - INFO -  * Detected change in 'C:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 15:37:22,978 - INFO -  * Restarting with stat
+2026-03-06 15:37:24,461 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 15:37:24,462 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 15:37:24,462 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 15:37:24,553 - WARNING -  * Debugger is active!
+2026-03-06 15:37:24,556 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 15:37:35,226 - INFO -  * Detected change in 'C:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 15:37:35,519 - INFO -  * Restarting with stat
+2026-03-06 15:37:37,637 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 15:37:37,638 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 15:37:37,638 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 15:37:37,736 - WARNING -  * Debugger is active!
+2026-03-06 15:37:37,739 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 15:39:06,058 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-06 15:39:06,158 - INFO - 127.0.0.1 - - [06/Mar/2026 15:39:06] "GET /school-admin HTTP/1.1" 200 -
+2026-03-06 15:39:06,188 - INFO - 127.0.0.1 - - [06/Mar/2026 15:39:06] "GET /school-logo/2?v=2026-03-03+18:49:25.651100 HTTP/1.1" 200 -
+2026-03-06 15:39:06,442 - INFO - 127.0.0.1 - - [06/Mar/2026 15:39:06] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:39:06,451 - INFO - 127.0.0.1 - - [06/Mar/2026 15:39:06] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 15:39:06,461 - INFO - 127.0.0.1 - - [06/Mar/2026 15:39:06] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:39:06,463 - INFO - 127.0.0.1 - - [06/Mar/2026 15:39:06] "[36mGET /static/css/app-assistant.css?v=20260306a HTTP/1.1[0m" 304 -
+2026-03-06 15:39:06,466 - INFO - 127.0.0.1 - - [06/Mar/2026 15:39:06] "[36mGET /static/js/app-assistant.js?v=20260306a HTTP/1.1[0m" 304 -
+2026-03-06 15:39:12,681 - INFO - 127.0.0.1 - - [06/Mar/2026 15:39:12] "POST /assistant/guide HTTP/1.1" 200 -
+2026-03-06 15:40:15,546 - INFO - 127.0.0.1 - - [06/Mar/2026 15:40:15] "POST /assistant/guide HTTP/1.1" 200 -
+2026-03-06 15:42:05,267 - INFO -  * Detected change in 'C:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 15:42:05,555 - INFO -  * Restarting with stat
+2026-03-06 15:42:07,171 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 15:42:07,171 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 15:42:07,171 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 15:42:07,274 - WARNING -  * Debugger is active!
+2026-03-06 15:42:07,276 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 15:42:18,692 - INFO -  * Detected change in 'C:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 15:42:18,872 - INFO -  * Restarting with stat
+2026-03-06 15:42:20,369 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 15:42:20,369 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 15:42:20,369 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 15:42:20,483 - WARNING -  * Debugger is active!
+2026-03-06 15:42:20,487 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 15:45:13,821 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-06 15:45:13,975 - INFO - 127.0.0.1 - - [06/Mar/2026 15:45:13] "GET /school-admin HTTP/1.1" 200 -
+2026-03-06 15:45:14,002 - INFO - 127.0.0.1 - - [06/Mar/2026 15:45:14] "GET /school-logo/2?v=2026-03-03+18:49:25.651100 HTTP/1.1" 200 -
+2026-03-06 15:45:14,243 - INFO - 127.0.0.1 - - [06/Mar/2026 15:45:14] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 15:45:14,246 - INFO - 127.0.0.1 - - [06/Mar/2026 15:45:14] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:45:14,248 - INFO - 127.0.0.1 - - [06/Mar/2026 15:45:14] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:45:14,254 - INFO - 127.0.0.1 - - [06/Mar/2026 15:45:14] "[36mGET /static/js/app-assistant.js?v=20260306a HTTP/1.1[0m" 304 -
+2026-03-06 15:45:14,255 - INFO - 127.0.0.1 - - [06/Mar/2026 15:45:14] "[36mGET /static/css/app-assistant.css?v=20260306a HTTP/1.1[0m" 304 -
+2026-03-06 15:45:20,444 - INFO - 127.0.0.1 - - [06/Mar/2026 15:45:20] "POST /assistant/guide HTTP/1.1" 200 -
+2026-03-06 15:45:32,681 - INFO - 127.0.0.1 - - [06/Mar/2026 15:45:32] "POST /assistant/guide HTTP/1.1" 200 -
+2026-03-06 15:45:40,285 - INFO - 127.0.0.1 - - [06/Mar/2026 15:45:40] "POST /assistant/guide HTTP/1.1" 200 -
+2026-03-06 15:46:03,753 - INFO - 127.0.0.1 - - [06/Mar/2026 15:46:03] "POST /assistant/guide HTTP/1.1" 200 -
+2026-03-06 15:46:25,526 - INFO - 127.0.0.1 - - [06/Mar/2026 15:46:25] "POST /assistant/guide HTTP/1.1" 200 -
+2026-03-06 15:48:41,220 - INFO -  * Detected change in 'C:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 15:48:41,575 - INFO -  * Restarting with stat
+2026-03-06 15:48:43,630 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 15:48:43,630 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 15:48:43,630 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 15:48:43,749 - WARNING -  * Debugger is active!
+2026-03-06 15:48:43,752 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 15:48:55,267 - INFO -  * Detected change in 'C:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 15:48:55,519 - INFO -  * Restarting with stat
+2026-03-06 15:48:57,055 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 15:48:57,055 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 15:48:57,055 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 15:48:57,176 - WARNING -  * Debugger is active!
+2026-03-06 15:48:57,181 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 15:50:50,837 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-06 15:50:50,968 - INFO - 127.0.0.1 - - [06/Mar/2026 15:50:50] "GET /school-admin HTTP/1.1" 200 -
+2026-03-06 15:50:50,996 - INFO - 127.0.0.1 - - [06/Mar/2026 15:50:50] "GET /school-logo/2?v=2026-03-03+18:49:25.651100 HTTP/1.1" 200 -
+2026-03-06 15:50:51,354 - INFO - 127.0.0.1 - - [06/Mar/2026 15:50:51] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:50:51,376 - INFO - 127.0.0.1 - - [06/Mar/2026 15:50:51] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:50:51,388 - INFO - 127.0.0.1 - - [06/Mar/2026 15:50:51] "[36mGET /static/js/app-assistant.js?v=20260306a HTTP/1.1[0m" 304 -
+2026-03-06 15:50:51,390 - INFO - 127.0.0.1 - - [06/Mar/2026 15:50:51] "[36mGET /static/css/app-assistant.css?v=20260306a HTTP/1.1[0m" 304 -
+2026-03-06 15:50:51,394 - INFO - 127.0.0.1 - - [06/Mar/2026 15:50:51] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 15:51:09,925 - INFO - 127.0.0.1 - - [06/Mar/2026 15:51:09] "POST /assistant/guide HTTP/1.1" 200 -
+2026-03-06 15:51:39,280 - INFO - 127.0.0.1 - - [06/Mar/2026 15:51:39] "POST /assistant/guide HTTP/1.1" 200 -
+2026-03-06 15:51:54,933 - INFO -  * Detected change in 'C:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 15:51:55,118 - INFO -  * Restarting with stat
+2026-03-06 15:51:56,612 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 15:51:56,613 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 15:51:56,613 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 15:51:56,692 - WARNING -  * Debugger is active!
+2026-03-06 15:51:56,695 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 15:55:39,333 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-06 15:55:39,571 - INFO - 127.0.0.1 - - [06/Mar/2026 15:55:39] "GET /school-admin HTTP/1.1" 200 -
+2026-03-06 15:55:39,636 - INFO - 127.0.0.1 - - [06/Mar/2026 15:55:39] "GET /school-logo/2?v=2026-03-03+18:49:25.651100 HTTP/1.1" 200 -
+2026-03-06 15:55:39,999 - INFO - 127.0.0.1 - - [06/Mar/2026 15:55:39] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 15:55:40,013 - INFO - 127.0.0.1 - - [06/Mar/2026 15:55:40] "[36mGET /static/css/app-assistant.css?v=20260306a HTTP/1.1[0m" 304 -
+2026-03-06 15:55:40,015 - INFO - 127.0.0.1 - - [06/Mar/2026 15:55:40] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:55:40,017 - INFO - 127.0.0.1 - - [06/Mar/2026 15:55:40] "[36mGET /static/js/app-assistant.js?v=20260306a HTTP/1.1[0m" 304 -
+2026-03-06 15:55:40,025 - INFO - 127.0.0.1 - - [06/Mar/2026 15:55:40] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:56:09,278 - INFO - 127.0.0.1 - - [06/Mar/2026 15:56:09] "POST /assistant/guide HTTP/1.1" 200 -
+2026-03-06 15:57:45,982 - INFO - 127.0.0.1 - - [06/Mar/2026 15:57:45] "POST /assistant/guide HTTP/1.1" 200 -
+2026-03-06 15:57:57,560 - INFO -  * Detected change in 'C:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 15:57:57,921 - INFO -  * Restarting with stat
+2026-03-06 15:57:59,516 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 15:57:59,516 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 15:57:59,516 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 15:57:59,593 - WARNING -  * Debugger is active!
+2026-03-06 15:57:59,596 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 15:59:27,896 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-06 15:59:28,179 - INFO - 127.0.0.1 - - [06/Mar/2026 15:59:28] "GET /school-admin HTTP/1.1" 200 -
+2026-03-06 15:59:28,227 - INFO - 127.0.0.1 - - [06/Mar/2026 15:59:28] "GET /school-logo/2?v=2026-03-03+18:49:25.651100 HTTP/1.1" 200 -
+2026-03-06 15:59:28,671 - INFO - 127.0.0.1 - - [06/Mar/2026 15:59:28] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 15:59:28,680 - INFO - 127.0.0.1 - - [06/Mar/2026 15:59:28] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:59:28,686 - INFO - 127.0.0.1 - - [06/Mar/2026 15:59:28] "[36mGET /static/js/app-assistant.js?v=20260306a HTTP/1.1[0m" 304 -
+2026-03-06 15:59:28,690 - INFO - 127.0.0.1 - - [06/Mar/2026 15:59:28] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 15:59:28,696 - INFO - 127.0.0.1 - - [06/Mar/2026 15:59:28] "[36mGET /static/css/app-assistant.css?v=20260306a HTTP/1.1[0m" 304 -
+2026-03-06 16:00:02,810 - INFO - 127.0.0.1 - - [06/Mar/2026 16:00:02] "POST /assistant/guide HTTP/1.1" 200 -
+2026-03-06 16:00:13,108 - INFO -  * Detected change in 'C:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 16:00:13,379 - INFO -  * Restarting with stat
+2026-03-06 16:00:15,249 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 16:00:15,249 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 16:00:15,249 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 16:00:15,379 - WARNING -  * Debugger is active!
+2026-03-06 16:00:15,384 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 16:02:30,953 - INFO -  * Detected change in 'C:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 16:02:31,297 - INFO -  * Restarting with stat
+2026-03-06 16:02:33,641 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 16:02:33,641 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 16:02:33,641 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 16:02:33,781 - WARNING -  * Debugger is active!
+2026-03-06 16:02:33,785 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 16:19:00,324 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-06 16:19:00,450 - INFO - 127.0.0.1 - - [06/Mar/2026 16:19:00] "GET /school-admin/timetable HTTP/1.1" 200 -
+2026-03-06 16:19:00,901 - INFO - 127.0.0.1 - - [06/Mar/2026 16:19:00] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 16:19:00,924 - INFO - 127.0.0.1 - - [06/Mar/2026 16:19:00] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 16:19:00,925 - INFO - 127.0.0.1 - - [06/Mar/2026 16:19:00] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 16:21:09,060 - INFO -  * Detected change in 'C:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 16:21:09,527 - INFO -  * Restarting with stat
+2026-03-06 16:21:11,501 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 16:21:11,502 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 16:21:11,502 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 16:21:11,642 - WARNING -  * Debugger is active!
+2026-03-06 16:21:11,645 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 16:27:12,104 - INFO -  * Detected change in 'C:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 16:27:12,372 - INFO -  * Restarting with stat
+2026-03-06 16:27:14,523 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 16:27:14,524 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 16:27:14,524 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 16:27:14,885 - WARNING -  * Debugger is active!
+2026-03-06 16:27:14,891 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 16:27:22,678 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-06 16:27:22,782 - INFO - 127.0.0.1 - - [06/Mar/2026 16:27:22] "GET /school-admin/timetable HTTP/1.1" 200 -
+2026-03-06 16:27:23,310 - INFO - 127.0.0.1 - - [06/Mar/2026 16:27:23] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 16:27:23,321 - INFO - 127.0.0.1 - - [06/Mar/2026 16:27:23] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 16:27:23,324 - INFO - 127.0.0.1 - - [06/Mar/2026 16:27:23] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 16:27:29,536 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-06 16:27:29,539 - INFO - 127.0.0.1 - - [06/Mar/2026 16:27:29] "GET /school-admin/timetable-template HTTP/1.1" 200 -
+2026-03-06 16:34:15,064 - INFO -  * Detected change in 'C:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 16:34:15,422 - INFO -  * Restarting with stat
+2026-03-06 16:34:17,612 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 16:34:17,612 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 16:34:17,612 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 16:34:17,734 - WARNING -  * Debugger is active!
+2026-03-06 16:34:17,738 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 16:38:57,792 - INFO -  * Detected change in 'C:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 16:38:58,138 - INFO -  * Restarting with stat
+2026-03-06 16:39:00,276 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 16:39:00,277 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 16:39:00,277 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 16:39:00,397 - WARNING -  * Debugger is active!
+2026-03-06 16:39:00,401 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 16:42:58,216 - INFO -  * Detected change in 'C:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 16:42:58,520 - INFO -  * Restarting with stat
+2026-03-06 16:43:00,589 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 16:43:00,589 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 16:43:00,589 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 16:43:00,727 - WARNING -  * Debugger is active!
+2026-03-06 16:43:00,730 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 16:43:06,120 - INFO -  * Detected change in 'C:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 16:43:06,385 - INFO -  * Restarting with stat
+2026-03-06 16:43:08,413 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 16:43:08,413 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 16:43:08,413 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 16:43:08,560 - WARNING -  * Debugger is active!
+2026-03-06 16:43:08,565 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 16:43:44,294 - INFO -  * Detected change in 'C:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 16:43:44,802 - INFO -  * Restarting with stat
+2026-03-06 16:43:47,008 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 16:43:47,008 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 16:43:47,008 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 16:43:47,142 - WARNING -  * Debugger is active!
+2026-03-06 16:43:47,146 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 16:44:27,093 - INFO -  * Detected change in 'C:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 16:44:27,393 - INFO -  * Restarting with stat
+2026-03-06 16:44:29,882 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 16:44:29,883 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 16:44:29,883 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 16:44:30,026 - WARNING -  * Debugger is active!
+2026-03-06 16:44:30,030 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 16:44:38,520 - INFO -  * Detected change in 'C:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 16:44:38,785 - INFO -  * Restarting with stat
+2026-03-06 16:44:40,832 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 16:44:40,833 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 16:44:40,833 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 16:44:41,013 - WARNING -  * Debugger is active!
+2026-03-06 16:44:41,019 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 16:45:02,267 - INFO -  * Detected change in 'C:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 16:45:02,484 - INFO -  * Restarting with stat
+2026-03-06 16:45:04,520 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 16:45:04,520 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 16:45:04,520 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 16:45:04,666 - WARNING -  * Debugger is active!
+2026-03-06 16:45:04,670 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 17:01:23,789 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-06 17:01:23,819 - ERROR - Database Error: column "target_subject" does not exist
+LINE 1: ... title, message, target_classname, target_stream, target_sub...
+                                                             ^
+
+2026-03-06 17:01:23,820 - WARNING - Failed to load school student messages for dashboard: column "target_subject" does not exist
+LINE 1: ... title, message, target_classname, target_stream, target_sub...
+                                                             ^
+
+2026-03-06 17:01:23,968 - INFO - 127.0.0.1 - - [06/Mar/2026 17:01:23] "GET /school-admin HTTP/1.1" 200 -
+2026-03-06 17:01:24,029 - INFO - 127.0.0.1 - - [06/Mar/2026 17:01:24] "GET /school-logo/2?v=2026-03-03+18:49:25.651100 HTTP/1.1" 200 -
+2026-03-06 17:01:24,362 - INFO - 127.0.0.1 - - [06/Mar/2026 17:01:24] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 17:01:24,463 - INFO - 127.0.0.1 - - [06/Mar/2026 17:01:24] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 17:01:24,472 - INFO - 127.0.0.1 - - [06/Mar/2026 17:01:24] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 17:01:24,481 - INFO - 127.0.0.1 - - [06/Mar/2026 17:01:24] "[36mGET /static/js/app-assistant.js?v=20260306a HTTP/1.1[0m" 304 -
+2026-03-06 17:01:24,487 - INFO - 127.0.0.1 - - [06/Mar/2026 17:01:24] "[36mGET /static/css/app-assistant.css?v=20260306a HTTP/1.1[0m" 304 -
+2026-03-06 17:02:06,340 - INFO -  * Detected change in 'C:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 17:02:06,683 - INFO -  * Restarting with stat
+2026-03-06 17:02:08,941 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 17:02:08,941 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 17:02:08,941 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 17:02:09,028 - WARNING -  * Debugger is active!
+2026-03-06 17:02:09,030 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 17:02:11,179 - INFO -  * Detected change in 'C:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 17:02:11,515 - INFO -  * Restarting with stat
+2026-03-06 17:02:13,235 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 17:02:13,235 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 17:02:13,235 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 17:02:13,316 - WARNING -  * Debugger is active!
+2026-03-06 17:02:13,319 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 17:14:35,879 - INFO -  * Detected change in 'C:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 17:14:36,103 - INFO -  * Restarting with stat
+2026-03-06 17:14:37,667 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 17:14:37,668 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 17:14:37,668 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 17:14:37,755 - WARNING -  * Debugger is active!
+2026-03-06 17:14:37,757 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 17:14:59,428 - INFO -  * Detected change in 'C:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 17:14:59,851 - INFO -  * Restarting with stat
+2026-03-06 17:15:01,534 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 17:15:01,534 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 17:15:01,534 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 17:15:01,612 - WARNING -  * Debugger is active!
+2026-03-06 17:15:01,614 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 17:15:14,014 - INFO -  * Detected change in 'C:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 17:15:14,260 - INFO -  * Restarting with stat
+2026-03-06 17:15:15,800 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 17:15:15,800 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 17:15:15,800 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 17:15:15,906 - WARNING -  * Debugger is active!
+2026-03-06 17:15:15,909 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 17:15:21,110 - INFO -  * Detected change in 'C:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 17:15:21,497 - INFO -  * Restarting with stat
+2026-03-06 17:15:23,453 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 17:15:23,453 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 17:15:23,453 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 17:15:23,557 - WARNING -  * Debugger is active!
+2026-03-06 17:15:23,560 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 17:15:30,845 - INFO -  * Detected change in 'C:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 17:15:31,062 - INFO -  * Restarting with stat
+2026-03-06 17:15:33,104 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 17:15:33,105 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 17:15:33,105 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 17:15:33,230 - WARNING -  * Debugger is active!
+2026-03-06 17:15:33,235 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 17:15:59,667 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-06 17:15:59,877 - INFO - 127.0.0.1 - - [06/Mar/2026 17:15:59] "GET /school-admin HTTP/1.1" 200 -
+2026-03-06 17:15:59,914 - INFO - 127.0.0.1 - - [06/Mar/2026 17:15:59] "GET /school-logo/2?v=2026-03-03+18:49:25.651100 HTTP/1.1" 200 -
+2026-03-06 17:16:00,220 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:00] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 17:16:00,226 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:00] "[36mGET /static/js/app-assistant.js?v=20260306a HTTP/1.1[0m" 304 -
+2026-03-06 17:16:00,237 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:00] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 17:16:00,238 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:00] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 17:16:00,241 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:00] "[36mGET /static/css/app-assistant.css?v=20260306a HTTP/1.1[0m" 304 -
+2026-03-06 17:16:01,710 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:01] "GET /school-admin/publish-results HTTP/1.1" 200 -
+2026-03-06 17:16:01,737 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:01] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 17:16:01,745 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:01] "[36mGET /static/css/app-assistant.css?v=20260306a HTTP/1.1[0m" 304 -
+2026-03-06 17:16:01,746 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:01] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 17:16:01,747 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:01] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 17:16:01,753 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:01] "[36mGET /static/js/app-assistant.js?v=20260306a HTTP/1.1[0m" 304 -
+2026-03-06 17:16:03,146 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:03] "GET /school-admin/parents HTTP/1.1" 200 -
+2026-03-06 17:16:03,177 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:03] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 17:16:03,186 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:03] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 17:16:03,188 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:03] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 17:16:06,817 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:06] "GET /school-admin/add-students-by-class HTTP/1.1" 200 -
+2026-03-06 17:16:06,844 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:06] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 17:16:06,858 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:06] "[36mGET /static/css/app-assistant.css?v=20260306a HTTP/1.1[0m" 304 -
+2026-03-06 17:16:06,858 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:06] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 17:16:06,859 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:06] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 17:16:06,860 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:06] "[36mGET /static/js/app-assistant.js?v=20260306a HTTP/1.1[0m" 304 -
+2026-03-06 17:16:08,607 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:08] "GET /school-admin/settings HTTP/1.1" 200 -
+2026-03-06 17:16:08,643 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:08] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 17:16:08,653 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:08] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 17:16:08,656 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:08] "[36mGET /static/css/app-assistant.css?v=20260306a HTTP/1.1[0m" 304 -
+2026-03-06 17:16:08,657 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:08] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 17:16:08,659 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:08] "[36mGET /static/js/app-assistant.js?v=20260306a HTTP/1.1[0m" 304 -
+2026-03-06 17:16:09,996 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:09] "GET /school-admin/class-subjects HTTP/1.1" 200 -
+2026-03-06 17:16:10,022 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:10] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 17:16:10,037 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:10] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 17:16:10,037 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:10] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 17:16:10,039 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:10] "[36mGET /static/css/app-assistant.css?v=20260306a HTTP/1.1[0m" 304 -
+2026-03-06 17:16:10,047 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:10] "[36mGET /static/js/app-assistant.js?v=20260306a HTTP/1.1[0m" 304 -
+2026-03-06 17:16:11,573 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:11] "GET /school-admin/promote-students HTTP/1.1" 200 -
+2026-03-06 17:16:11,614 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:11] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 17:16:11,632 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:11] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 17:16:11,641 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:11] "GET /static/css/app-assistant.css?v=20260306a HTTP/1.1" 200 -
+2026-03-06 17:16:11,643 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:11] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 17:16:11,645 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:11] "[36mGET /static/js/app-assistant.js?v=20260306a HTTP/1.1[0m" 304 -
+2026-03-06 17:16:12,815 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-06 17:16:12,844 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:12] "GET /school-admin/score-audit HTTP/1.1" 200 -
+2026-03-06 17:16:12,869 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:12] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 17:16:12,883 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:12] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 17:16:12,885 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:12] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 17:16:12,885 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:12] "[36mGET /static/css/app-assistant.css?v=20260306a HTTP/1.1[0m" 304 -
+2026-03-06 17:16:12,888 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:12] "[36mGET /static/js/app-assistant.js?v=20260306a HTTP/1.1[0m" 304 -
+2026-03-06 17:16:13,729 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:13] "GET /school-admin/term-programs HTTP/1.1" 200 -
+2026-03-06 17:16:13,763 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:13] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 17:16:13,775 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:13] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 17:16:13,775 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:13] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 17:16:26,502 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:26] "[32mPOST /school-admin/term-programs/send-reminders HTTP/1.1[0m" 302 -
+2026-03-06 17:16:26,529 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:26] "GET /school-admin/term-programs?program_term=First+Term&program_year=2026-2027 HTTP/1.1" 200 -
+2026-03-06 17:16:26,579 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:26] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 17:16:26,581 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:26] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 17:16:26,582 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:26] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 17:16:30,816 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-06 17:16:30,845 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:30] "GET /school-admin HTTP/1.1" 200 -
+2026-03-06 17:16:30,880 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:30] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 17:16:30,892 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:30] "GET /school-logo/2?v=2026-03-03+18:49:25.651100 HTTP/1.1" 200 -
+2026-03-06 17:16:30,894 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:30] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 17:16:30,909 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:30] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 17:16:30,915 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:30] "GET /static/js/app-assistant.js?v=20260306b HTTP/1.1" 200 -
+2026-03-06 17:16:30,916 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:30] "GET /static/css/app-assistant.css?v=20260306b HTTP/1.1" 200 -
+2026-03-06 17:16:32,781 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:32] "GET /school-admin/analytics HTTP/1.1" 200 -
+2026-03-06 17:16:32,818 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:32] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 17:16:32,844 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:32] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 17:16:32,847 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:32] "[36mGET /static/css/app-assistant.css?v=20260306b HTTP/1.1[0m" 304 -
+2026-03-06 17:16:32,854 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:32] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 17:16:32,857 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:32] "[36mGET /static/js/app-assistant.js?v=20260306b HTTP/1.1[0m" 304 -
+2026-03-06 17:16:34,278 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:34] "GET /school-admin/disputes HTTP/1.1" 200 -
+2026-03-06 17:16:34,313 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:34] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 17:16:34,328 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:34] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 17:16:34,330 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:34] "[36mGET /static/css/app-assistant.css?v=20260306b HTTP/1.1[0m" 304 -
+2026-03-06 17:16:34,332 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:34] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 17:16:34,338 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:34] "[36mGET /static/js/app-assistant.js?v=20260306b HTTP/1.1[0m" 304 -
+2026-03-06 17:16:36,338 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:36] "GET /school-admin/analytics HTTP/1.1" 200 -
+2026-03-06 17:16:36,373 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:36] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 17:16:36,384 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:36] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 17:16:36,386 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:36] "[36mGET /static/css/app-assistant.css?v=20260306b HTTP/1.1[0m" 304 -
+2026-03-06 17:16:36,389 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:36] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 17:16:36,394 - INFO - 127.0.0.1 - - [06/Mar/2026 17:16:36] "[36mGET /static/js/app-assistant.js?v=20260306b HTTP/1.1[0m" 304 -
+2026-03-06 17:17:10,045 - INFO - 127.0.0.1 - - [06/Mar/2026 17:17:10] "[32mPOST /logout HTTP/1.1[0m" 302 -
+2026-03-06 17:17:10,057 - INFO - 127.0.0.1 - - [06/Mar/2026 17:17:10] "GET / HTTP/1.1" 200 -
+2026-03-06 17:17:25,043 - INFO - 127.0.0.1 - - [06/Mar/2026 17:17:25] "[32mPOST /login HTTP/1.1[0m" 302 -
+2026-03-06 17:17:25,055 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-06 17:17:25,070 - INFO - 127.0.0.1 - - [06/Mar/2026 17:17:25] "GET /school-admin HTTP/1.1" 200 -
+2026-03-06 17:17:25,098 - INFO - 127.0.0.1 - - [06/Mar/2026 17:17:25] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 17:17:25,101 - INFO - 127.0.0.1 - - [06/Mar/2026 17:17:25] "GET /school-logo/2?v=2026-03-03+18:49:25.651100 HTTP/1.1" 200 -
+2026-03-06 17:17:25,104 - INFO - 127.0.0.1 - - [06/Mar/2026 17:17:25] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 17:17:25,110 - INFO - 127.0.0.1 - - [06/Mar/2026 17:17:25] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 17:17:25,113 - INFO - 127.0.0.1 - - [06/Mar/2026 17:17:25] "[36mGET /static/css/app-assistant.css?v=20260306b HTTP/1.1[0m" 304 -
+2026-03-06 17:17:25,114 - INFO - 127.0.0.1 - - [06/Mar/2026 17:17:25] "[36mGET /static/js/app-assistant.js?v=20260306b HTTP/1.1[0m" 304 -
+2026-03-06 17:18:30,764 - INFO -  * Detected change in 'C:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 17:18:30,976 - INFO -  * Restarting with stat
+2026-03-06 17:18:32,461 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 17:18:32,461 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 17:18:32,461 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 17:18:32,543 - WARNING -  * Debugger is active!
+2026-03-06 17:18:32,547 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 17:18:32,822 - INFO - 127.0.0.1 - - [06/Mar/2026 17:18:32] "POST /assistant/guide HTTP/1.1" 200 -
+2026-03-06 17:18:59,200 - INFO - 127.0.0.1 - - [06/Mar/2026 17:18:59] "POST /assistant/guide HTTP/1.1" 200 -
+2026-03-06 17:19:49,475 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-06 17:19:49,637 - INFO - 127.0.0.1 - - [06/Mar/2026 17:19:49] "GET /school-admin HTTP/1.1" 200 -
+2026-03-06 17:19:49,683 - INFO - 127.0.0.1 - - [06/Mar/2026 17:19:49] "GET /school-logo/2?v=2026-03-03+18:49:25.651100 HTTP/1.1" 200 -
+2026-03-06 17:19:50,052 - INFO - 127.0.0.1 - - [06/Mar/2026 17:19:50] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 17:19:50,107 - INFO - 127.0.0.1 - - [06/Mar/2026 17:19:50] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 17:19:50,107 - INFO - 127.0.0.1 - - [06/Mar/2026 17:19:50] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 17:19:50,117 - INFO - 127.0.0.1 - - [06/Mar/2026 17:19:50] "[36mGET /static/css/app-assistant.css?v=20260306b HTTP/1.1[0m" 304 -
+2026-03-06 17:19:50,119 - INFO - 127.0.0.1 - - [06/Mar/2026 17:19:50] "[36mGET /static/js/app-assistant.js?v=20260306b HTTP/1.1[0m" 304 -
+2026-03-06 17:20:22,864 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 17:20:22,864 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 17:20:22,864 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 17:20:22,964 - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.0.2:5000
+2026-03-06 17:20:22,965 - INFO - [33mPress CTRL+C to quit[0m
+2026-03-06 17:20:22,967 - INFO -  * Restarting with stat
+2026-03-06 17:20:24,173 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 17:20:24,173 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 17:20:24,173 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 17:20:24,252 - WARNING -  * Debugger is active!
+2026-03-06 17:20:24,256 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 17:20:25,913 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-06 17:20:26,026 - INFO - 127.0.0.1 - - [06/Mar/2026 17:20:26] "GET /school-admin HTTP/1.1" 200 -
+2026-03-06 17:20:26,053 - INFO - 127.0.0.1 - - [06/Mar/2026 17:20:26] "GET /school-logo/2?v=2026-03-03+18:49:25.651100 HTTP/1.1" 200 -
+2026-03-06 17:20:26,397 - INFO - 127.0.0.1 - - [06/Mar/2026 17:20:26] "GET /static/css/style.css?v=20260228b HTTP/1.1" 200 -
+2026-03-06 17:20:26,402 - INFO - 127.0.0.1 - - [06/Mar/2026 17:20:26] "GET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1" 200 -
+2026-03-06 17:20:26,424 - INFO - 127.0.0.1 - - [06/Mar/2026 17:20:26] "GET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1" 200 -
+2026-03-06 17:20:26,435 - INFO - 127.0.0.1 - - [06/Mar/2026 17:20:26] "GET /static/css/app-assistant.css?v=20260306b HTTP/1.1" 200 -
+2026-03-06 17:20:26,437 - INFO - 127.0.0.1 - - [06/Mar/2026 17:20:26] "GET /static/js/app-assistant.js?v=20260306b HTTP/1.1" 200 -
+2026-03-06 17:20:41,933 - INFO - 127.0.0.1 - - [06/Mar/2026 17:20:41] "POST /assistant/guide HTTP/1.1" 200 -
+2026-03-06 17:20:46,926 - INFO - 127.0.0.1 - - [06/Mar/2026 17:20:46] "POST /assistant/guide HTTP/1.1" 200 -
+2026-03-06 19:10:28,883 - INFO - 127.0.0.1 - - [06/Mar/2026 19:10:28] "POST /assistant/guide HTTP/1.1" 200 -
+2026-03-06 19:10:53,914 - INFO - 127.0.0.1 - - [06/Mar/2026 19:10:53] "GET /school-admin/settings HTTP/1.1" 200 -
+2026-03-06 19:10:53,959 - INFO - 127.0.0.1 - - [06/Mar/2026 19:10:53] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 19:10:53,976 - INFO - 127.0.0.1 - - [06/Mar/2026 19:10:53] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 19:10:53,979 - INFO - 127.0.0.1 - - [06/Mar/2026 19:10:53] "[36mGET /static/css/app-assistant.css?v=20260306b HTTP/1.1[0m" 304 -
+2026-03-06 19:10:53,988 - INFO - 127.0.0.1 - - [06/Mar/2026 19:10:53] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 19:10:53,993 - INFO - 127.0.0.1 - - [06/Mar/2026 19:10:53] "[36mGET /static/js/app-assistant.js?v=20260306b HTTP/1.1[0m" 304 -
+2026-03-06 19:10:59,119 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-06 19:10:59,160 - INFO - 127.0.0.1 - - [06/Mar/2026 19:10:59] "GET /school-admin HTTP/1.1" 200 -
+2026-03-06 19:10:59,196 - INFO - 127.0.0.1 - - [06/Mar/2026 19:10:59] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 19:10:59,202 - INFO - 127.0.0.1 - - [06/Mar/2026 19:10:59] "GET /school-logo/2?v=2026-03-03+18:49:25.651100 HTTP/1.1" 200 -
+2026-03-06 19:10:59,221 - INFO - 127.0.0.1 - - [06/Mar/2026 19:10:59] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 19:10:59,232 - INFO - 127.0.0.1 - - [06/Mar/2026 19:10:59] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 19:10:59,235 - INFO - 127.0.0.1 - - [06/Mar/2026 19:10:59] "[36mGET /static/css/app-assistant.css?v=20260306b HTTP/1.1[0m" 304 -
+2026-03-06 19:10:59,236 - INFO - 127.0.0.1 - - [06/Mar/2026 19:10:59] "[36mGET /static/js/app-assistant.js?v=20260306b HTTP/1.1[0m" 304 -
+2026-03-06 19:12:37,404 - INFO - 127.0.0.1 - - [06/Mar/2026 19:12:37] "POST /assistant/guide HTTP/1.1" 200 -
+2026-03-06 19:20:33,486 - INFO - 127.0.0.1 - - [06/Mar/2026 19:20:33] "POST /assistant/guide HTTP/1.1" 200 -
+2026-03-06 19:21:02,430 - INFO - 127.0.0.1 - - [06/Mar/2026 19:21:02] "POST /assistant/guide HTTP/1.1" 200 -
+2026-03-06 19:21:11,493 - INFO - 127.0.0.1 - - [06/Mar/2026 19:21:11] "POST /assistant/guide HTTP/1.1" 200 -
+2026-03-06 19:21:33,119 - INFO - 127.0.0.1 - - [06/Mar/2026 19:21:33] "POST /assistant/guide HTTP/1.1" 200 -
+2026-03-06 19:22:02,043 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:02] "GET /school-admin/promote-students HTTP/1.1" 200 -
+2026-03-06 19:22:02,091 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:02] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 19:22:02,105 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:02] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 19:22:02,112 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:02] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 19:22:02,115 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:02] "[36mGET /static/css/app-assistant.css?v=20260306b HTTP/1.1[0m" 304 -
+2026-03-06 19:22:02,118 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:02] "[36mGET /static/js/app-assistant.js?v=20260306b HTTP/1.1[0m" 304 -
+2026-03-06 19:22:09,545 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:09] "GET /school-admin/publish-results HTTP/1.1" 200 -
+2026-03-06 19:22:09,581 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:09] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 19:22:09,603 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:09] "[36mGET /static/css/app-assistant.css?v=20260306b HTTP/1.1[0m" 304 -
+2026-03-06 19:22:09,606 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:09] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 19:22:09,607 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:09] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 19:22:09,609 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:09] "[36mGET /static/js/app-assistant.js?v=20260306b HTTP/1.1[0m" 304 -
+2026-03-06 19:22:15,540 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:15] "GET /school-admin/publish-results?term=First+Term&academic_year=2026-2027 HTTP/1.1" 200 -
+2026-03-06 19:22:15,591 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:15] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 19:22:15,608 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:15] "[36mGET /static/css/app-assistant.css?v=20260306b HTTP/1.1[0m" 304 -
+2026-03-06 19:22:15,608 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:15] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 19:22:15,609 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:15] "[36mGET /static/js/app-assistant.js?v=20260306b HTTP/1.1[0m" 304 -
+2026-03-06 19:22:15,611 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:15] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 19:22:24,046 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:24] "GET /school-admin/publish-results?term=Second+Term&academic_year=2026-2027 HTTP/1.1" 200 -
+2026-03-06 19:22:24,084 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:24] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 19:22:24,097 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:24] "[36mGET /static/css/app-assistant.css?v=20260306b HTTP/1.1[0m" 304 -
+2026-03-06 19:22:24,102 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:24] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 19:22:24,102 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:24] "[36mGET /static/js/app-assistant.js?v=20260306b HTTP/1.1[0m" 304 -
+2026-03-06 19:22:24,106 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:24] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 19:22:26,878 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:26] "GET /school-admin/publish-results?term=First+Term&academic_year=2026-2027 HTTP/1.1" 200 -
+2026-03-06 19:22:26,924 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:26] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 19:22:26,935 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:26] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 19:22:26,938 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:26] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 19:22:26,939 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:26] "[36mGET /static/css/app-assistant.css?v=20260306b HTTP/1.1[0m" 304 -
+2026-03-06 19:22:26,948 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:26] "[36mGET /static/js/app-assistant.js?v=20260306b HTTP/1.1[0m" 304 -
+2026-03-06 19:22:28,380 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:28] "GET /school-admin/publish-results HTTP/1.1" 200 -
+2026-03-06 19:22:28,422 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:28] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 19:22:28,449 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:28] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 19:22:28,450 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:28] "[36mGET /static/css/app-assistant.css?v=20260306b HTTP/1.1[0m" 304 -
+2026-03-06 19:22:28,450 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:28] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 19:22:28,453 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:28] "[36mGET /static/js/app-assistant.js?v=20260306b HTTP/1.1[0m" 304 -
+2026-03-06 19:22:33,765 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:33] "GET /school-admin/publish-results?term=Third+Term&academic_year=2026-2027 HTTP/1.1" 200 -
+2026-03-06 19:22:33,810 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:33] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 19:22:33,829 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:33] "[36mGET /static/js/app-assistant.js?v=20260306b HTTP/1.1[0m" 304 -
+2026-03-06 19:22:33,832 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:33] "[36mGET /static/css/app-assistant.css?v=20260306b HTTP/1.1[0m" 304 -
+2026-03-06 19:22:33,833 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:33] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 19:22:33,834 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:33] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 19:22:35,730 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:35] "GET /school-admin/publish-results?term=Second+Term&academic_year=2026-2027 HTTP/1.1" 200 -
+2026-03-06 19:22:35,769 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:35] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 19:22:35,791 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:35] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 19:22:35,791 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:35] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 19:22:35,792 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:35] "[36mGET /static/css/app-assistant.css?v=20260306b HTTP/1.1[0m" 304 -
+2026-03-06 19:22:35,794 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:35] "[36mGET /static/js/app-assistant.js?v=20260306b HTTP/1.1[0m" 304 -
+2026-03-06 19:22:37,003 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:37] "GET /school-admin/publish-results?term=First+Term&academic_year=2026-2027 HTTP/1.1" 200 -
+2026-03-06 19:22:37,049 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:37] "[36mGET /static/css/style.css?v=20260228b HTTP/1.1[0m" 304 -
+2026-03-06 19:22:37,063 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:37] "[36mGET /static/css/app-assistant.css?v=20260306b HTTP/1.1[0m" 304 -
+2026-03-06 19:22:37,065 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:37] "[36mGET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 19:22:37,071 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:37] "[36mGET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1[0m" 304 -
+2026-03-06 19:22:37,075 - INFO - 127.0.0.1 - - [06/Mar/2026 19:22:37] "[36mGET /static/js/app-assistant.js?v=20260306b HTTP/1.1[0m" 304 -
+2026-03-06 19:27:26,143 - INFO - 127.0.0.1 - - [06/Mar/2026 19:27:26] "GET /sw.js HTTP/1.1" 200 -
+2026-03-06 20:56:35,656 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 20:56:36,804 - INFO -  * Restarting with stat
+2026-03-06 20:56:40,265 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 20:56:40,266 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 20:56:40,266 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 20:56:40,493 - WARNING -  * Debugger is active!
+2026-03-06 20:56:40,499 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 20:57:40,874 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 20:57:41,205 - INFO -  * Restarting with stat
+2026-03-06 20:57:44,045 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 20:57:44,046 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 20:57:44,046 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 20:57:44,167 - WARNING -  * Debugger is active!
+2026-03-06 20:57:44,172 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 20:58:22,380 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 20:58:22,730 - INFO -  * Restarting with stat
+2026-03-06 20:58:25,064 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 20:58:25,064 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 20:58:25,065 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 20:58:25,229 - WARNING -  * Debugger is active!
+2026-03-06 20:58:25,233 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 20:59:12,832 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 20:59:13,153 - INFO -  * Restarting with stat
+2026-03-06 20:59:15,655 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 20:59:15,655 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 20:59:15,656 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 20:59:15,812 - WARNING -  * Debugger is active!
+2026-03-06 20:59:15,817 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 20:59:36,132 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 20:59:36,429 - INFO -  * Restarting with stat
+2026-03-06 20:59:39,217 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 20:59:39,217 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 20:59:39,218 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 20:59:39,363 - WARNING -  * Debugger is active!
+2026-03-06 20:59:39,368 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 20:59:54,320 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 20:59:54,575 - INFO -  * Restarting with stat
+2026-03-06 20:59:56,916 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 20:59:56,916 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 20:59:56,916 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 20:59:57,065 - WARNING -  * Debugger is active!
+2026-03-06 20:59:57,070 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 21:00:16,276 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 21:00:16,503 - INFO -  * Restarting with stat
+2026-03-06 21:00:18,521 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 21:00:18,521 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 21:00:18,522 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 21:00:18,664 - WARNING -  * Debugger is active!
+2026-03-06 21:00:18,670 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 21:00:31,460 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 21:00:31,752 - INFO -  * Restarting with stat
+2026-03-06 21:00:34,089 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 21:00:34,089 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 21:00:34,090 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 21:00:34,233 - WARNING -  * Debugger is active!
+2026-03-06 21:00:34,236 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 21:00:45,889 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 21:00:46,293 - INFO -  * Restarting with stat
+2026-03-06 21:00:48,530 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 21:00:48,530 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 21:00:48,530 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 21:00:48,644 - WARNING -  * Debugger is active!
+2026-03-06 21:00:48,648 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 21:01:03,446 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 21:01:03,801 - INFO -  * Restarting with stat
+2026-03-06 21:01:06,339 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 21:01:06,339 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 21:01:06,340 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 21:01:06,471 - WARNING -  * Debugger is active!
+2026-03-06 21:01:06,474 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 21:01:20,327 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 21:01:20,539 - INFO -  * Restarting with stat
+2026-03-06 21:01:22,552 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 21:01:22,552 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 21:01:22,552 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 21:01:22,678 - WARNING -  * Debugger is active!
+2026-03-06 21:01:22,683 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 21:02:11,678 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 21:02:11,942 - INFO -  * Restarting with stat
+2026-03-06 21:02:13,939 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 21:02:13,939 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 21:02:13,939 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 21:02:14,117 - WARNING -  * Debugger is active!
+2026-03-06 21:02:14,121 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 21:02:38,895 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 21:02:39,117 - INFO -  * Restarting with stat
+2026-03-06 21:02:41,216 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 21:02:41,217 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 21:02:41,217 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 21:02:41,341 - WARNING -  * Debugger is active!
+2026-03-06 21:02:41,344 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 21:03:14,680 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 21:03:14,950 - INFO -  * Restarting with stat
+2026-03-06 21:03:17,244 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 21:03:17,245 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 21:03:17,245 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 21:03:17,409 - WARNING -  * Debugger is active!
+2026-03-06 21:03:17,414 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 21:03:35,471 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 21:03:35,793 - INFO -  * Restarting with stat
+2026-03-06 21:03:38,764 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 21:03:38,765 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 21:03:38,765 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 21:03:38,919 - WARNING -  * Debugger is active!
+2026-03-06 21:03:38,922 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 21:03:46,508 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 21:03:46,848 - INFO -  * Restarting with stat
+2026-03-06 21:03:49,148 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 21:03:49,148 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 21:03:49,149 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 21:03:49,298 - WARNING -  * Debugger is active!
+2026-03-06 21:03:49,303 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 21:03:57,184 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 21:03:57,678 - INFO -  * Restarting with stat
+2026-03-06 21:04:00,332 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 21:04:00,332 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 21:04:00,332 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 21:04:00,496 - WARNING -  * Debugger is active!
+2026-03-06 21:04:00,501 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 21:04:41,721 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 21:04:42,305 - INFO -  * Restarting with stat
+2026-03-06 21:04:44,516 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 21:04:44,516 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 21:04:44,517 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 21:04:44,656 - WARNING -  * Debugger is active!
+2026-03-06 21:04:44,660 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 21:04:57,701 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 21:04:58,118 - INFO -  * Restarting with stat
+2026-03-06 21:05:00,733 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 21:05:00,734 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 21:05:00,734 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 21:05:00,896 - WARNING -  * Debugger is active!
+2026-03-06 21:05:00,901 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 21:05:15,226 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 21:05:15,602 - INFO -  * Restarting with stat
+2026-03-06 21:05:17,855 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 21:05:17,855 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 21:05:17,856 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 21:05:17,992 - WARNING -  * Debugger is active!
+2026-03-06 21:05:17,996 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 21:05:27,892 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 21:05:28,171 - INFO -  * Restarting with stat
+2026-03-06 21:05:30,645 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 21:05:30,645 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 21:05:30,645 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 21:05:30,802 - WARNING -  * Debugger is active!
+2026-03-06 21:05:30,808 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 21:05:36,354 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 21:05:36,654 - INFO -  * Restarting with stat
+2026-03-06 21:05:39,072 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 21:05:39,072 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 21:05:39,072 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 21:05:39,222 - WARNING -  * Debugger is active!
+2026-03-06 21:05:39,228 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 21:07:38,164 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 21:07:38,414 - INFO -  * Restarting with stat
+2026-03-06 21:07:40,556 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 21:07:40,556 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 21:07:40,556 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 21:07:40,680 - WARNING -  * Debugger is active!
+2026-03-06 21:07:40,683 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 21:07:53,422 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 21:07:53,852 - INFO -  * Restarting with stat
+2026-03-06 21:07:56,033 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 21:07:56,033 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 21:07:56,034 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 21:07:56,164 - WARNING -  * Debugger is active!
+2026-03-06 21:07:56,168 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 21:08:00,780 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 21:08:01,283 - INFO -  * Restarting with stat
+2026-03-06 21:08:04,177 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 21:08:04,177 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 21:08:04,177 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 21:08:04,322 - WARNING -  * Debugger is active!
+2026-03-06 21:08:04,327 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 21:08:24,030 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 21:08:24,356 - INFO -  * Restarting with stat
+2026-03-06 21:08:26,715 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 21:08:26,715 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 21:08:26,715 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 21:08:26,882 - WARNING -  * Debugger is active!
+2026-03-06 21:08:26,886 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 21:08:34,606 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 21:08:34,917 - INFO -  * Restarting with stat
+2026-03-06 21:08:37,322 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 21:08:37,322 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 21:08:37,322 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 21:08:37,488 - WARNING -  * Debugger is active!
+2026-03-06 21:08:37,493 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 21:08:40,837 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 21:08:41,224 - INFO -  * Restarting with stat
+2026-03-06 21:08:44,158 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 21:08:44,158 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 21:08:44,158 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 21:08:44,283 - WARNING -  * Debugger is active!
+2026-03-06 21:08:44,287 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 21:08:48,684 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 21:08:48,972 - INFO -  * Restarting with stat
+2026-03-06 21:08:51,428 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 21:08:51,428 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 21:08:51,428 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 21:08:51,573 - WARNING -  * Debugger is active!
+2026-03-06 21:08:51,576 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 21:09:16,153 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 21:09:16,468 - INFO -  * Restarting with stat
+2026-03-06 21:09:18,652 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 21:09:18,652 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 21:09:18,652 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 21:09:18,783 - WARNING -  * Debugger is active!
+2026-03-06 21:09:18,787 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 21:10:51,528 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 21:10:51,769 - INFO -  * Restarting with stat
+2026-03-06 21:10:54,116 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 21:10:54,116 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 21:10:54,117 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 21:10:54,265 - WARNING -  * Debugger is active!
+2026-03-06 21:10:54,268 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 21:12:36,290 - INFO - 127.0.0.1 - - [06/Mar/2026 21:12:36] "[36mGET /sw.js HTTP/1.1[0m" 304 -
+2026-03-06 21:12:38,656 - INFO - The CSRF token is missing.
+2026-03-06 21:12:38,657 - INFO - 127.0.0.1 - - [06/Mar/2026 21:12:38] "[32mPOST /login HTTP/1.1[0m" 302 -
+2026-03-06 21:12:38,995 - INFO - 127.0.0.1 - - [06/Mar/2026 21:12:38] "GET /login HTTP/1.1" 200 -
+2026-03-06 21:12:39,703 - INFO - 127.0.0.1 - - [06/Mar/2026 21:12:39] "[33mGET /favicon.ico HTTP/1.1[0m" 404 -
+2026-03-06 21:12:40,966 - INFO - 127.0.0.1 - - [06/Mar/2026 21:12:40] "[36mGET /sw.js HTTP/1.1[0m" 304 -
+2026-03-06 21:12:47,611 - INFO - 127.0.0.1 - - [06/Mar/2026 21:12:47] "[32mPOST /login HTTP/1.1[0m" 302 -
+2026-03-06 21:12:47,672 - INFO - 127.0.0.1 - - [06/Mar/2026 21:12:47] "GET /super-admin HTTP/1.1" 200 -
+2026-03-06 21:12:47,894 - INFO - 127.0.0.1 - - [06/Mar/2026 21:12:47] "GET /static/css/dashboard-pro.css?v=20260303c HTTP/1.1" 200 -
+2026-03-06 21:12:48,048 - INFO - 127.0.0.1 - - [06/Mar/2026 21:12:48] "GET /static/css/app-assistant.css?v=20260306c HTTP/1.1" 200 -
+2026-03-06 21:12:48,055 - INFO - 127.0.0.1 - - [06/Mar/2026 21:12:48] "GET /static/js/dashboard-menu.js?v=20260303c HTTP/1.1" 200 -
+2026-03-06 21:12:48,093 - INFO - 127.0.0.1 - - [06/Mar/2026 21:12:48] "GET /static/js/app-assistant.js?v=20260306c HTTP/1.1" 200 -
+2026-03-06 21:12:51,499 - INFO - 127.0.0.1 - - [06/Mar/2026 21:12:51] "[36mGET /sw.js HTTP/1.1[0m" 304 -
+2026-03-06 21:13:10,544 - INFO - 127.0.0.1 - - [06/Mar/2026 21:13:10] "POST /assistant/guide HTTP/1.1" 200 -
+2026-03-06 21:13:21,032 - INFO - 127.0.0.1 - - [06/Mar/2026 21:13:21] "POST /assistant/feedback HTTP/1.1" 200 -
+2026-03-06 21:16:50,083 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 21:16:50,357 - INFO -  * Restarting with stat
+2026-03-06 21:16:52,521 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 21:16:52,521 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 21:16:52,522 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 21:16:52,648 - WARNING -  * Debugger is active!
+2026-03-06 21:16:52,652 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 21:17:24,588 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 21:17:24,965 - INFO -  * Restarting with stat
+2026-03-06 21:17:27,201 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 21:17:27,201 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 21:17:27,201 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 21:17:27,331 - WARNING -  * Debugger is active!
+2026-03-06 21:17:27,336 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 21:17:50,322 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 21:17:50,611 - INFO -  * Restarting with stat
+2026-03-06 21:17:52,731 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 21:17:52,731 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 21:17:52,732 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 21:17:52,903 - WARNING -  * Debugger is active!
+2026-03-06 21:17:52,906 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 21:17:58,366 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 21:17:58,618 - INFO -  * Restarting with stat
+2026-03-06 21:18:00,711 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 21:18:00,711 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 21:18:00,712 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 21:18:00,857 - WARNING -  * Debugger is active!
+2026-03-06 21:18:00,862 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 21:18:05,331 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 21:18:05,606 - INFO -  * Restarting with stat
+2026-03-06 21:18:07,722 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 21:18:07,723 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 21:18:07,723 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 21:18:07,857 - WARNING -  * Debugger is active!
+2026-03-06 21:18:07,860 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 21:18:14,587 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 21:18:14,831 - INFO -  * Restarting with stat
+2026-03-06 21:18:16,998 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 21:18:16,999 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 21:18:16,999 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 21:18:17,166 - WARNING -  * Debugger is active!
+2026-03-06 21:18:17,171 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 21:18:31,867 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 21:18:32,156 - INFO -  * Restarting with stat
+2026-03-06 21:18:35,483 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 21:18:35,483 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 21:18:35,483 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 21:18:35,643 - WARNING -  * Debugger is active!
+2026-03-06 21:18:35,648 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 21:18:44,504 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 21:18:44,871 - INFO -  * Restarting with stat
+2026-03-06 21:18:47,302 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 21:18:47,303 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 21:18:47,304 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 21:18:47,456 - WARNING -  * Debugger is active!
+2026-03-06 21:18:47,461 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 21:18:55,260 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 21:18:55,854 - INFO -  * Restarting with stat
+2026-03-06 21:18:58,072 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 21:18:58,072 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 21:18:58,072 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 21:18:58,201 - WARNING -  * Debugger is active!
+2026-03-06 21:18:58,206 - INFO -  * Debugger PIN: 541-365-780
+2026-03-06 21:19:33,563 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-06 21:19:33,879 - INFO -  * Restarting with stat
+2026-03-06 21:19:36,458 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-06 21:19:36,458 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-06 21:19:36,458 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-06 21:19:36,582 - WARNING -  * Debugger is active!
+2026-03-06 21:19:36,586 - INFO -  * Debugger PIN: 541-365-780

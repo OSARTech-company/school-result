@@ -1,0 +1,25 @@
+<link rel="stylesheet" href="{{ url_for('static', filename='css/app-assistant.css', v='20260306c') }}">
+{% if post_login_welcome_name %}
+<div class="app-welcome-toast" role="status" aria-live="polite">
+    Welcome, {{ post_login_welcome_name }}.
+</div>
+{% endif %}
+<div class="app-ai-assistant" data-role="{{ (session.get('role') or '')|e }}">
+    <input type="hidden" class="app-ai-csrf" value="{{ csrf_token() }}">
+    <button type="button" class="app-ai-toggle" aria-expanded="false" aria-controls="app-ai-panel">AI Help</button>
+    <section id="app-ai-panel" class="app-ai-panel" hidden>
+        <header class="app-ai-header">
+            <strong>App Assistant</strong>
+            <button type="button" class="app-ai-close" aria-label="Close assistant">&times;</button>
+        </header>
+        <div class="app-ai-messages" aria-live="polite">
+            <div class="app-ai-bot-msg">Ask anything about how to use this app. I can guide you step-by-step.</div>
+        </div>
+        <div class="app-ai-quick"></div>
+        <form class="app-ai-form" autocomplete="off">
+            <input type="text" name="question" maxlength="320" placeholder="Ask about results, messages, attendance..." required>
+            <button type="submit">Ask</button>
+        </form>
+    </section>
+</div>
+<script src="{{ url_for('static', filename='js/app-assistant.js', v='20260306c') }}" defer></script>

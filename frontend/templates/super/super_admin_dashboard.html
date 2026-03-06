@@ -6,7 +6,7 @@
     <title>Super Admin Dashboard - Student Score Management System</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260303c') }}">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" integrity="sha384-3B6NwesSXE7YJlcLI9RpRqGf2p/EgVH8BgoKTaUrmKNDkHPStTQ3EyoYjCGXaOTS" crossorigin="anonymous" referrerpolicy="no-referrer">
 </head>
 <body>
     <div class="app-shell topbar-layout">
@@ -115,6 +115,7 @@
         });
       })();
     </script>
+    {% include 'shared/_ai_assistant_widget.html' %}
 </body>
 </html>
 

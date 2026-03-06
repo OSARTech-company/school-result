@@ -113,6 +113,16 @@
                                 | Sent: {{ msg.created_at }}
                             </div>
                             <div>{{ msg.message }}</div>
+                            {% if msg.attachment_url %}
+                            <div class="mt-10">
+                                <a href="{{ msg.attachment_url }}" target="_blank" rel="noopener" class="btn btn-secondary">
+                                    <i class="fas fa-image"></i> Open Attached Image
+                                </a>
+                                <div class="mt-10">
+                                    <img src="{{ msg.attachment_url }}" alt="Attachment" style="max-width:100%; max-height:360px; border-radius:10px; border:1px solid #dbe4ef;">
+                                </div>
+                            </div>
+                            {% endif %}
                             {% if not msg.is_read %}
                             <div class="student-message-actions">
                                 <form method="post" action="{{ url_for('student_mark_message_read') }}">
@@ -133,6 +143,9 @@
             </div>
         </div>
     </div>
+    {% if session.get('role') in ['student', 'school_admin', 'teacher', 'parent', 'super_admin'] %}
+    {% include 'shared/_ai_assistant_widget.html' %}
+    {% endif %}
     <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260303c') }}"></script>
 </body>
 </html>

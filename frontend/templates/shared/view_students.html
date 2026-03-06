@@ -625,6 +625,10 @@
         </div>
     </div>
 
+    {% if session.get('role') in ['school_admin', 'teacher', 'student', 'parent', 'super_admin'] %}
+    {% include 'shared/_ai_assistant_widget.html' %}
+    {% endif %}
+
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             const searchInput = document.getElementById('searchInput');

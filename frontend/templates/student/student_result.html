@@ -1306,6 +1306,9 @@
         })();
     </script>
     {% endif %}
+    {% if session.get('role') in ['student', 'school_admin', 'teacher', 'parent', 'super_admin'] %}
+    {% include 'shared/_ai_assistant_widget.html' %}
+    {% endif %}
 </body>
 </html>
 

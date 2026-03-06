@@ -55,6 +55,28 @@
     </div>
 
     <div class="card">
+        <h2>Import Timetable (CSV)</h2>
+        <p class="muted">Upload period timetable rows in CSV format. Required columns: <code>classname, day_of_week, period_label, subject</code>. Optional: <code>teacher_id, start_time, end_time, room</code>.</p>
+        <p class="muted"><code>day_of_week</code> accepts numbers <code>1-7</code> or names like <code>Monday</code>. Time format is <code>HH:MM</code>.</p>
+        <p class="mt-10">
+            <a class="btn btn-secondary" href="{{ url_for('school_admin_timetable_template') }}">
+                <i class="fas fa-download"></i> Download CSV Template
+            </a>
+        </p>
+        <form method="post" enctype="multipart/form-data">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="import_csv">
+            <div class="grid">
+                <div>
+                    <label>CSV File</label>
+                    <input type="file" name="timetable_file" accept=".csv,text/csv" required>
+                </div>
+            </div>
+            <div class="mt-12"><button class="btn btn-primary" type="submit">Upload Timetable CSV</button></div>
+        </form>
+    </div>
+
+    <div class="card">
         <h2>Current Timetable</h2>
         <form method="get" class="toolbar">
             <label>Filter Class</label>

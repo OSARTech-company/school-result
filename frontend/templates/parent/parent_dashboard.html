@@ -6,8 +6,7 @@
     <title>Parent Dashboard</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260303c') }}">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" integrity="sha384-3B6NwesSXE7YJlcLI9RpRqGf2p/EgVH8BgoKTaUrmKNDkHPStTQ3EyoYjCGXaOTS" crossorigin="anonymous" referrerpolicy="no-referrer">
     <style>
         .container { max-width: 1100px; }
         .parent-message-card { border: 1px solid #dbe4ef; border-radius: 10px; padding: 12px; background: #f8fbff; margin-bottom: 10px; }
@@ -35,7 +34,7 @@
         .welcome-modal-card ol { margin: 8px 0 14px 18px; color: #334155; }
     </style>
 </head>
-<body style="--accent: {{ parent_theme_accent if parent_theme_accent else '#1F7A8C' }};">
+<body style="--accent: {{ parent_theme_accent if parent_theme_accent else '#1F7A8C' }};" data-parent-account="{{ parent_phone|default('parent', true)|e }}" data-unread-parent-messages="{{ unread_parent_messages|default(0, true)|int }}">
     <div class="app-shell topbar-layout">
         <div class="side-taskbar">
             <div class="side-brand">
@@ -238,9 +237,10 @@
     <script>
         (function () {
             if (!('Notification' in window)) return;
-            const unread = Number({{ unread_parent_messages|int }});
+            const unread = Number(document.body.getAttribute('data-unread-parent-messages') || '0');
             if (!Number.isFinite(unread) || unread <= 0) return;
-            const key = 'parentUnreadNotifyShown';
+            const accountMarker = document.body.getAttribute('data-parent-account') || 'parent';
+            const key = 'parentUnreadNotifyShown:' + accountMarker;
             const marker = String(unread);
             if (localStorage.getItem(key) === marker) return;
             if (Notification.permission === 'default') {
@@ -262,30 +262,51 @@
     </script>
     {% endif %}
     <script>
-        document.querySelectorAll('.child-trend-chart').forEach(function (canvas) {
-            const rows = JSON.parse(canvas.getAttribute('data-points') || '[]');
-            if (!rows.length) return;
-            new Chart(canvas, {
-                type: 'line',
-                data: {
-                    labels: rows.map(r => r.label),
-                    datasets: [{
-                        label: 'Average Score Trend',
-                        data: rows.map(r => r.average),
-                        borderColor: '#16a34a',
-                        backgroundColor: 'rgba(22, 163, 74, 0.18)',
-                        fill: true,
-                        tension: 0.25
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: { y: { min: 0, max: 100 } }
-                }
-            });
-        });
+        (function () {
+            const canvases = Array.from(document.querySelectorAll('.child-trend-chart'));
+            if (!canvases.length) return;
+
+            function renderCharts() {
+                canvases.forEach(function (canvas) {
+                    const rows = JSON.parse(canvas.getAttribute('data-points') || '[]');
+                    if (!rows.length) return;
+                    new Chart(canvas, {
+                        type: 'line',
+                        data: {
+                            labels: rows.map(r => r.label),
+                            datasets: [{
+                                label: 'Average Score Trend',
+                                data: rows.map(r => r.average),
+                                borderColor: '#16a34a',
+                                backgroundColor: 'rgba(22, 163, 74, 0.18)',
+                                fill: true,
+                                tension: 0.25
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            scales: { y: { min: 0, max: 100 } }
+                        }
+                    });
+                });
+            }
+
+            if (typeof Chart !== 'undefined') {
+                renderCharts();
+                return;
+            }
+
+            const chartScript = document.createElement('script');
+            chartScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js';
+            chartScript.integrity = 'sha384-bs/nf9FbdNouRbMiFcrcZfLXYPKiPaGVGplVbv7dLGECccEXDW+S3zjqSKR5ZEaD';
+            chartScript.crossOrigin = 'anonymous';
+            chartScript.referrerPolicy = 'no-referrer';
+            chartScript.onload = renderCharts;
+            document.head.appendChild(chartScript);
+        })();
     </script>
+    {% include 'shared/_ai_assistant_widget.html' %}
 </body>
 </html>
 

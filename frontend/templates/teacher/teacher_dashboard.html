@@ -87,7 +87,7 @@
         .welcome-modal-card ol { margin: 8px 0 14px 18px; color: #334155; }
     </style>
 </head>
-<body style="--brand: {{ school.theme_primary_color if school and school.theme_primary_color else '#0F4C81' }}; --brand-2: {{ school.theme_secondary_color if school and school.theme_secondary_color else '#1F7A8C' }}; --accent: {{ school.theme_accent_color if school and school.theme_accent_color else '#1F7A8C' }};">
+<body style="--brand: {{ school.theme_primary_color if school and school.theme_primary_color else '#0F4C81' }}; --brand-2: {{ school.theme_secondary_color if school and school.theme_secondary_color else '#1F7A8C' }}; --accent: {{ school.theme_accent_color if school and school.theme_accent_color else '#1F7A8C' }};" data-teacher-account="{{ teacher_phone|default(teacher_name, true)|default('teacher', true)|e }}" data-unread-teacher-messages="{{ unread_teacher_messages|default(0, true)|int }}">
     {% set has_class_assignment = (classes|length) > 0 %}
     {% set active_tab = (request.args.get('tab', 'overview') or 'overview').strip().lower() %}
     {% if active_tab not in ['overview', 'score', 'submission'] %}
@@ -317,6 +317,58 @@
                 <div class="layout-main">
                 <div class="layout-side">
                 {% if active_tab == 'overview' %}
+                <div class="card">
+                    <h2><i class="fas fa-paper-plane"></i> Send Assignment / Note To Students</h2>
+                    {% if subject_assignment_form_map %}
+                    <p class="note">Send to students in a class you are assigned to for the selected subject.</p>
+                    <form method="post" action="{{ url_for('teacher_send_student_message') }}" enctype="multipart/form-data">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <div class="grid">
+                            <div>
+                                <label>Type</label>
+                                <select name="message_kind" required>
+                                    <option value="assignment">Assignment</option>
+                                    <option value="note">Note</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label>Class</label>
+                                <select name="target_classname" id="teacher-student-msg-class" required>
+                                    {% for cls in subject_assignment_form_map.keys()|list|sort %}
+                                    <option value="{{ cls }}">{{ cls }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div>
+                                <label>Subject</label>
+                                <select name="target_subject" id="teacher-student-msg-subject" required></select>
+                            </div>
+                            <div>
+                                <label>Deadline (Optional)</label>
+                                <input type="date" name="deadline_date">
+                            </div>
+                            <div>
+                                <label>Title (Optional)</label>
+                                <input type="text" name="title" maxlength="160" placeholder="Auto-generated if empty">
+                            </div>
+                            <div>
+                                <label>Attach Image (Optional)</label>
+                                <input type="file" name="attachment_image" accept=".jpg,.jpeg,.png,.gif,.webp,image/*">
+                            </div>
+                        </div>
+                        <div class="mt-12">
+                            <label>Message / Assignment Details</label>
+                            <textarea name="message" rows="4" maxlength="12000" required placeholder="Type assignment instructions or class note..."></textarea>
+                            <p class="note">Image formats: JPG, PNG, GIF, WEBP. Max image size: 8MB. Note max length: 12,000 characters.</p>
+                        </div>
+                        <div class="mt-12">
+                            <button type="submit" class="btn btn-primary"><i class="fas fa-paper-plane"></i> Send To Students</button>
+                        </div>
+                    </form>
+                    {% else %}
+                    <p class="note">No subject assignment found yet. Ask school admin to assign your class subjects first.</p>
+                    {% endif %}
+                </div>
                 <div class="card">
                     <h2><i class="fas fa-bell"></i> School Notifications</h2>
                     <p class="note">Open a dedicated messages page to keep the dashboard focused.</p>
@@ -950,6 +1002,29 @@
     </div>
     {% endif %}
     <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260303c') }}"></script>
+    <script id="teacher-subject-assignment-map" type="application/json">{{ subject_assignment_form_map|tojson|safe }}</script>
+    <script>
+        (function () {
+            const classSel = document.getElementById('teacher-student-msg-class');
+            const subjSel = document.getElementById('teacher-student-msg-subject');
+            if (!classSel || !subjSel) return;
+            const mapNode = document.getElementById('teacher-subject-assignment-map');
+            const classMap = mapNode ? JSON.parse(mapNode.textContent || '{}') : {};
+            function renderSubjects() {
+                const cls = classSel.value || '';
+                const subjects = Array.isArray(classMap[cls]) ? classMap[cls] : [];
+                subjSel.innerHTML = '';
+                subjects.forEach(function (subject) {
+                    const opt = document.createElement('option');
+                    opt.value = subject;
+                    opt.textContent = subject;
+                    subjSel.appendChild(opt);
+                });
+            }
+            classSel.addEventListener('change', renderSubjects);
+            renderSubjects();
+        })();
+    </script>
     <script>
         (function () {
             const allBtn = document.getElementById('view-filter-all');
@@ -986,9 +1061,10 @@
     <script>
         (function () {
             if (!('Notification' in window)) return;
-            const unread = Number({{ unread_teacher_messages|int }});
+            const unread = Number(document.body.getAttribute('data-unread-teacher-messages') || '0');
             if (!Number.isFinite(unread) || unread <= 0) return;
-            const key = 'teacherUnreadNotifyShown';
+            const accountMarker = document.body.getAttribute('data-teacher-account') || 'teacher';
+            const key = 'teacherUnreadNotifyShown:' + accountMarker;
             const marker = String(unread);
             if (localStorage.getItem(key) === marker) return;
             if (Notification.permission === 'default') {
@@ -1009,6 +1085,7 @@
         })();
     </script>
     {% endif %}
+    {% include 'shared/_ai_assistant_widget.html' %}
 </body>
 </html>
 

@@ -40,10 +40,11 @@
 
     <div class="card">
         <h2>Import CSV</h2>
-        <p class="note">Students columns: student_id, firstname, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects, promoted, parent_phone</p>
+        <p class="note">Students columns: student_id (optional, leave blank to auto-generate), firstname (or student_name/name), lastname/surname (optional), date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects, promoted, parent_phone</p>
         <form method="post" action="{{ url_for('school_admin_import_target', target='students') }}" enctype="multipart/form-data">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="file" name="file" accept=".csv" required>
+            <label style="margin-left:10px;"><input type="checkbox" name="dry_run" value="1"> Dry run only</label>
             <button class="btn btn-primary" type="submit">Import Students CSV</button>
         </form>
         <hr>
@@ -51,6 +52,7 @@
         <form method="post" action="{{ url_for('school_admin_import_target', target='teachers') }}" enctype="multipart/form-data">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="file" name="file" accept=".csv" required>
+            <label style="margin-left:10px;"><input type="checkbox" name="dry_run" value="1"> Dry run only</label>
             <button class="btn btn-primary" type="submit">Import Teachers CSV</button>
         </form>
         <hr>
@@ -58,6 +60,7 @@
         <form method="post" action="{{ url_for('school_admin_import_target', target='class_assignments') }}" enctype="multipart/form-data">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="file" name="file" accept=".csv" required>
+            <label style="margin-left:10px;"><input type="checkbox" name="dry_run" value="1"> Dry run only</label>
             <button class="btn btn-primary" type="submit">Import Class Assignments CSV</button>
         </form>
     </div>
@@ -65,15 +68,38 @@
     <div class="card">
         <h2>Backup / Restore</h2>
         <a class="btn btn-secondary" href="{{ url_for('school_admin_backup') }}">Download Full JSON Backup</a>
+        <form method="post" action="{{ url_for('school_admin_backup_encrypted') }}" class="mt-12">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="password" name="backup_passphrase" placeholder="Backup passphrase (min 8 chars)" minlength="8" required>
+            <button class="btn btn-secondary" type="submit">Download Encrypted Backup</button>
+        </form>
         <form method="post" action="{{ url_for('school_admin_restore') }}" enctype="multipart/form-data" class="mt-12">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="file" name="backup_file" accept=".json,application/json" required>
+            <input type="password" name="backup_passphrase" placeholder="Passphrase (only for encrypted backup)">
             <select name="mode">
                 <option value="merge">Merge</option>
                 <option value="replace">Replace Existing</option>
             </select>
             <button class="btn btn-danger" type="submit">Restore Backup</button>
         </form>
+        <hr>
+        <h3>Backup Schedule</h3>
+        <form method="post" action="{{ url_for('school_admin_backup_schedule') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <select name="frequency_days">
+                <option value="1" {% if backup_schedule and backup_schedule.frequency_days == 1 %}selected{% endif %}>Daily</option>
+                <option value="7" {% if backup_schedule and backup_schedule.frequency_days == 7 %}selected{% endif %}>Weekly</option>
+                <option value="30" {% if backup_schedule and backup_schedule.frequency_days == 30 %}selected{% endif %}>Monthly</option>
+            </select>
+            <label style="margin-left:10px;">
+                <input type="checkbox" name="encrypted_by_default" value="1" {% if backup_schedule and backup_schedule.encrypted_by_default %}checked{% endif %}>
+                Encrypted by default
+            </label>
+            <button class="btn btn-primary" type="submit">Save Schedule</button>
+        </form>
+        <p class="note">Last backup: {{ backup_schedule.last_backup_at if backup_schedule else 'N/A' }}</p>
+        <p class="note">Next due: {{ backup_schedule.next_due_at if backup_schedule and backup_schedule.next_due_at else 'Not scheduled yet' }}</p>
     </div>
 </div>
     </div>

@@ -27,6 +27,13 @@
                 </select>
             </div>
             <div><label>Academic Year</label><input name="academic_year" value="{{ selected_year }}"></div>
+            <div><label>AI Window</label>
+                <select name="assistant_days">
+                    <option value="7" {% if assistant_days == 7 %}selected{% endif %}>Last 7 days</option>
+                    <option value="30" {% if assistant_days == 30 %}selected{% endif %}>Last 30 days</option>
+                    <option value="90" {% if assistant_days == 90 %}selected{% endif %}>Last 90 days</option>
+                </select>
+            </div>
             <button class="btn btn-secondary" type="submit">Load</button>
         </form>
     </div>
@@ -68,6 +75,77 @@
             <tr><td>{{ row.label }}</td><td>{{ row.student_count }}</td><td>{{ row.avg_score }}</td></tr>
             {% else %}
             <tr><td colspan="3">No attendance impact data yet.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="card">
+        <h2>AI Assistant Usage (Last {{ assistant_days if assistant_days else 30 }} Days)</h2>
+        <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 12px;">
+            <div class="stat-card">
+                <div class="stat-label">Total Questions</div>
+                <div class="stat-value" style="font-size: 1.6rem; font-weight: 800;">{{ assistant_usage.total if assistant_usage else 0 }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">LLM Answers</div>
+                <div class="stat-value" style="font-size: 1.6rem; font-weight: 800;">{{ assistant_usage.llm_total if assistant_usage else 0 }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Helpful Feedback</div>
+                <div class="stat-value" style="font-size: 1.6rem; font-weight: 800;">{{ assistant_feedback.helpful if assistant_feedback else 0 }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Not Helpful</div>
+                <div class="stat-value" style="font-size: 1.6rem; font-weight: 800;">{{ assistant_feedback.not_helpful if assistant_feedback else 0 }}</div>
+            </div>
+        </div>
+        <h3>Usage by Role</h3>
+        <table>
+            <thead><tr><th>Role</th><th>Questions</th></tr></thead>
+            <tbody>
+            {% for row in (assistant_usage.role_rows if assistant_usage else []) %}
+            <tr><td>{{ row.role }}</td><td>{{ row.count }}</td></tr>
+            {% else %}
+            <tr><td colspan="2">No assistant usage logs yet.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        <h3 style="margin-top: 14px;">Top Questions</h3>
+        <table>
+            <thead><tr><th>Question</th><th>Count</th></tr></thead>
+            <tbody>
+            {% for row in (assistant_usage.top_questions if assistant_usage else []) %}
+            <tr><td>{{ row.question }}</td><td>{{ row.count }}</td></tr>
+            {% else %}
+            <tr><td colspan="2">No repeated question pattern yet.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <div class="card">
+        <h2>Notification Delivery (Last {{ assistant_days if assistant_days else 30 }} Days)</h2>
+        <table>
+            <thead><tr><th>Metric</th><th>Count</th></tr></thead>
+            <tbody>
+            <tr><td>Queued</td><td>{{ notification_stats.queued if notification_stats else 0 }}</td></tr>
+            <tr><td>Sent</td><td>{{ notification_stats.sent if notification_stats else 0 }}</td></tr>
+            <tr><td>Failed</td><td>{{ notification_stats.failed if notification_stats else 0 }}</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="card">
+        <h2>Admin Action Audit (Last {{ assistant_days if assistant_days else 30 }} Days)</h2>
+        <p><strong>Total audited actions:</strong> {{ action_audit.total if action_audit else 0 }}</p>
+        <table>
+            <thead><tr><th>Action Type</th><th>Count</th></tr></thead>
+            <tbody>
+            {% for row in (action_audit.action_rows if action_audit else []) %}
+            <tr><td>{{ row.action_type }}</td><td>{{ row.count }}</td></tr>
+            {% else %}
+            <tr><td colspan="2">No audited action recorded yet.</td></tr>
             {% endfor %}
             </tbody>
         </table>
