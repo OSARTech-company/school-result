@@ -7820,6 +7820,22 @@ def _next_term_and_year(term_value, academic_year):
         return 'First Term', year
     return '', year
 
+def _previous_term_and_year(term_value, academic_year):
+    term = (term_value or '').strip()
+    year = (academic_year or '').strip()
+    if term == 'Third Term':
+        return 'Second Term', year
+    if term == 'Second Term':
+        return 'First Term', year
+    if term == 'First Term':
+        match = re.fullmatch(r'(\d{4})-(\d{4})', year)
+        if match:
+            start_year = int(match.group(1)) - 1
+            end_year = int(match.group(2)) - 1
+            return 'Third Term', f'{start_year}-{end_year}'
+        return 'Third Term', year
+    return '', year
+
 def resolve_next_term_begin_date(school_id, academic_year, term, current_value=''):
     raw = (current_value or '').strip()
     if _parse_iso_date(raw):
@@ -11749,11 +11765,42 @@ def school_admin_publish_results():
     school = get_school(school_id) or {}
     current_term = get_current_term(school)
     current_year = (school or {}).get('academic_year', '')
+    selected_term = (request.args.get('term', '') or '').strip() or current_term
+    if selected_term not in {'First Term', 'Second Term', 'Third Term'}:
+        selected_term = current_term
+    selected_year = (request.args.get('academic_year', '') or '').strip() or current_year
     assignments = get_class_assignments(school_id)
+    term_options = ['First Term', 'Second Term', 'Third Term']
+    year_options_set = {
+        (current_year or '').strip(),
+        (selected_year or '').strip(),
+    }
+    for row in assignments:
+        year_options_set.add((row.get('academic_year', '') or '').strip())
+    with db_connection() as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """SELECT DISTINCT COALESCE(academic_year, '')
+               FROM result_publications
+               WHERE school_id = ?""",
+            (school_id,),
+        )
+        for row in c.fetchall() or []:
+            year_options_set.add((row[0] or '').strip())
+    year_options = sorted(
+        [y for y in year_options_set if y],
+        key=lambda y: ((_academic_year_start(y) or 0), y),
+        reverse=True,
+    )
+    if not year_options and current_year:
+        year_options = [current_year]
+    prev_term, prev_year = _previous_term_and_year(selected_term, selected_year)
+    can_load_previous = bool(prev_term and prev_year and prev_year in set(year_options))
     publication_statuses = get_school_publication_statuses(
         school_id,
-        current_term,
-        current_year,
+        selected_term,
+        selected_year,
         assignments=assignments,
     )
     approval_workflow_enabled = result_publication_has_approval_columns()
@@ -11773,6 +11820,13 @@ def school_admin_publish_results():
         school=school,
         current_term=current_term,
         current_year=current_year,
+        selected_term=selected_term,
+        selected_year=selected_year,
+        term_options=term_options,
+        year_options=year_options,
+        prev_term=prev_term,
+        prev_year=prev_year,
+        can_load_previous=can_load_previous,
         publication_statuses=publication_statuses,
         approval_workflow_enabled=approval_workflow_enabled,
         school_message_total=school_message_total,

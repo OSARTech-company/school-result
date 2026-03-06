@@ -37,8 +37,31 @@
           {% endwith %}
 
           <div class="card">
+            <form method="get" action="{{ url_for('school_admin_publish_results') }}" class="inline-form mb-8">
+              <label for="term"><strong>Term:</strong></label>
+              <select id="term" name="term">
+                {% for t in (term_options or ['First Term', 'Second Term', 'Third Term']) %}
+                <option value="{{ t }}" {% if (selected_term or current_term) == t %}selected{% endif %}>{{ t }}</option>
+                {% endfor %}
+              </select>
+              <label for="academic_year"><strong>Academic Year:</strong></label>
+              <select id="academic_year" name="academic_year">
+                {% if year_options %}
+                  {% for y in year_options %}
+                  <option value="{{ y }}" {% if (selected_year or current_year) == y %}selected{% endif %}>{{ y }}</option>
+                  {% endfor %}
+                {% else %}
+                  <option value="{{ current_year }}">{{ current_year }}</option>
+                {% endif %}
+              </select>
+              <button type="submit" class="btn btn-primary btn-sm">Load</button>
+              {% if can_load_previous %}
+              <a href="{{ url_for('school_admin_publish_results', term=prev_term, academic_year=prev_year) }}" class="btn btn-back btn-sm">Previous Term</a>
+              {% endif %}
+              <a href="{{ url_for('school_admin_publish_results') }}" class="btn btn-back btn-sm">Current Term</a>
+            </form>
             <h2>
-              <i class="fas fa-clipboard-check"></i> Teacher Upload Status ({{ current_term }})
+              <i class="fas fa-clipboard-check"></i> Teacher Upload Status ({{ selected_term or current_term }}{% if selected_year or current_year %} - {{ selected_year or current_year }}{% endif %})
             </h2>
             {% if not approval_workflow_enabled %}
             <div class="flash error">
@@ -160,7 +183,7 @@
               </table>
             </div>
             {% else %}
-            <p>No class assignments found for {{ current_term }}.</p>
+            <p>No class assignments/publication records found for {{ selected_term or current_term }}{% if selected_year or current_year %} - {{ selected_year or current_year }}{% endif %}.</p>
             {% endif %}
           </div>
         </div>

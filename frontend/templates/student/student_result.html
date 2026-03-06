@@ -1163,14 +1163,36 @@
                 const originalText = downloadBtn.innerHTML;
                 downloadBtn.style.pointerEvents = 'none';
                 downloadBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Preparing PDF...';
+                let exportHost = null;
                 try {
-                    const canvas = await window.html2canvas(reportEl, {
-                        scale: 2,
+                    const phone = window.matchMedia('(max-width: 700px)').matches;
+                    const exportScale = phone ? 1.5 : 2;
+
+                    exportHost = document.createElement('div');
+                    exportHost.style.position = 'fixed';
+                    exportHost.style.left = '-100000px';
+                    exportHost.style.top = '0';
+                    exportHost.style.width = '1200px';
+                    exportHost.style.background = '#ffffff';
+                    exportHost.style.padding = '24px';
+                    exportHost.style.zIndex = '-1';
+
+                    const clone = reportEl.cloneNode(true);
+                    clone.style.width = '1040px';
+                    clone.style.maxWidth = '1040px';
+                    clone.style.margin = '0 auto';
+                    clone.style.boxSizing = 'border-box';
+                    exportHost.appendChild(clone);
+                    document.body.appendChild(exportHost);
+
+                    const canvas = await window.html2canvas(clone, {
+                        scale: exportScale,
                         useCORS: true,
                         backgroundColor: '#ffffff',
                         logging: false,
                         scrollX: 0,
-                        scrollY: -window.scrollY
+                        scrollY: 0,
+                        windowWidth: 1200,
                     });
                     const imgData = canvas.toDataURL('image/jpeg', 0.95);
                     const { jsPDF } = window.jspdf;
@@ -1199,6 +1221,9 @@
                 } catch (e) {
                     fallbackDownload();
                 } finally {
+                    if (exportHost && exportHost.parentNode) {
+                        exportHost.parentNode.removeChild(exportHost);
+                    }
                     downloadBtn.style.pointerEvents = '';
                     downloadBtn.innerHTML = originalText;
                 }
