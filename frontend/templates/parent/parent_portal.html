@@ -15,6 +15,12 @@
         .flash.error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
         .input { width: 100%; padding: 11px 12px; border: 1px solid #ced4da; border-radius: 6px; margin-top: 6px; margin-bottom: 12px; }
         .btn { background: #1f6feb; color: #fff; border: none; border-radius: 6px; padding: 11px 16px; cursor: pointer; }
+        @media (max-width: 640px) {
+            .container { margin: 16px auto; padding: 12px; }
+            .card { padding: 16px; }
+            .btn { width: 100%; }
+            .back-link { display: block; margin: 10px 0 0; }
+        }
     </style>
 </head>
 <body>
@@ -35,7 +41,7 @@
                 <label for="password">Password</label>
                 <input class="input" id="password" name="password" type="password" required>
                 <button class="btn" type="submit"><i class="fas fa-sign-in-alt"></i> Login</button>
-                <a href="{{ url_for('login') }}" style="margin-left:12px;">Back to Main Login</a>
+                <a class="back-link" href="{{ url_for('login') }}" style="margin-left:12px;">Back to Main Login</a>
             </form>
         </div>
     </div>

@@ -1,10 +1,59 @@
 (function () {
+    function normalizeGlobalFooter() {
+        var footers = Array.prototype.slice.call(document.querySelectorAll('.app-global-footer'));
+        if (!footers.length) return;
+        var keep = footers[0];
+        for (var i = 1; i < footers.length; i++) {
+            var node = footers[i];
+            if (node && node.parentNode) node.parentNode.removeChild(node);
+        }
+        if (keep.parentNode !== document.body) {
+            document.body.appendChild(keep);
+        }
+    }
+
     function createMessage(container, text, isUser) {
         var node = document.createElement('div');
         node.className = isUser ? 'app-ai-user-msg' : 'app-ai-bot-msg';
         node.textContent = text;
         container.appendChild(node);
         container.scrollTop = container.scrollHeight;
+        return node;
+    }
+
+    function createTypingMessage(container) {
+        var node = document.createElement('div');
+        node.className = 'app-ai-bot-msg app-ai-typing';
+        node.textContent = 'Thinking';
+        container.appendChild(node);
+        container.scrollTop = container.scrollHeight;
+        return node;
+    }
+
+    function createStreamedBotMessage(container, text, onDone) {
+        var node = document.createElement('div');
+        node.className = 'app-ai-bot-msg app-ai-streaming';
+        node.textContent = '';
+        container.appendChild(node);
+        container.scrollTop = container.scrollHeight;
+
+        var fullText = String(text || '');
+        var index = 0;
+
+        function tick() {
+            var speedBoost = Math.min(8, Math.floor(index / 150));
+            index = Math.min(fullText.length, index + 2 + speedBoost);
+            node.textContent = fullText.slice(0, index);
+            container.scrollTop = container.scrollHeight;
+            if (index < fullText.length) {
+                window.setTimeout(tick, 14);
+                return;
+            }
+            node.classList.remove('app-ai-streaming');
+            if (typeof onDone === 'function') onDone(node);
+        }
+
+        tick();
         return node;
     }
 
@@ -52,17 +101,45 @@
         hostNode.parentNode.scrollTop = hostNode.parentNode.scrollHeight;
     }
 
-    function renderQuickPrompts(quickWrap, prompts, onPick) {
-        quickWrap.innerHTML = '';
-        (prompts || []).slice(0, 3).forEach(function (promptText) {
-            var btn = document.createElement('button');
-            btn.type = 'button';
-            btn.textContent = promptText;
-            btn.addEventListener('click', function () {
-                onPick(promptText);
-            });
-            quickWrap.appendChild(btn);
+    function renderSmartLinks(hostNode, links) {
+        if (!hostNode || !Array.isArray(links) || !links.length) return;
+        var wrap = document.createElement('div');
+        wrap.className = 'app-ai-smart-links';
+        links.slice(0, 3).forEach(function (item) {
+            if (!item || !item.url || !item.label) return;
+            var link = document.createElement('a');
+            link.href = String(item.url);
+            link.textContent = String(item.label);
+            link.className = 'app-ai-smart-link';
+            wrap.appendChild(link);
         });
+        if (wrap.childNodes.length) hostNode.appendChild(wrap);
+    }
+
+    function renderFixSnippet(hostNode, snippetText) {
+        if (!hostNode) return;
+        var text = String(snippetText || '').trim();
+        if (!text) return;
+        var wrap = document.createElement('div');
+        wrap.className = 'app-ai-fix-snippet';
+        var pre = document.createElement('pre');
+        pre.textContent = text;
+        var copyBtn = document.createElement('button');
+        copyBtn.type = 'button';
+        copyBtn.className = 'app-ai-fix-copy';
+        copyBtn.textContent = 'Copy Fix Snippet';
+        copyBtn.addEventListener('click', function () {
+            var done = function () {
+                copyBtn.textContent = 'Copied';
+                window.setTimeout(function () { copyBtn.textContent = 'Copy Fix Snippet'; }, 1300);
+            };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(done).catch(function () {});
+            }
+        });
+        wrap.appendChild(pre);
+        wrap.appendChild(copyBtn);
+        hostNode.appendChild(wrap);
     }
 
     function initAssistant(root) {
@@ -72,13 +149,25 @@
         var panel = root.querySelector('.app-ai-panel');
         var toggle = root.querySelector('.app-ai-toggle');
         var closeBtn = root.querySelector('.app-ai-close');
+        var clearBtn = root.querySelector('.app-ai-clear');
         var form = root.querySelector('.app-ai-form');
         var input = form ? form.querySelector('input[name=\"question\"]') : null;
+        var modeSelect = form ? form.querySelector('select[name=\"response_mode\"]') : null;
+        var submitBtn = form ? form.querySelector('button[type=\"submit\"]') : null;
         var messages = root.querySelector('.app-ai-messages');
-        var quickWrap = root.querySelector('.app-ai-quick');
         var csrfToken = (root.querySelector('.app-ai-csrf') || {}).value || '';
+        var defaultMode = String(root.getAttribute('data-preferred-mode') || 'standard').trim().toLowerCase();
+        var defaultIntro = String((messages && messages.getAttribute('data-intro')) || '').trim();
+        var history = [];
+        var isBusy = false;
 
-        if (!panel || !toggle || !closeBtn || !form || !input || !messages || !quickWrap) return;
+        if (!panel || !toggle || !closeBtn || !form || !input || !messages) return;
+
+        try {
+            var savedMode = window.localStorage.getItem('app_ai_response_mode_v1') || '';
+            var chosenMode = (savedMode || defaultMode || 'standard').trim().toLowerCase();
+            if (modeSelect && chosenMode) modeSelect.value = chosenMode;
+        } catch (e) {}
 
         try {
             var pulseKey = 'app_ai_seen_pulse_v1';
@@ -102,16 +191,43 @@
             toggle.setAttribute('aria-expanded', 'false');
         }
 
+        function setBusy(flag) {
+            isBusy = !!flag;
+            input.disabled = isBusy;
+            if (modeSelect) modeSelect.disabled = isBusy;
+            if (submitBtn) submitBtn.disabled = isBusy;
+            if (clearBtn) clearBtn.disabled = isBusy;
+        }
+
+        function resetConversation(extraText) {
+            history = [];
+            while (messages.firstChild) messages.removeChild(messages.firstChild);
+            if (defaultIntro) createMessage(messages, defaultIntro, false);
+            if (extraText) createMessage(messages, extraText, false);
+        }
+
         function ask(questionText) {
+            if (isBusy) return;
             var text = String(questionText || '').trim();
-            if (!text) return;
+            if (!text) {
+                createMessage(messages, 'Type a question first. You can also paste an error message.', false);
+                return;
+            }
+            if (text.length > 1200) {
+                createMessage(messages, 'Message is too long. Keep it under 1200 characters.', false);
+                return;
+            }
+            setBusy(true);
             createMessage(messages, text, true);
-            createMessage(messages, 'Thinking...', false);
-            var pendingNode = messages.lastElementChild;
+            history.push({ role: 'user', text: text });
+            history = history.slice(-8);
+            var pendingNode = createTypingMessage(messages);
 
             var payload = new URLSearchParams();
             payload.set('question', text);
             payload.set('page', window.location.pathname || '/');
+            payload.set('history', JSON.stringify(history));
+            if (modeSelect && modeSelect.value) payload.set('response_mode', modeSelect.value);
             if (csrfToken) payload.set('csrf_token', csrfToken);
 
             fetch('/assistant/guide', {
@@ -122,12 +238,20 @@
                 },
                 body: payload.toString()
             }).then(function (resp) {
-                if (!resp.ok) throw new Error('Assistant request failed.');
+                if (!resp.ok) {
+                    return resp.json().then(function (errData) {
+                        var msg = (errData && errData.error) ? String(errData.error) : 'Assistant request failed.';
+                        throw new Error(msg);
+                    }).catch(function () {
+                        throw new Error('Assistant request failed.');
+                    });
+                }
                 return resp.json();
             }).then(function (data) {
                 if (pendingNode && pendingNode.parentNode) pendingNode.parentNode.removeChild(pendingNode);
                 if (!data || !data.ok) {
                     createMessage(messages, 'I could not process that. Try again.', false);
+                    setBusy(false);
                     return;
                 }
                 var lines = [data.answer || 'I could not find a direct answer.'];
@@ -139,15 +263,32 @@
                 if (Array.isArray(data.links) && data.links.length) {
                     lines.push('Useful pages: ' + data.links.map(function (item) { return item.label; }).join(', '));
                 }
+                if (Array.isArray(data.source_hints) && data.source_hints.length) {
+                    lines.push('Relevant pages: ' + data.source_hints.join(', '));
+                }
+                if (typeof data.confidence === 'number') {
+                    lines.push('Confidence: ' + Math.round(Math.max(0, Math.min(1, data.confidence)) * 100) + '%');
+                }
+                if (data.safety_note) {
+                    lines.push('Safety: ' + data.safety_note);
+                }
+                if (data.next_question) {
+                    lines.push('Next: ' + data.next_question);
+                }
                 var answerText = lines.join('\n');
-                var botNode = createMessage(messages, answerText, false);
-                renderFeedbackControls(csrfToken, botNode, text, answerText);
-                renderQuickPrompts(quickWrap, data.quick_prompts || [], function (picked) {
-                    ask(picked);
+                createStreamedBotMessage(messages, answerText, function (botNode) {
+                    history.push({ role: 'assistant', text: answerText });
+                    history = history.slice(-8);
+                    renderFeedbackControls(csrfToken, botNode, text, answerText);
+                    renderSmartLinks(botNode, data.smart_links || []);
+                    renderFixSnippet(botNode, data.fix_snippet || '');
+                    setBusy(false);
                 });
-            }).catch(function () {
+            }).catch(function (err) {
                 if (pendingNode && pendingNode.parentNode) pendingNode.parentNode.removeChild(pendingNode);
-                createMessage(messages, 'Network or permission issue. Please try again.', false);
+                var msg = (err && err.message) ? err.message : 'Network or permission issue. Please try again.';
+                createMessage(messages, msg, false);
+                setBusy(false);
             });
         }
 
@@ -156,26 +297,69 @@
             else closePanel();
         });
         closeBtn.addEventListener('click', closePanel);
+        if (clearBtn) {
+            clearBtn.addEventListener('click', function () {
+                if (isBusy) return;
+                setBusy(true);
+                var payload = new URLSearchParams();
+                if (csrfToken) payload.set('csrf_token', csrfToken);
+                fetch('/assistant/memory/clear', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    body: payload.toString()
+                }).then(function (resp) {
+                    if (!resp.ok) {
+                        return resp.json().then(function (errData) {
+                            var msg = (errData && errData.error) ? String(errData.error) : 'Could not clear memory.';
+                            throw new Error(msg);
+                        }).catch(function () {
+                            throw new Error('Could not clear memory.');
+                        });
+                    }
+                    return resp.json();
+                }).then(function () {
+                    resetConversation('Assistant memory cleared. I will respond from scratch now.');
+                    setBusy(false);
+                }).catch(function (err) {
+                    var msg = (err && err.message) ? err.message : 'Could not clear memory.';
+                    createMessage(messages, msg, false);
+                    setBusy(false);
+                });
+            });
+        }
         form.addEventListener('submit', function (ev) {
             ev.preventDefault();
             ask(input.value);
             input.value = '';
         });
-
-        renderQuickPrompts(quickWrap, [
-            'How do I use messages?',
-            'How do I change password?',
-            'Where is help page?'
-        ], function (picked) {
-            if (panel.hidden) openPanel();
-            ask(picked);
-        });
+        if (modeSelect) {
+            modeSelect.addEventListener('change', function () {
+                try {
+                    window.localStorage.setItem('app_ai_response_mode_v1', modeSelect.value || 'standard');
+                } catch (e) {}
+                var prefPayload = new URLSearchParams();
+                prefPayload.set('response_mode', modeSelect.value || 'standard');
+                if (csrfToken) prefPayload.set('csrf_token', csrfToken);
+                fetch('/assistant/preferences', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    body: prefPayload.toString()
+                }).catch(function () {});
+            });
+        }
 
         // Always start collapsed and open only on user click.
         closePanel();
     }
 
     function boot() {
+        normalizeGlobalFooter();
         var welcomeNode = document.querySelector('.app-welcome-toast');
         if (welcomeNode) {
             window.setTimeout(function () {

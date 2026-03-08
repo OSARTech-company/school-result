@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Publish Results - Student Score Management System</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}" />
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260303c') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260307f') }}" />
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" />
     <style>
       body { min-height: 100vh; }
@@ -148,7 +148,8 @@
                         <input type="hidden" name="classname" value="{{ p.classname }}" />
                         <input type="hidden" name="term" value="{{ p.term }}" />
                         <input type="hidden" name="academic_year" value="{{ p.academic_year }}" />
-                        <input type="number" name="unlock_minutes" min="5" max="240" value="30" style="width:90px;" />
+                        <label for="unlock_minutes_{{ loop.index0 }}" style="font-weight:600; color:#334155;">Unlock (mins):</label>
+                        <input id="unlock_minutes_{{ loop.index0 }}" type="number" name="unlock_minutes" min="5" max="240" value="30" style="width:90px;" title="Unlock Duration (minutes)" />
                         <input type="text" name="unlock_reason" placeholder="Unlock reason (required)" required class="review-note-input" />
                         <button type="submit" class="btn btn-warning btn-sm">Unlock Edit</button>
                       </form>
@@ -189,7 +190,7 @@
         </div>
       </div>
     </div>
-    <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260303c') }}"></script>
+    <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260306e') }}"></script>
     <script>
       (function () {
         var body = document.body;
@@ -200,3 +201,4 @@
     </script>
   </body>
 </html>
+

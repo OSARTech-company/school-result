@@ -10,7 +10,7 @@
     />
     <link
       rel="stylesheet"
-      href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260303c') }}"
+      href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260308d') }}"
     />
     <link
       href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
@@ -46,9 +46,6 @@
       .mini-cal-cell.empty { background: transparent; border-style: dashed; }
       .mini-cal-dot { display: block; border-radius: 4px; padding: 1px 3px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .layout-main { gap: 20px; grid-template-columns: minmax(290px, 0.9fr) minmax(0, 1.8fr); }
-      .table-scroll { width: 100%; overflow-x: auto; border: 1px solid #dde5f0; border-radius: 10px; }
-      .table-scroll .assignment-table { min-width: 920px; margin-top: 0; border: 0; }
-      .table-scroll .assignment-table th, .table-scroll .assignment-table td { white-space: nowrap; }
       .section-title-bar {
         display: flex;
         justify-content: space-between;
@@ -89,48 +86,6 @@
       .quick-link:hover {
         background: #edf5ff;
       }
-      .teacher-grid {
-        display: grid;
-        gap: 10px;
-        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-      }
-      .teacher-card {
-        margin: 0;
-        height: 100%;
-      }
-      .student-message-list { margin-top: 12px; border-top: 1px solid #e2e8f0; padding-top: 10px; }
-      .student-message-item { border: 1px solid #dbe4ef; border-radius: 10px; padding: 10px; margin-bottom: 8px; background: #f8fbff; }
-      .student-message-item h4 { margin: 0 0 6px; color: #1e3a5f; font-size: 0.98rem; }
-      .student-message-meta { color: #5b6475; font-size: 0.85rem; margin-bottom: 4px; }
-      .student-message-target-fields { display: none; }
-      .student-message-target-fields.show { display: block; }
-      .subject-checklist {
-        display: grid;
-        gap: 8px;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-        padding: 10px;
-        border: 1px solid #d9e3ef;
-        border-radius: 10px;
-        background: #f8fbff;
-      }
-      .subject-check-item {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 6px 8px;
-        border: 1px solid #e3e8f1;
-        border-radius: 8px;
-        background: #fff;
-      }
-      .subject-check-item input[type='checkbox'] {
-        width: 16px;
-        height: 16px;
-        margin: 0;
-      }
-      .subject-check-hint {
-        color: #5b6475;
-        font-size: 0.88rem;
-      }
       .welcome-modal-overlay {
         position: fixed;
         inset: 0;
@@ -156,104 +111,7 @@
   </head>
   <body style="--brand: {{ school.theme_primary_color if school and school.theme_primary_color else '#0F4C81' }}; --brand-2: {{ school.theme_secondary_color if school and school.theme_secondary_color else '#1F7A8C' }}; --accent: {{ school.theme_accent_color if school and school.theme_accent_color else '#1F7A8C' }};">
     <div class="app-shell topbar-layout">
-      <div class="side-taskbar">
-        <div class="side-brand">
-            <i class="fas fa-graduation-cap"></i>
-            <span>School Admin</span>
-        </div>
-        <div class="side-links">
-            <a href="{{ url_for('school_admin_dashboard') }}" class="side-link active">
-                <i class="fas fa-home"></i>
-                <span>Dashboard</span>
-            </a>
-            <a href="{{ url_for('school_admin_messages') }}" class="side-link">
-                <i class="fas fa-bell"></i>
-                <span>Messages</span>
-                {% if school_message_total %}
-                <span class="notif-badge">{{ school_message_total }}</span>
-                {% endif %}
-            </a>
-            <a href="{{ url_for('school_admin_publish_results') }}" class="side-link">
-                <i class="fas fa-cloud-upload-alt"></i>
-                <span>Publish Results</span>
-            </a>
-            <a href="{{ url_for('view_students') }}" class="side-link">
-                <i class="fas fa-users"></i>
-                <span>View Students</span>
-            </a>
-            <a href="{{ url_for('school_admin_view_parents') }}" class="side-link">
-                <i class="fas fa-user-friends"></i>
-                <span>View Parents</span>
-            </a>
-            <a href="{{ url_for('school_admin_add_students_by_class') }}" class="side-link">
-                <i class="fas fa-user-plus"></i>
-                <span>Add Students</span>
-            </a>
-            <a href="{{ url_for('school_admin_settings') }}" class="side-link">
-                <i class="fas fa-cogs"></i>
-                <span>School Settings</span>
-            </a>
-            <a href="{{ url_for('school_admin_class_subjects') }}" class="side-link">
-                <i class="fas fa-book-open"></i>
-                <span>Class Subjects</span>
-            </a>
-            <a href="{{ url_for('school_admin_promote') }}" class="side-link">
-                <i class="fas fa-arrow-up"></i>
-                <span>Promote Students</span>
-            </a>
-            <a href="{{ url_for('school_admin_score_audit') }}" class="side-link">
-                <i class="fas fa-clipboard-list"></i>
-                <span>Score Audit Log</span>
-            </a>
-            <a href="{{ url_for('school_admin_term_programs') }}" class="side-link">
-                <i class="fas fa-calendar-alt"></i>
-                <span>Term Programs</span>
-            </a>
-            <a href="{{ url_for('school_admin_timetable') }}" class="side-link">
-                <i class="fas fa-table"></i>
-                <span>Timetable</span>
-            </a>
-            <a href="{{ url_for('school_admin_analytics') }}" class="side-link">
-                <i class="fas fa-chart-line"></i>
-                <span>Analytics</span>
-            </a>
-            <a href="{{ url_for('school_admin_disputes') }}" class="side-link">
-                <i class="fas fa-balance-scale"></i>
-                <span>Result Disputes</span>
-            </a>
-            <a href="{{ url_for('school_admin_promotion_audit') }}" class="side-link">
-                <i class="fas fa-history"></i>
-                <span>Promotion Audit</span>
-            </a>
-            <a href="{{ url_for('school_admin_bulk_tools') }}" class="side-link">
-                <i class="fas fa-database"></i>
-                <span>Bulk/Backup</span>
-            </a>
-            <a href="{{ url_for('school_admin_security') }}" class="side-link">
-                <i class="fas fa-shield-alt"></i>
-                <span>Security Logs</span>
-            </a>
-            <a href="{{ url_for('report_issue') }}" class="side-link">
-                <i class="fas fa-bug"></i>
-                <span>Report Issue</span>
-            </a>
-            <a href="{{ url_for('school_admin_change_password') }}" class="side-link">
-                <i class="fas fa-key"></i>
-                <span>Change Password</span>
-            </a>
-            <a href="{{ url_for('help', role='school_admin') }}" class="side-link">
-                <i class="fas fa-question-circle"></i>
-                <span>Help</span>
-            </a>
-            <form method="post" action="{{ url_for('logout') }}">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button type="submit" class="side-link side-link-logout">
-                    <i class="fas fa-sign-out-alt"></i>
-                    <span>Logout</span>
-                </button>
-            </form>
-        </div>
-      </div>
+      {% include 'school/_school_admin_sidebar.html' %}
       
       <div class="main-content">
         <div class="container">
@@ -263,6 +121,19 @@
               <strong>Location:</strong> {{ school.location if school and school.location else '-' }} |
               <strong>Last Login:</strong> {{ last_login_at }}
             </p>
+            {% if school_access_state %}
+            {% set access_status = (school_access_state.effective_status or '') %}
+            {% set access_class = 'is-active' if access_status in ['trial_free', 'active_paid'] else ('is-warning' if access_status == 'pending_payment' else 'is-blocked') %}
+            <div class="access-badge-row">
+              <span class="access-badge {{ access_class }}">
+                <i class="fas fa-shield-alt" aria-hidden="true"></i>
+                Access: {{ access_status|replace('_', ' ')|title }}
+              </span>
+              {% if school_access_state.reason %}
+              <p class="access-badge-note">{{ school_access_state.reason }}</p>
+              {% endif %}
+            </div>
+            {% endif %}
             {% set school_initial = ((school.school_name if school and school.school_name else 'S')[:1] or 'S')|upper %}
             {% if school and school.school_logo %}
             <img
@@ -296,10 +167,6 @@
               <p>Total Students</p>
             </div>
             <div class="stat-card">
-              <h3>{{ teachers|length }}</h3>
-              <p>Teachers</p>
-            </div>
-            <div class="stat-card">
               <h3>{{ class_counts|length }}</h3>
               <p>Classes</p>
             </div>
@@ -307,6 +174,45 @@
               <h3>{{ parent_count }}</h3>
               <p>Parents Linked</p>
             </div>
+            <div class="stat-card">
+              <h3>{{ total_teachers }}</h3>
+              <p>Active Teachers</p>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="section-title-bar">
+              <h2><i class="fas fa-list-check"></i> Setup & Plan Checklist</h2>
+              <p>Complete core setup before full rollout.</p>
+            </div>
+            <p class="note">Completion: <strong>{{ profile_checklist.percentage if profile_checklist else 0 }}%</strong></p>
+            {% if profile_checklist and profile_checklist.rows %}
+            <div class="quick-actions">
+              {% for item in profile_checklist.rows %}
+              <div class="quick-link" style="justify-content:flex-start;">
+                <i class="fas {{ 'fa-circle-check' if item.ok else 'fa-circle-xmark' }}"></i>
+                <span>{{ item.label }}</span>
+              </div>
+              {% endfor %}
+            </div>
+            {% endif %}
+            <p class="note mt-10">
+              Plan Limits:
+              Students {{ plan_limits.max_students if plan_limits.max_students else 'Unlimited' }},
+              Teachers {{ plan_limits.max_teachers if plan_limits.max_teachers else 'Unlimited' }},
+              Storage {{ plan_limits.storage_quota_mb if plan_limits.storage_quota_mb else 'Unlimited' }} MB.
+            </p>
+            <p class="note">
+              Backup Status:
+              {{ backup_health.exports if backup_health else 0 }} export(s) in 30 days,
+              {{ backup_health.restore_dry_runs if backup_health else 0 }} dry-run restore(s),
+              {{ backup_health.auto_snapshots if backup_health else 0 }} auto snapshot(s),
+              {% if backup_health and backup_health.is_overdue %}
+              <strong class="op-off">schedule overdue</strong>.
+              {% else %}
+              <strong class="op-on">schedule on track</strong>.
+              {% endif %}
+            </p>
           </div>
 
           <div class="card">
@@ -325,529 +231,100 @@
           </div>
 
           <div class="layout-main">
-          <div class="layout-side">
-          <div class="card">
-            <h2><i class="fas fa-circle-notch"></i> Term Open-Day Progress</h2>
-            {% set pct = (term_open_progress.percentage if term_open_progress else 0) %}
-            {% set circ = 283 %}
-            {% set off = ((100 - pct) * circ / 100) %}
-            <div class="term-progress-wrap">
-              <svg class="term-progress-ring" viewBox="0 0 120 120" role="img" aria-label="Term progress {{ pct }} percent">
-                <circle cx="60" cy="60" r="45" fill="none" stroke="#dbeafe" stroke-width="12"></circle>
-                <circle cx="60" cy="60" r="45" fill="none" stroke="#0ea5e9" stroke-width="12"
-                        stroke-linecap="round" transform="rotate(-90 60 60)"
-                        stroke-dasharray="{{ circ }}" stroke-dashoffset="{{ off }}"></circle>
-                <text x="60" y="66" text-anchor="middle" font-size="22" font-weight="700" fill="#0f172a">{{ pct }}%</text>
-              </svg>
-              <div class="term-progress-meta">
-                <div><strong>Status:</strong> {{ term_open_progress.status if term_open_progress else 'Calendar not set' }}</div>
-                <div><strong>Elapsed:</strong> {{ term_open_progress.elapsed_open_days if term_open_progress else 0 }} / {{ term_open_progress.total_open_days if term_open_progress else 0 }} days</div>
-                <div><strong>Remaining:</strong> {{ term_open_progress.remaining_open_days if term_open_progress else 0 }} days</div>
-                <div><strong>Range:</strong> {{ term_open_progress.open_date if term_open_progress and term_open_progress.open_date else '-' }} to {{ term_open_progress.close_date if term_open_progress and term_open_progress.close_date else '-' }}</div>
+            <div class="layout-side">
+              <div class="section-title-bar">
+                <h2><i class="fas fa-sliders-h"></i> School Operations</h2>
+                <p>Core controls and calendar overview.</p>
               </div>
-            </div>
-            <p class="note mt-10">Progress counts only official open days (excluding Saturday, Sunday, and mid-term break).</p>
-          </div>
 
-          <div class="card">
-            <h2><i class="fas fa-calendar-week"></i> Term Mini Calendar</h2>
-            <div class="form-group">
-              <label for="miniCalMonth">Month</label>
-              <input type="month" id="miniCalMonth" />
-            </div>
-            <div id="miniCalGrid" class="mini-cal-grid"></div>
-            <p class="note mt-10">Quick view of scheduled term events by day.</p>
-          </div>
-
-          <div class="card">
-            <h2><i class="fas fa-power-off"></i> Operations Control</h2>
-            <p>
-              School Status:
-              <strong
-                class="{{ 'op-on' if school and school.operations_enabled else 'op-off' }}"
-              >
-                {{ 'ON' if school and school.operations_enabled else 'OFF' }}
-              </strong>
-            </p>
-            <p>
-              Teacher Edit Status:
-              <strong
-                class="{{ 'op-on' if school and school.teacher_operations_enabled else 'op-off' }}"
-              >
-                {{ 'ON' if school and school.teacher_operations_enabled else 'OFF' }}
-              </strong>
-            </p>
-            <p class="note mt-10">
-              Managed by Super Admin. When OFF: school admin is read-only, teachers
-              cannot edit/upload/publish, and students can view only previous
-              published results.
-            </p>
-            <form action="{{ url_for('school_admin_toggle_operations') }}" method="POST" class="mt-10">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-              {% if school and school.teacher_operations_enabled %}
-                <input type="hidden" name="teacher_operations_enabled" value="0" />
-                <button type="submit" class="btn btn-primary">Turn Teacher Edit OFF</button>
-              {% else %}
-                <input type="hidden" name="teacher_operations_enabled" value="1" />
-                <button type="submit" class="btn btn-success">Turn Teacher Edit ON</button>
-              {% endif %}
-            </form>
-          </div>
-
-          <div class="card">
-            <h2><i class="fas fa-signature"></i> Principal Signature</h2>
-            <p>
-              Status:
-              <strong class="{{ 'op-on' if has_principal_signature else 'op-off' }}">
-                {{ 'Uploaded' if has_principal_signature else 'Not Uploaded' }}
-              </strong>
-            </p>
-            <p class="note mt-10">
-              Result publishing requires principal signature. Uploading signature requires your school admin password.
-            </p>
-            <form action="{{ url_for('school_admin_upload_principal_signature') }}" method="POST" enctype="multipart/form-data" class="mt-10">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-              <div class="form-group">
-                <label for="principal_signature">Principal Signature Image (PNG/JPG/WEBP, max 2MB)</label>
-                <input type="file" id="principal_signature" name="principal_signature" accept=".png,.jpg,.jpeg,.webp,image/*" required />
-              </div>
-              <div class="form-group">
-                <label for="admin_password">School Admin Password</label>
-                <input type="password" id="admin_password" name="admin_password" autocomplete="current-password" required />
-              </div>
-              <button type="submit" class="btn btn-primary">Save Principal Signature</button>
-            </form>
-          </div>
-
-          <div class="card">
-            <h2><i class="fas fa-calendar-alt"></i> School Programs</h2>
-            <p class="note">Manage mid-term break, exams period, PTA, inter-house sports, graduation, CA deadlines, and events on a dedicated page.</p>
-            <a href="{{ url_for('school_admin_term_programs') }}" class="btn btn-primary">
-              <i class="fas fa-external-link-alt"></i> Open Term Programs
-            </a>
-          </div>
-
-          <div class="card">
-            <h2><i class="fas fa-bullhorn"></i> Messages</h2>
-            <p class="note">Move message broadcast and history to a dedicated page to keep this dashboard focused.</p>
-            <p class="note">Current recent message count: <strong>{{ school_message_total or 0 }}</strong></p>
-            <a href="{{ url_for('school_admin_messages') }}" class="btn btn-primary">
-              <i class="fas fa-external-link-alt"></i> Open Messages Center
-            </a>
-          </div>
-
-          </div>
-          <div class="layout-primary">
-          <div class="section-title-bar">
-            <h2><i class="fas fa-users"></i> Staff Setup</h2>
-            <p>Create teacher accounts and assign class/subject ownership.</p>
-          </div>
-          <div class="card">
-            <h2><i class="fas fa-user-plus"></i> Teacher Management</h2>
-            <div class="menu-grid">
-              <div class="menu-item">
-                <i class="fas fa-user-plus"></i>
-                <h3>Add Teacher</h3>
-                <p>Create teacher accounts</p>
-                <a
-                  href="#addTeacher"
-                  class="btn btn-primary"
-                  onclick="
-                    document.getElementById('addTeacherSection').style.display =
-                      'block'
-                  "
-                  >Add Teacher</a
-                >
-              </div>
-            </div>
-          </div>
-
-          <div class="card is-hidden" id="addTeacherSection">
-            <h2><i class="fas fa-user-plus"></i> Add New Teacher</h2>
-            <form action="{{ url_for('school_admin_add_teacher') }}" method="POST">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-              <div class="form-group">
-                <label for="username">Username (Email):</label>
-                <input
-                  type="email"
-                  id="username"
-                  name="username"
-                  placeholder="e.g., teacher@school.com"
-                  required
-                />
-              </div>
-              <div class="form-group">
-                <label for="firstname">First Name:</label>
-                <input type="text" id="firstname" name="firstname" required />
-              </div>
-              <div class="form-group">
-                <label for="lastname">Last Name:</label>
-                <input type="text" id="lastname" name="lastname" />
-              </div>
-              <div class="form-group">
-                <label for="gender">Gender:</label>
-                <select id="gender" name="gender" required>
-                  <option value="">-- Select Gender --</option>
-                  <option value="male">Male</option>
-                  <option value="female">Female</option>
-                  <option value="other">Other</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label for="password"
-                  >Password (optional - will generate if empty):</label
-                >
-                <input type="password" id="password" name="password" autocomplete="new-password" />
-              </div>
-              <button type="submit" class="btn btn-primary">
-                <i class="fas fa-plus"></i> Add Teacher
-              </button>
-            </form>
-          </div>
-
-          <div class="card">
-            <h2><i class="fas fa-diagram-project"></i> Teacher Result Workflow</h2>
-            <p class="workflow-step">
-              1. Add teacher.
-            </p>
-            <p class="workflow-step">
-              2. Assign a class teacher (class owner) for each class and term.
-            </p>
-            <p class="workflow-step">
-              3. Assign subject teachers per class and term.
-            </p>
-            <p class="workflow-step">
-              4. Subject teachers enter scores; class teacher submits final class result for approval.
-            </p>
-          </div>
-
-          <div class="card">
-            <h2><i class="fas fa-user-plus"></i> Assign Teacher to Class</h2>
-            <p class="note">
-              This teacher becomes the class owner for final result submission.
-            </p>
-            <form
-              action="{{ url_for('school_admin_assign_teacher') }}"
-              method="POST"
-            >
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-              <div class="form-group">
-                <label for="teacher_id">Select Teacher:</label>
-                <select id="teacher_id" name="teacher_id" required>
-                  <option value="">-- Select Teacher --</option>
-                  {% for teacher_id, teacher in teachers.items() %}
-                  {% set assigned_classes = teacher_class_map.get(teacher_id, []) %}
-                  <option value="{{ teacher_id }}">
-                    {{ teacher.firstname }} {{ teacher.lastname }}{% if assigned_classes %} (Class: {{ assigned_classes|join(', ') }}){% endif %}
-                  </option>
-                  {% endfor %}
-                </select>
-              </div>
-              <div class="form-group">
-                <label for="classname">Class:</label>
-                <select id="classname" name="classname" required>
-                  <option value="">-- Select Class --</option>
-                  {% for class_name in class_counts.keys()|sort %}
-                  <option value="{{ class_name }}">{{ class_name }}</option>
-                  {% endfor %}
-                </select>
-              </div>
-              <div class="form-group">
-                <label for="term">Term:</label>
-                <select id="term" name="term">
-                  <option value="First Term">First Term</option>
-                  <option value="Second Term">Second Term</option>
-                  <option value="Third Term">Third Term</option>
-                </select>
-              </div>
-              <button type="submit" class="btn btn-primary">
-                <i class="fas fa-user-plus"></i> Assign Teacher
-              </button>
-            </form>
-          </div>
-
-          <div class="card">
-            <h2><i class="fas fa-book"></i> Assign Teacher to Subjects</h2>
-            <p class="note">
-              Choose subject(s), then assign to all compatible classes or only selected compatible classes.
-            </p>
-            <form
-              action="{{ url_for('school_admin_assign_subject_teacher') }}"
-              method="POST"
-            >
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-              <div class="form-group">
-                <label for="subject_teacher_id">Select Teacher:</label>
-                <select id="subject_teacher_id" name="teacher_id" required>
-                  <option value="">-- Select Teacher --</option>
-                  {% for teacher_id, teacher in teachers.items() %}
-                  <option value="{{ teacher_id }}">
-                    {{ teacher.firstname }} {{ teacher.lastname }}
-                  </option>
-                  {% endfor %}
-                </select>
-              </div>
-              <div class="form-group">
-                <label for="subject_assignment_scope">Assignment Scope:</label>
-                <select id="subject_assignment_scope" name="assignment_scope">
-                  <option value="all_compatible">All Compatible Classes</option>
-                  <option value="selected">Selected Compatible Class(es)</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label>Subjects (tick all this teacher will teach):</label>
-                <div id="subjectChecklist" class="subject-checklist">
-                  <div class="subject-check-hint">Select teacher and term to load subjects.</div>
+              <div class="card">
+                <h2><i class="fas fa-circle-notch"></i> Term Open-Day Progress</h2>
+                {% set pct = (term_open_progress.percentage if term_open_progress else 0) %}
+                {% set circ = 283 %}
+                {% set off = ((100 - pct) * circ / 100) %}
+                <div class="term-progress-wrap">
+                  <svg class="term-progress-ring" viewBox="0 0 120 120" role="img" aria-label="Term progress {{ pct }} percent">
+                    <circle cx="60" cy="60" r="45" fill="none" stroke="#dbeafe" stroke-width="12"></circle>
+                    <circle cx="60" cy="60" r="45" fill="none" stroke="#0ea5e9" stroke-width="12"
+                            stroke-linecap="round" transform="rotate(-90 60 60)"
+                            stroke-dasharray="{{ circ }}" stroke-dashoffset="{{ off }}"></circle>
+                    <text x="60" y="66" text-anchor="middle" font-size="22" font-weight="700" fill="#0f172a">{{ pct }}%</text>
+                  </svg>
+                  <div class="term-progress-meta">
+                    <div><strong>Status:</strong> {{ term_open_progress.status if term_open_progress else 'Calendar not set' }}</div>
+                    <div><strong>Elapsed:</strong> {{ term_open_progress.elapsed_open_days if term_open_progress else 0 }} / {{ term_open_progress.total_open_days if term_open_progress else 0 }} days</div>
+                    <div><strong>Remaining:</strong> {{ term_open_progress.remaining_open_days if term_open_progress else 0 }} days</div>
+                    <div><strong>Range:</strong> {{ term_open_progress.open_date if term_open_progress and term_open_progress.open_date else '-' }} to {{ term_open_progress.close_date if term_open_progress and term_open_progress.close_date else '-' }}</div>
+                  </div>
                 </div>
+                <p class="note mt-10">Progress counts only official open days (excluding Saturday, Sunday, and mid-term break).</p>
               </div>
-              <div class="form-group">
-                <label>Compatible Classes:</label>
-                <div id="compatibleClassChecklist" class="subject-checklist">
-                  <div class="subject-check-hint">Select subject(s) to see compatible classes.</div>
+
+              <div class="card">
+                <h2><i class="fas fa-calendar-week"></i> Term Mini Calendar</h2>
+                <div class="form-group">
+                  <label for="miniCalMonth">Month</label>
+                  <input type="month" id="miniCalMonth" />
                 </div>
-                <small class="note">SS-only subjects will show only SS classes automatically.</small>
+                <div id="miniCalGrid" class="mini-cal-grid"></div>
+                <p class="note mt-10">Quick view of scheduled term events by day.</p>
               </div>
-              <div class="form-group">
-                <label for="subject_term">Term:</label>
-                <select id="subject_term" name="term">
-                  <option value="First Term">First Term</option>
-                  <option value="Second Term">Second Term</option>
-                  <option value="Third Term">Third Term</option>
-                </select>
+
+              <div class="card">
+                <h2><i class="fas fa-power-off"></i> Operations Control</h2>
+                <p>
+                  School Status:
+                  <strong
+                    class="{{ 'op-on' if school and school.operations_enabled else 'op-off' }}"
+                  >
+                    {{ 'ON' if school and school.operations_enabled else 'OFF' }}
+                  </strong>
+                </p>
+                <p class="note mt-10">
+                  Managed by Super Admin. When OFF: school admin is read-only and students can view only previously published results.
+                </p>
               </div>
-              <button type="submit" class="btn btn-primary">
-                <i class="fas fa-link"></i> Assign Subject(s)
-              </button>
-            </form>
-          </div>
+            </div>
 
-          <div class="card">
-            <h2><i class="fas fa-chalkboard-teacher"></i> Teachers</h2>
-            {% if teachers %}
-            <div class="teacher-grid">
-            {% for teacher_id, teacher in teachers.items() %}
-            <div class="teacher-card">
-              <strong>{{ teacher.firstname }} {{ teacher.lastname }}</strong>
-              <br /><small>Username: {{ teacher_id }}</small>
-              <br /><small>Gender: {{ (teacher.gender or 'Not set')|title }}</small>
-              <br /><small>Phone: {{ teacher.phone or 'Not set' }}</small>
-              <br /><small>Subjects: {{ teacher.subjects_taught|join(', ') if teacher.subjects_taught else 'Not set' }}</small>
-              <form action="{{ url_for('school_admin_archive_teacher') }}" method="POST" class="mt-10" onsubmit="return confirm('Archive this teacher and clear current assignments?');">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-                <input type="hidden" name="teacher_id" value="{{ teacher_id }}" />
-                <button type="submit" class="btn btn-danger btn-sm">Archive</button>
-              </form>
-            </div>
-            {% endfor %}
-            </div>
-            {% else %}
-            <p>No teachers added yet.</p>
-            {% endif %}
-          </div>
+            <div class="layout-primary">
+              <div class="section-title-bar">
+                <h2><i class="fas fa-clipboard-check"></i> Monitoring & Review</h2>
+                <p>Track data quality and publish readiness.</p>
+              </div>
 
-          <div class="card">
-            <h2><i class="fas fa-box-archive"></i> Archived Teachers</h2>
-            {% if archived_teachers %}
-            <div class="teacher-grid">
-            {% for teacher_id, teacher in archived_teachers.items() %}
-            <div class="teacher-card">
-              <strong>{{ teacher.firstname }} {{ teacher.lastname }}</strong>
-              <br /><small>Username: {{ teacher_id }}</small>
-              <form action="{{ url_for('school_admin_restore_teacher') }}" method="POST" class="mt-10">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-                <input type="hidden" name="teacher_id" value="{{ teacher_id }}" />
-                <button type="submit" class="btn btn-success btn-sm">Restore</button>
-              </form>
-            </div>
-            {% endfor %}
-            </div>
-            {% else %}
-            <p>No archived teachers.</p>
-            {% endif %}
-          </div>
+              <div class="card">
+                <h2><i class="fas fa-signature"></i> Principal Signature</h2>
+                <p>
+                  Status:
+                  <strong class="{{ 'op-on' if has_principal_signature else 'op-off' }}">
+                    {{ 'Uploaded' if has_principal_signature else 'Not Uploaded' }}
+                  </strong>
+                </p>
+                <p class="note mt-10">
+                  Result publishing requires principal signature. Uploading signature requires your school admin password.
+                </p>
+                <form action="{{ url_for('school_admin_upload_principal_signature') }}" method="POST" enctype="multipart/form-data" class="mt-10">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                  <div class="form-group">
+                    <label for="principal_signature">Principal Signature Image (PNG/JPG/WEBP, max 2MB)</label>
+                    <input type="file" id="principal_signature" name="principal_signature" accept=".png,.jpg,.jpeg,.webp,image/*" required />
+                  </div>
+                  <div class="form-group">
+                    <label for="admin_password">School Admin Password</label>
+                    <input type="password" id="admin_password" name="admin_password" autocomplete="current-password" required />
+                  </div>
+                  <button type="submit" class="btn btn-primary">Save Principal Signature</button>
+                </form>
+              </div>
 
-          <div class="section-title-bar">
-            <h2><i class="fas fa-link"></i> Assignments</h2>
-            <p>Track class and subject teacher mappings.</p>
-          </div>
-          <div class="card">
-            <h2><i class="fas fa-link"></i> Current Class Assignments</h2>
-            {% if assignments %}
-            <div class="table-scroll">
-            <table class="assignment-table">
-              <thead>
-                <tr>
-                  <th>Teacher</th>
-                  <th>Class</th>
-                  <th>Term</th>
-                  <th>Academic Year</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for a in assignments %}
-                <tr>
-                  <td>
-                    {{ a.teacher_name }} <br /><small>{{ a.teacher_id }}</small>
-                  </td>
-                  <td>{{ a.classname }}</td>
-                  <td>{{ a.term }}</td>
-                  <td>{{ a.academic_year }}</td>
-                  <td>
-                    <form
-                      action="{{ url_for('school_admin_remove_teacher_assignment') }}"
-                      method="POST"
-                      onsubmit="return confirm('Remove this assignment?');"
-                    >
-                      <input
-                        type="hidden"
-                        name="csrf_token"
-                        value="{{ csrf_token() }}"
-                      />
-                      <input
-                        type="hidden"
-                        name="teacher_id"
-                        value="{{ a.teacher_id }}"
-                      />
-                      <input
-                        type="hidden"
-                        name="classname"
-                        value="{{ a.classname }}"
-                      />
-                      <input type="hidden" name="term" value="{{ a.term }}" />
-                      <input type="hidden" name="academic_year" value="{{ a.academic_year }}" />
-                      <button
-                        type="submit"
-                        class="btn btn-danger"
-                      >
-                        Remove
-                      </button>
-                    </form>
-                  </td>
-                </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-            </div>
-            {% else %}
-            <p>No class assignments yet.</p>
-            {% endif %}
-          </div>
-
-          <div class="card">
-            <h2><i class="fas fa-list-check"></i> Current Subject Assignments</h2>
-            {% if subject_assignments %}
-            <div class="table-scroll">
-            <table class="assignment-table">
-              <thead>
-                <tr>
-                  <th>Teacher</th>
-                  <th>Class</th>
-                  <th>Subject</th>
-                  <th>Term</th>
-                  <th>Academic Year</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for a in subject_assignments %}
-                <tr>
-                  <td>
-                    {{ a.teacher_name }} <br /><small>{{ a.teacher_id }}</small>
-                  </td>
-                  <td>{{ a.classname }}</td>
-                  <td>{{ a.subject }}</td>
-                  <td>{{ a.term }}</td>
-                  <td>{{ a.academic_year }}</td>
-                  <td>
-                    <form
-                      action="{{ url_for('school_admin_remove_subject_teacher_assignment') }}"
-                      method="POST"
-                      onsubmit="return confirm('Remove this subject assignment?');"
-                    >
-                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-                      <input type="hidden" name="teacher_id" value="{{ a.teacher_id }}" />
-                      <input type="hidden" name="classname" value="{{ a.classname }}" />
-                      <input type="hidden" name="subject" value="{{ a.subject }}" />
-                      <input type="hidden" name="term" value="{{ a.term }}" />
-                      <input type="hidden" name="academic_year" value="{{ a.academic_year }}" />
-                      <button
-                        type="submit"
-                        class="btn btn-danger"
-                      >
-                        Remove
-                      </button>
-                    </form>
-                  </td>
-                </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-            </div>
-            {% else %}
-            <p>No subject assignments yet.</p>
-            {% endif %}
-          </div>
-
-          <div class="section-title-bar">
-            <h2><i class="fas fa-clipboard-check"></i> Monitoring</h2>
-            <p>Watch pending scores and publishing approvals.</p>
-          </div>
-          <div class="card">
-            <h2><i class="fas fa-triangle-exclamation"></i> Missing Score Alerts ({{ current_term }})</h2>
-            {% if missing_score_alerts %}
-            <div class="table-scroll">
-            <table class="assignment-table">
-              <thead>
-                <tr>
-                  <th>Class</th>
-                  <th>Pending Subjects</th>
-                  <th>Total Pending Entries</th>
-                  <th>Subjects</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for m in missing_score_alerts %}
-                <tr>
-                  <td>{{ m.classname }}</td>
-                  <td>{{ m.pending_subjects }}</td>
-                  <td>{{ m.total_pending_entries }}</td>
-                  <td>{{ m.subjects|join(', ') }}</td>
-                </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-            </div>
-            {% else %}
-            <p>No missing score alerts for current class assignments.</p>
-            {% endif %}
-          </div>
-
-          <div class="card">
-            <h2>
-              <i class="fas fa-cloud-upload-alt"></i> Teacher Upload Status ({{
-              current_term }})
-            </h2>
-            {% if publication_statuses %}
-            {% set pending_count = publication_statuses | selectattr('approval_status', 'equalto', 'pending') | list | length %}
-            {% set published_count = publication_statuses | selectattr('is_published') | list | length %}
-            <div class="stack-card">
-              <p class="no-margin">
-                <span class="chip chip-pending">Pending: {{ pending_count }}</span>
-                <span class="chip chip-success">Published: {{ published_count }}</span>
-              </p>
-              <p class="note">Open the dedicated page to approve/reject and monitor class publish status.</p>
-              <p class="mt-10">
-                <a href="{{ url_for('school_admin_publish_results') }}" class="btn btn-primary">
-                  <i class="fas fa-cloud-upload-alt"></i> Open Publish Results
+              <div class="card">
+                <h2><i class="fas fa-calendar-alt"></i> School Programs</h2>
+                <p class="note">Manage mid-term break, exams period, PTA, inter-house sports, graduation, CA deadlines, and events on a dedicated page.</p>
+                <a href="{{ url_for('school_admin_term_programs') }}" class="btn btn-primary">
+                  <i class="fas fa-external-link-alt"></i> Open Term Programs
                 </a>
-              </p>
+              </div>
             </div>
-            {% else %}
-            <p>No class assignments found for {{ current_term }}.</p>
-            {% endif %}
-          </div>
-          </div>
           </div>
         </div>
       </div>
@@ -869,7 +346,7 @@
       </div>
     </div>
     {% endif %}
-    <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260303c') }}"></script>
+    <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260306e') }}"></script>
     <script>
       (function () {
         var body = document.body;
@@ -878,61 +355,7 @@
         }
       })();
     </script>
-    <script>
-      (function () {
-        var mode = document.getElementById('student_msg_target_mode');
-        var classGroup = document.getElementById('studentMsgClassGroup');
-        var streamGroup = document.getElementById('studentMsgStreamGroup');
-        var classInput = document.getElementById('student_msg_classname');
-        var streamInput = document.getElementById('student_msg_stream');
-        if (!mode || !classGroup || !streamGroup || !classInput || !streamInput) return;
-        function syncMode() {
-          var value = (mode.value || 'all').toLowerCase();
-          classGroup.classList.toggle('show', value === 'class' || value === 'stream');
-          streamGroup.classList.toggle('show', value === 'stream');
-          classInput.required = (value === 'class' || value === 'stream');
-          streamInput.required = (value === 'stream');
-          if (value === 'all') {
-            classInput.value = '';
-            streamInput.value = '';
-          } else if (value === 'class') {
-            streamInput.value = '';
-          }
-        }
-        mode.addEventListener('change', syncMode);
-        syncMode();
-      })();
-    </script>
-    <script>
-      (function () {
-        var mode = document.getElementById('teacher_msg_target_mode');
-        var classGroup = document.getElementById('teacherMsgClassGroup');
-        var subjectGroup = document.getElementById('teacherMsgSubjectGroup');
-        var classInput = document.getElementById('teacher_msg_classname');
-        var subjectInput = document.getElementById('teacher_msg_subject');
-        if (!mode || !classGroup || !subjectGroup || !classInput || !subjectInput) return;
-        function syncMode() {
-          var value = (mode.value || 'all').toLowerCase();
-          classGroup.classList.toggle('show', value === 'class' || value === 'class_subject');
-          subjectGroup.classList.toggle('show', value === 'subject' || value === 'class_subject');
-          classInput.required = (value === 'class' || value === 'class_subject');
-          subjectInput.required = (value === 'subject' || value === 'class_subject');
-          if (value === 'all') {
-            classInput.value = '';
-            subjectInput.value = '';
-          } else if (value === 'class') {
-            subjectInput.value = '';
-          } else if (value === 'subject') {
-            classInput.value = '';
-          }
-        }
-        mode.addEventListener('change', syncMode);
-        syncMode();
-      })();
-    </script>
     <script id="dashboardTermEventsPayload" type="application/json">{{ dashboard_term_events_payload|tojson }}</script>
-    <script id="classSubjectOptionsPayload" type="application/json">{{ class_subject_options|tojson }}</script>
-    <script id="subjectAssignmentsPayload" type="application/json">{{ subject_assignments|tojson }}</script>
     <script>
       (function () {
         var payloadEl = document.getElementById('dashboardTermEventsPayload');
@@ -1011,138 +434,7 @@
         draw();
       })();
     </script>
-    <script>
-      (function () {
-        var teacherSelect = document.getElementById('subject_teacher_id');
-        var termSelect = document.getElementById('subject_term');
-        var scopeSelect = document.getElementById('subject_assignment_scope');
-        var subjectChecklist = document.getElementById('subjectChecklist');
-        var classChecklist = document.getElementById('compatibleClassChecklist');
-        var classPayloadEl = document.getElementById('classSubjectOptionsPayload');
-        if (!teacherSelect || !termSelect || !scopeSelect || !subjectChecklist || !classChecklist) return;
-
-        var classOptions = {};
-        try {
-          classOptions = JSON.parse((classPayloadEl && classPayloadEl.textContent) || '{}') || {};
-        } catch (e) {
-          classOptions = {};
-        }
-
-        var allSubjectsMap = {};
-        Object.keys(classOptions).forEach(function (classname) {
-          var subjects = classOptions[classname] || [];
-          for (var i = 0; i < subjects.length; i++) {
-            var s = String(subjects[i] || '').trim();
-            if (s) allSubjectsMap[s] = true;
-          }
-        });
-        var allSubjects = Object.keys(allSubjectsMap).sort(function (a, b) {
-          return a.localeCompare(b);
-        });
-
-        function getSelectedSubjects() {
-          var out = [];
-          subjectChecklist.querySelectorAll('input[name="subjects"]:checked').forEach(function (el) {
-            var value = String(el.value || '').trim();
-            if (value) out.push(value);
-          });
-          return out;
-        }
-
-        function compatibleClasses(selectedSubjects) {
-          var out = [];
-          Object.keys(classOptions).forEach(function (classname) {
-            var configured = classOptions[classname] || [];
-            var configuredSet = {};
-            for (var i = 0; i < configured.length; i++) configuredSet[String(configured[i] || '').trim()] = true;
-            var ok = true;
-            for (var j = 0; j < selectedSubjects.length; j++) {
-              if (!configuredSet[selectedSubjects[j]]) {
-                ok = false;
-                break;
-              }
-            }
-            if (ok) out.push(classname);
-          });
-          out.sort(function (a, b) { return a.localeCompare(b); });
-          return out;
-        }
-
-        function renderSubjects() {
-          subjectChecklist.innerHTML = '';
-          if (!teacherSelect.value) {
-            subjectChecklist.innerHTML = '<div class="subject-check-hint">Select teacher first.</div>';
-            return;
-          }
-          if (!allSubjects.length) {
-            subjectChecklist.innerHTML = '<div class="subject-check-hint">No configured subjects found.</div>';
-            return;
-          }
-          allSubjects.forEach(function (subject) {
-            var label = document.createElement('label');
-            label.className = 'subject-check-item';
-            var checkbox = document.createElement('input');
-            checkbox.type = 'checkbox';
-            checkbox.name = 'subjects';
-            checkbox.value = subject;
-            checkbox.addEventListener('change', renderClasses);
-            var text = document.createElement('span');
-            text.textContent = subject;
-            label.appendChild(checkbox);
-            label.appendChild(text);
-            subjectChecklist.appendChild(label);
-          });
-        }
-
-        function renderClasses() {
-          var selectedSubjects = getSelectedSubjects();
-          var classes = compatibleClasses(selectedSubjects);
-          var isSelectedScope = scopeSelect.value === 'selected';
-          classChecklist.innerHTML = '';
-          if (!selectedSubjects.length) {
-            classChecklist.innerHTML = '<div class="subject-check-hint">Select subject(s) to see compatible classes.</div>';
-            return;
-          }
-          if (!classes.length) {
-            classChecklist.innerHTML = '<div class="subject-check-hint">No class matches all selected subjects.</div>';
-            return;
-          }
-          if (!isSelectedScope) {
-            var msg = document.createElement('div');
-            msg.className = 'subject-check-hint';
-            msg.textContent = 'All these compatible classes will be assigned: ' + classes.join(', ');
-            classChecklist.appendChild(msg);
-            return;
-          }
-          classes.forEach(function (classname) {
-            var label = document.createElement('label');
-            label.className = 'subject-check-item';
-            var checkbox = document.createElement('input');
-            checkbox.type = 'checkbox';
-            checkbox.name = 'target_classnames';
-            checkbox.value = classname;
-            var text = document.createElement('span');
-            text.textContent = classname;
-            label.appendChild(checkbox);
-            label.appendChild(text);
-            classChecklist.appendChild(label);
-          });
-        }
-
-        teacherSelect.addEventListener('change', function () {
-          renderSubjects();
-          renderClasses();
-        });
-        termSelect.addEventListener('change', function () {
-          renderSubjects();
-          renderClasses();
-        });
-        scopeSelect.addEventListener('change', renderClasses);
-        renderSubjects();
-        renderClasses();
-      })();
-    </script>
-    {% include 'shared/_ai_assistant_widget.html' %}
   </body>
 </html>
+
 

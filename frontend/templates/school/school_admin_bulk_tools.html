@@ -4,7 +4,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Bulk Tools</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260303c') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260307f') }}">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 </head>
 <body>
@@ -30,6 +30,17 @@
         <a class="btn btn-danger" href="{{ url_for('school_admin_import_csv_error_rows', token=error_token) }}">Download Error Rows CSV</a>
     </div>
     {% endif %}
+
+    <div class="card">
+        <h2>Storage Usage</h2>
+        <p><strong>Used:</strong> {{ storage_usage.used_mb if storage_usage else 0 }} MB / {{ storage_usage.quota_mb if storage_usage else 0 }} MB</p>
+        <p><strong>Usage:</strong> {{ storage_usage.pct if storage_usage else 0 }}%</p>
+        {% if storage_usage and storage_usage.pct >= 90 %}
+        <div class="flash error">Storage is above 90%. Clean old attachments/backups soon.</div>
+        {% elif storage_usage and storage_usage.pct >= 75 %}
+        <div class="flash warning">Storage is above 75%. Monitor usage.</div>
+        {% endif %}
+    </div>
 
     <div class="card">
         <h2>Export CSV</h2>
@@ -67,6 +78,13 @@
 
     <div class="card">
         <h2>Backup / Restore</h2>
+        {% if backup_health %}
+        <p class="note"><strong>Backup Exports (30d):</strong> {{ backup_health.exports }}</p>
+        <p class="note"><strong>Restore Runs (30d):</strong> {{ backup_health.restores }} | <strong>Dry-runs:</strong> {{ backup_health.restore_dry_runs }}</p>
+        {% if backup_health.is_overdue %}
+        <div class="flash warning">Backup is overdue. Run a backup now.</div>
+        {% endif %}
+        {% endif %}
         <a class="btn btn-secondary" href="{{ url_for('school_admin_backup') }}">Download Full JSON Backup</a>
         <form method="post" action="{{ url_for('school_admin_backup_encrypted') }}" class="mt-12">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -81,6 +99,7 @@
                 <option value="merge">Merge</option>
                 <option value="replace">Replace Existing</option>
             </select>
+            <label style="margin-left:10px;"><input type="checkbox" name="dry_run" value="1"> Dry-run verify only</label>
             <button class="btn btn-danger" type="submit">Restore Backup</button>
         </form>
         <hr>
@@ -104,6 +123,7 @@
 </div>
     </div>
 </div>
-<script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260303c') }}"></script>
+<script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260306e') }}"></script>
 </body>
 </html>
+

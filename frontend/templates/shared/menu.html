@@ -136,6 +136,32 @@
         .report-issue-btn:active {
             transform: scale(0.95);
         }
+        @media (max-width: 768px) {
+            .hero-section {
+                padding: 22px 0;
+                margin-bottom: 24px;
+            }
+            .hero-section h1 {
+                font-size: 2rem;
+            }
+            .hero-section p {
+                font-size: 1rem;
+                margin-bottom: 18px;
+            }
+            .feature-grid {
+                grid-template-columns: 1fr;
+            }
+            .action-buttons {
+                grid-template-columns: 1fr;
+            }
+            .report-issue-btn {
+                width: 52px;
+                height: 52px;
+                font-size: 20px;
+                right: 12px;
+                bottom: 12px;
+            }
+        }
     </style>
 </head>
 <body>

@@ -11,11 +11,32 @@
             background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
             min-height: 100vh;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
         }
         .container {
             max-width: 1400px;
             margin: 0 auto;
             padding: 20px;
+            width: 100%;
+            flex: 1 0 auto;
+        }
+        .page-header-block {
+            text-align: center;
+            margin: 8px auto 30px;
+            padding: 18px 20px;
+            max-width: 860px;
+            border: 1px solid rgba(148, 163, 184, 0.25);
+            border-radius: 16px;
+            background: rgba(255, 255, 255, 0.58);
+            backdrop-filter: blur(6px);
+            box-shadow: 0 10px 26px rgba(15, 23, 42, 0.08);
+        }
+        .page-subtitle {
+            margin-top: 8px;
+            color: #546173;
+            font-size: 0.98rem;
+            font-weight: 500;
         }
         .page-header {
             text-align: center;
@@ -194,12 +215,15 @@
             backdrop-filter: blur(10px);
             border: 1px solid rgba(255, 255, 255, 0.2);
             border-radius: 16px;
-            overflow: hidden;
+            overflow-x: auto;
+            overflow-y: hidden;
+            -webkit-overflow-scrolling: touch;
             box-shadow: 0 12px 40px rgba(0, 0, 0, 0.1);
             margin-bottom: 40px;
         }
         .students-table {
             width: 100%;
+            min-width: 980px;
             border-collapse: collapse;
         }
         .students-table thead th {
@@ -319,6 +343,7 @@
         .action-buttons {
             display: flex;
             gap: 8px;
+            flex-wrap: wrap;
         }
         .action-btn {
             padding: 6px 10px;
@@ -339,13 +364,100 @@
         }
         .no-students {
             text-align: center;
-            padding: 60px 20px;
+            padding: 36px 20px 50px;
             color: #7f8c8d;
         }
         .no-students i {
             font-size: 4rem;
             margin-bottom: 20px;
             opacity: 0.5;
+        }
+        .empty-state-card {
+            max-width: 760px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.98);
+            border: 1px solid #dbe4ef;
+            border-radius: 18px;
+            padding: 30px 26px;
+            box-shadow: 0 16px 42px rgba(15, 23, 42, 0.12);
+        }
+        .empty-state-hero {
+            width: 72px;
+            height: 72px;
+            border-radius: 20px;
+            margin: 0 auto 8px;
+            background: linear-gradient(135deg, #edf3ff, #f5f3ff);
+            border: 1px solid #d8e3ff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #5b6fd6;
+            font-size: 2rem;
+        }
+        .empty-state-title {
+            margin: 6px 0 8px;
+            color: #1f2937;
+            font-size: 1.5rem;
+            font-weight: 800;
+        }
+        .empty-state-desc {
+            margin: 0 0 16px;
+            color: #4b5563;
+            font-size: 1rem;
+            line-height: 1.5;
+        }
+        .empty-state-actions {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 10px;
+            margin: 8px 0 16px;
+        }
+        .empty-state-actions .export-btn,
+        .empty-state-actions .clear-btn {
+            min-width: 184px;
+            justify-content: center;
+            text-decoration: none;
+            border-radius: 12px;
+            padding: 13px 18px;
+            font-size: 1rem;
+            font-weight: 700;
+            border: 1px solid #cbd5e1;
+        }
+        .empty-state-actions .clear-btn {
+            background: #f8fafc;
+            color: #1f2937;
+        }
+        .empty-state-actions .clear-btn:hover {
+            background: #eef2f7;
+            color: #0f172a;
+        }
+        .empty-state-checklist {
+            margin: 8px auto 0;
+            padding: 0;
+            list-style: none;
+            display: grid;
+            gap: 8px;
+            max-width: 560px;
+            text-align: left;
+            color: #374151;
+        }
+        .empty-state-checklist li {
+            padding: 8px 10px;
+            border-radius: 10px;
+            background: #f8fafc;
+            border: 1px solid #e5edf6;
+        }
+        .empty-filter-note {
+            display: inline-block;
+            margin-bottom: 10px;
+            padding: 6px 10px;
+            border-radius: 999px;
+            font-size: 0.78rem;
+            font-weight: 700;
+            color: #1d4ed8;
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
         }
         .export-buttons {
             display: flex;
@@ -369,7 +481,37 @@
             transform: translateY(-2px);
             box-shadow: 0 6px 20px rgba(102, 126, 234, 0.3);
         }
+        .pagination-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 16px;
+        }
+        .pagination-summary {
+            color: #4b5563;
+            font-weight: 600;
+        }
+        .pagination-controls {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .pagination-pages {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+            max-width: 420px;
+            overflow-x: auto;
+            padding-bottom: 2px;
+        }
         @media (max-width: 768px) {
+            .page-header-block {
+                margin: 2px auto 18px;
+                padding: 14px 12px;
+            }
             .search-filter-row {
                 grid-template-columns: 1fr;
                 gap: 10px;
@@ -380,6 +522,13 @@
             .students-table thead th,
             .students-table tbody td {
                 padding: 8px 6px;
+            }
+            .students-table {
+                min-width: 860px;
+            }
+            .students-table tbody tr:hover {
+                transform: none;
+                box-shadow: none;
             }
             .student-avatar {
                 width: 40px;
@@ -394,12 +543,33 @@
                 padding: 4px 8px;
                 font-size: 0.7rem;
             }
+            .empty-state-actions .export-btn,
+            .empty-state-actions .clear-btn {
+                width: 100%;
+            }
+            .pagination-row {
+                align-items: stretch;
+            }
+            .pagination-summary {
+                width: 100%;
+            }
+            .pagination-controls {
+                width: 100%;
+            }
+            .pagination-controls .btn {
+                flex: 1 1 120px;
+                text-align: center;
+                justify-content: center;
+            }
         }
     </style>
 </head>
 <body>
     <div class="container fade-in">
-        <h1><i class="fas fa-users"></i> View Students</h1>
+        <div class="page-header-block">
+            <h1><i class="fas fa-users"></i> View Students</h1>
+            <div class="page-subtitle">Browse student records, scores, and class performance.</div>
+        </div>
 
         {% if students %}
             <!-- Statistics Overview -->
@@ -486,7 +656,7 @@
                             <option value="{{ term_name }}">{{ term_name }}</option>
                         {% endfor %}
                     </select>
-                    <button class="btn" onclick="clearFilters()">
+                    <button type="button" class="btn" onclick="clearFilters()">
                         <i class="fas fa-times"></i> Clear
                     </button>
                 </div>
@@ -595,27 +765,103 @@
                     </tbody>
                 </table>
             </div>
-            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-top:16px;">
-                <div style="color:#4b5563; font-weight:600;">Page {{ page }} of {{ total_pages }} | Total {{ total_students }} students</div>
-                <div style="display:flex; gap:8px;">
+            <div class="pagination-row">
+                <div class="pagination-summary">Page {{ page }} of {{ total_pages }} | Total {{ total_students }} students</div>
+                <div class="pagination-controls">
                     {% if page > 1 %}
+                    <a class="btn clear-btn" style="text-decoration:none;" href="{{ url_for('view_students') }}?class={{ selected_class|urlencode }}&term={{ selected_term|urlencode }}&per_page={{ per_page }}&page=1">
+                        <i class="fas fa-angles-left"></i> First
+                    </a>
                     <a class="btn clear-btn" style="text-decoration:none;" href="{{ url_for('view_students') }}?class={{ selected_class|urlencode }}&term={{ selected_term|urlencode }}&per_page={{ per_page }}&page={{ page - 1 }}">
                         <i class="fas fa-arrow-left"></i> Prev
                     </a>
                     {% endif %}
+
+                    {% if total_pages > 1 %}
+                    {% set ns = namespace(start=page - 2, end=page + 2) %}
+                    {% if ns.start < 1 %}{% set ns.start = 1 %}{% endif %}
+                    {% if ns.end > total_pages %}{% set ns.end = total_pages %}{% endif %}
+                    {% if ns.end - ns.start < 4 %}
+                        {% if ns.start == 1 %}
+                            {% set ns.end = [total_pages, 5]|min %}
+                        {% elif ns.end == total_pages %}
+                            {% set ns.start = [1, total_pages - 4]|max %}
+                        {% endif %}
+                    {% endif %}
+                    <div class="pagination-pages">
+                        {% for p in range(ns.start, ns.end + 1) %}
+                        <a
+                            class="btn {% if p == page %}btn-primary{% else %}clear-btn{% endif %}"
+                            style="text-decoration:none; min-width:42px; text-align:center; flex:0 0 auto;"
+                            href="{{ url_for('view_students') }}?class={{ selected_class|urlencode }}&term={{ selected_term|urlencode }}&per_page={{ per_page }}&page={{ p }}"
+                        >
+                            {{ p }}
+                        </a>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+
                     {% if page < total_pages %}
                     <a class="btn clear-btn" style="text-decoration:none;" href="{{ url_for('view_students') }}?class={{ selected_class|urlencode }}&term={{ selected_term|urlencode }}&per_page={{ per_page }}&page={{ page + 1 }}">
                         Next <i class="fas fa-arrow-right"></i>
+                    </a>
+                    <a class="btn clear-btn" style="text-decoration:none;" href="{{ url_for('view_students') }}?class={{ selected_class|urlencode }}&term={{ selected_term|urlencode }}&per_page={{ per_page }}&page={{ total_pages }}">
+                        Last <i class="fas fa-angles-right"></i>
                     </a>
                     {% endif %}
                 </div>
             </div>
         {% else %}
-            <div class="no-students">
-                <i class="fas fa-users"></i>
-                <h3>No Students Found</h3>
-                <p>No students found for the current filter.</p>
-            </div>
+            {% set has_server_filter = (selected_class or selected_term) %}
+            {% if session.get('role') == 'school_admin' %}
+                <div class="no-students">
+                    <div class="empty-state-card">
+                        <div class="empty-state-hero"><i class="fas fa-user-graduate"></i></div>
+                        {% if has_server_filter %}
+                        <span class="empty-filter-note">Filter is active</span>
+                        <h3 class="empty-state-title">No students match this class or term filter</h3>
+                        <p class="empty-state-desc">
+                            Nothing was found for the current selection. Reset the filter or switch class/term.
+                        </p>
+                        <div class="empty-state-actions">
+                            <a href="{{ url_for('view_students') }}" class="export-btn">
+                                <i class="fas fa-rotate-left"></i> Reset Filter
+                            </a>
+                            <a href="{{ url_for('school_admin_add_students_by_class') }}" class="clear-btn" style="text-decoration:none;">
+                                <i class="fas fa-user-plus"></i> Add Students
+                            </a>
+                        </div>
+                        {% else %}
+                        <h3 class="empty-state-title">No students have been added yet</h3>
+                        <p class="empty-state-desc">
+                            Start with student intake and class setup, then this page will show student records, scores, and results.
+                        </p>
+                        <div class="empty-state-actions">
+                            <a href="{{ url_for('school_admin_add_students_by_class') }}" class="export-btn">
+                                <i class="fas fa-user-plus"></i> Add Students
+                            </a>
+                            <a href="{{ url_for('school_admin_class_subjects') }}" class="clear-btn" style="text-decoration:none;">
+                                <i class="fas fa-book"></i> Configure Class Subjects
+                            </a>
+                            <a href="{{ url_for('school_admin_view_parents') }}" class="clear-btn" style="text-decoration:none;">
+                                <i class="fas fa-users"></i> View Parents
+                            </a>
+                        </div>
+                        <ul class="empty-state-checklist">
+                            <li>1. Add students by class manually or with CSV import.</li>
+                            <li>2. Confirm class-subject setup so score entry is ready.</li>
+                            <li>3. Link parents to students for parent portal visibility.</li>
+                        </ul>
+                        {% endif %}
+                    </div>
+                </div>
+            {% else %}
+                <div class="no-students">
+                    <i class="fas fa-users"></i>
+                    <h3>No Students Found</h3>
+                    <p>No students found for the current filter.</p>
+                </div>
+            {% endif %}
         {% endif %}
 
         <div style="text-align: center; margin-top: 30px;">
@@ -677,6 +923,7 @@
                 termFilter.value = '';
                 filterStudents();
             }
+            window.clearFilters = clearFilters;
 
             // Add event listeners
             searchInput.addEventListener('input', filterStudents);

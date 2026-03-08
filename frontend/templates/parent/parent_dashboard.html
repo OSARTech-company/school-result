@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Parent Dashboard</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260303c') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260308d') }}">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" integrity="sha384-3B6NwesSXE7YJlcLI9RpRqGf2p/EgVH8BgoKTaUrmKNDkHPStTQ3EyoYjCGXaOTS" crossorigin="anonymous" referrerpolicy="no-referrer">
     <style>
         .container { max-width: 1100px; }
@@ -38,9 +38,17 @@
     <div class="app-shell topbar-layout">
         <div class="side-taskbar">
             <div class="side-brand">
-                <i class="fas fa-graduation-cap"></i>
+                <img src="{{ url_for('static', filename='img/osartech-logo.png') }}" alt="Osartech Logo" class="brand-logo">
                 <span>Parent</span>
             </div>
+            {% if school_access_state %}
+            {% set access_status = (school_access_state.effective_status or school_access_state.status or '') %}
+            {% set access_class = 'is-active' if access_status in ['trial_free', 'active_paid'] else ('is-warning' if access_status == 'pending_payment' else 'is-blocked') %}
+            <div class="side-access-status">
+                <span class="label">Access</span>
+                <span class="status {{ access_class }}">{{ access_status|replace('_', ' ')|title }}</span>
+            </div>
+            {% endif %}
             <div class="side-links">
                 <a href="{{ url_for('parent_dashboard') }}" class="side-link active">
                     <i class="fas fa-home"></i>
@@ -56,6 +64,10 @@
                 <a href="{{ url_for('parent_period_attendance') }}" class="side-link">
                     <i class="fas fa-calendar-check"></i>
                     <span>Attendance</span>
+                </a>
+                <a href="{{ url_for('parent_timetable') }}" class="side-link">
+                    <i class="fas fa-table"></i>
+                    <span>Timetable</span>
                 </a>
                 {% for child in children %}
                 <a href="{{ url_for('parent_view_result', student_key=child.key) }}" class="side-link">
@@ -96,6 +108,19 @@
                         <h2 class="no-margin"><i class="fas fa-users"></i> Osartech</h2>
                     </div>
                     <div class="muted mt-10">Phone: {{ parent_phone }}</div>
+                    {% if school_access_state %}
+                    {% set access_status = (school_access_state.effective_status or '') %}
+                    {% set access_class = 'is-active' if access_status in ['trial_free', 'active_paid'] else ('is-warning' if access_status == 'pending_payment' else 'is-blocked') %}
+                    <div class="access-badge-row">
+                        <span class="access-badge {{ access_class }}">
+                            <i class="fas fa-shield-alt" aria-hidden="true"></i>
+                            Access: {{ access_status|replace('_', ' ')|title }}
+                        </span>
+                        {% if school_access_state.reason %}
+                        <p class="access-badge-note">{{ school_access_state.reason }}</p>
+                        {% endif %}
+                    </div>
+                    {% endif %}
                 </div>
 
                 {% with messages = get_flashed_messages(with_categories=true) %}
@@ -202,6 +227,7 @@
                             <a class="btn" href="{{ url_for('parent_view_result', student_key=child.key) }}">View Results</a>
                             <a class="btn ml-10" href="{{ url_for('parent_compare_results', student_key=child.key) }}">Compare Terms</a>
                             <a class="btn ml-10" href="{{ url_for('parent_period_attendance', student_key=child.key) }}">Attendance</a>
+                            <a class="btn ml-10" href="{{ url_for('parent_timetable', student_key=child.key) }}">Timetable</a>
                             <a class="btn ml-10" href="{{ url_for('parent_submit_dispute', student_key=child.key) }}">Report Dispute</a>
                         </div>
                     </div>
@@ -232,7 +258,7 @@
         </div>
     </div>
     {% endif %}
-    <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260303c') }}"></script>
+    <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260306e') }}"></script>
     {% if unread_parent_messages %}
     <script>
         (function () {
@@ -309,4 +335,5 @@
     {% include 'shared/_ai_assistant_widget.html' %}
 </body>
 </html>
+
 

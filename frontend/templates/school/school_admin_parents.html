@@ -10,7 +10,7 @@
     />
     <link
       rel="stylesheet"
-      href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260303c') }}"
+      href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260307f') }}"
     />
     <link
       href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
@@ -23,69 +23,7 @@
   </head>
   <body>
     <div class="app-shell topbar-layout">
-      <div class="side-taskbar">
-        <div class="side-brand">
-            <i class="fas fa-graduation-cap"></i>
-            <span>School Admin</span>
-        </div>
-        <div class="side-links">
-            <a href="{{ url_for('school_admin_dashboard') }}" class="side-link">
-                <i class="fas fa-home"></i>
-                <span>Dashboard</span>
-            </a>
-            <a href="{{ url_for('school_admin_publish_results') }}" class="side-link">
-                <i class="fas fa-cloud-upload-alt"></i>
-                <span>Publish Results</span>
-            </a>
-            <a href="{{ url_for('view_students') }}" class="side-link">
-                <i class="fas fa-users"></i>
-                <span>View Students</span>
-            </a>
-            <a href="{{ url_for('school_admin_view_parents') }}" class="side-link active">
-                <i class="fas fa-user-friends"></i>
-                <span>View Parents</span>
-            </a>
-            <a href="{{ url_for('school_admin_add_students_by_class') }}" class="side-link">
-                <i class="fas fa-user-plus"></i>
-                <span>Add Students</span>
-            </a>
-            <a href="{{ url_for('school_admin_settings') }}" class="side-link">
-                <i class="fas fa-cogs"></i>
-                <span>School Settings</span>
-            </a>
-            <a href="{{ url_for('school_admin_class_subjects') }}" class="side-link">
-                <i class="fas fa-book-open"></i>
-                <span>Class Subjects</span>
-            </a>
-            <a href="{{ url_for('school_admin_promote') }}" class="side-link">
-                <i class="fas fa-arrow-up"></i>
-                <span>Promote Students</span>
-            </a>
-            <a href="{{ url_for('school_admin_score_audit') }}" class="side-link">
-                <i class="fas fa-clipboard-list"></i>
-                <span>Score Audit Log</span>
-            </a>
-            <a href="{{ url_for('report_issue') }}" class="side-link">
-                <i class="fas fa-bug"></i>
-                <span>Report Issue</span>
-            </a>
-            <a href="{{ url_for('school_admin_change_password') }}" class="side-link">
-                <i class="fas fa-key"></i>
-                <span>Change Password</span>
-            </a>
-            <a href="{{ url_for('help', role='school_admin') }}" class="side-link">
-                <i class="fas fa-question-circle"></i>
-                <span>Help</span>
-            </a>
-            <form method="post" action="{{ url_for('logout') }}">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button type="submit" class="side-link side-link-logout">
-                    <i class="fas fa-sign-out-alt"></i>
-                    <span>Logout</span>
-                </button>
-            </form>
-        </div>
-      </div>
+      {% include 'school/_school_admin_sidebar.html' %}
 
       <div class="main-content">
         <div class="container">
@@ -151,7 +89,7 @@
         </div>
       </div>
     </div>
-    <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260303c') }}"></script>
+    <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260306e') }}"></script>
     <script>
       (function () {
         var body = document.body;
@@ -162,4 +100,5 @@
     </script>
   </body>
 </html>
+
 

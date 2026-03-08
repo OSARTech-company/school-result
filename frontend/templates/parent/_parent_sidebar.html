@@ -1,8 +1,16 @@
 <div class="side-taskbar">
     <div class="side-brand">
-        <i class="fas fa-graduation-cap"></i>
+        <img src="{{ url_for('static', filename='img/osartech-logo.png') }}" alt="Osartech Logo" class="brand-logo">
         <span>Parent</span>
     </div>
+    {% if school_access_state %}
+    {% set access_status = (school_access_state.effective_status or school_access_state.status or '') %}
+    {% set access_class = 'is-active' if access_status in ['trial_free', 'active_paid'] else ('is-warning' if access_status == 'pending_payment' else 'is-blocked') %}
+    <div class="side-access-status">
+        <span class="label">Access</span>
+        <span class="status {{ access_class }}">{{ access_status|replace('_', ' ')|title }}</span>
+    </div>
+    {% endif %}
     <div class="side-links">
         <a href="{{ url_for('parent_dashboard') }}" class="side-link{% if active_page == 'dashboard' %} active{% endif %}">
             <i class="fas fa-home"></i>
@@ -18,6 +26,10 @@
         <a href="{{ url_for('parent_period_attendance') }}" class="side-link{% if active_page == 'attendance' %} active{% endif %}">
             <i class="fas fa-calendar-check"></i>
             <span>Attendance</span>
+        </a>
+        <a href="{{ url_for('parent_timetable') }}" class="side-link{% if active_page == 'timetable' %} active{% endif %}">
+            <i class="fas fa-table"></i>
+            <span>Timetable</span>
         </a>
         {% for child in (children or []) %}
         <a href="{{ url_for('parent_view_result', student_key=child.key) }}" class="side-link">

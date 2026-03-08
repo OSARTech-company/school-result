@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>School Term Programs</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}" />
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260303c') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260307f') }}" />
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" />
   <style>
     .badge-status{padding:2px 8px;border-radius:999px;font-size:12px;font-weight:700}
@@ -19,15 +19,7 @@
 </head>
 <body>
 <div class="app-shell topbar-layout">
-  <div class="side-taskbar">
-    <div class="side-brand"><i class="fas fa-graduation-cap"></i><span>School Admin</span></div>
-    <div class="side-links">
-      <a href="{{ url_for('school_admin_dashboard') }}" class="side-link"><i class="fas fa-home"></i><span>Dashboard</span></a>
-      <a href="{{ url_for('school_admin_publish_results') }}" class="side-link"><i class="fas fa-cloud-upload-alt"></i><span>Publish Results</span></a>
-      <a href="{{ url_for('school_admin_term_programs') }}" class="side-link active"><i class="fas fa-calendar-alt"></i><span>Term Programs</span></a>
-      <form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" class="side-link side-link-logout"><i class="fas fa-sign-out-alt"></i><span>Logout</span></button></form>
-    </div>
-  </div>
+  {% include 'school/_school_admin_sidebar.html' %}
   <div class="main-content">
     <div class="container">
       <div class="header">
@@ -150,7 +142,7 @@
   </div>
 </div>
 
-<script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260303c') }}"></script>
+<script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260306e') }}"></script>
 <script>
 (function(){
   function addRow(listId, html){ var list=document.getElementById(listId); if(!list) return; var d=document.createElement('div'); d.innerHTML=html; list.appendChild(d.firstElementChild);} 
@@ -174,3 +166,4 @@
 </script>
 </body>
 </html>
+

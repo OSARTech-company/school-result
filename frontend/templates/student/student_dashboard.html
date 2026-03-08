@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Student Dashboard - Student Score Management System</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260303c') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260308d') }}">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         .container { max-width: 960px; }
@@ -98,9 +98,17 @@
     <div class="app-shell topbar-layout">
         <div class="side-taskbar">
             <div class="side-brand">
-                <i class="fas fa-graduation-cap"></i>
+                <img src="{{ url_for('static', filename='img/osartech-logo.png') }}" alt="Osartech Logo" class="brand-logo">
                 <span>Student</span>
             </div>
+            {% if school_access_state %}
+            {% set access_status = (school_access_state.effective_status or school_access_state.status or '') %}
+            {% set access_class = 'is-active' if access_status in ['trial_free', 'active_paid'] else ('is-warning' if access_status == 'pending_payment' else 'is-blocked') %}
+            <div class="side-access-status">
+                <span class="label">Access</span>
+                <span class="status {{ access_class }}">{{ access_status|replace('_', ' ')|title }}</span>
+            </div>
+            {% endif %}
             <div class="side-links">
                 <a href="{{ url_for('student_dashboard') }}" class="side-link active">
                     <i class="fas fa-home"></i>
@@ -139,6 +147,19 @@
             <div class="container">
                 <div class="header">
                     <h1><i class="fas fa-user-graduate"></i> Osartech</h1>
+                    {% if school_access_state %}
+                    {% set access_status = (school_access_state.effective_status or '') %}
+                    {% set access_class = 'is-active' if access_status in ['trial_free', 'active_paid'] else ('is-warning' if access_status == 'pending_payment' else 'is-blocked') %}
+                    <div class="access-badge-row">
+                        <span class="access-badge {{ access_class }}">
+                            <i class="fas fa-shield-alt" aria-hidden="true"></i>
+                            Access: {{ access_status|replace('_', ' ')|title }}
+                        </span>
+                        {% if school_access_state.reason %}
+                        <p class="access-badge-note">{{ school_access_state.reason }}</p>
+                        {% endif %}
+                    </div>
+                    {% endif %}
                 </div>
         
                 {% with messages = get_flashed_messages(with_categories=true) %}
@@ -434,7 +455,7 @@
         })();
     </script>
     {% endif %}
-    <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260303c') }}"></script>
+    <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260306e') }}"></script>
     {% if unread_student_messages %}
     <script>
         (function () {
@@ -466,4 +487,5 @@
     {% include 'shared/_ai_assistant_widget.html' %}
 </body>
 </html>
+
 

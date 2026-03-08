@@ -39,10 +39,16 @@
             margin: 0 0 14px;
             color: #475569;
         }
+        .table-wrap {
+            width: 100%;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
         table {
             width: 100%;
             border-collapse: collapse;
             font-size: 0.95rem;
+            min-width: 540px;
         }
         th, td {
             border: 1px solid #e5ebf3;
@@ -54,6 +60,20 @@
             background: #f8fbff;
             color: #334155;
             font-weight: 600;
+        }
+        @media (max-width: 640px) {
+            body {
+                padding: 12px;
+            }
+            .head {
+                padding: 14px 14px;
+            }
+            .body {
+                padding: 14px;
+            }
+            .status {
+                font-size: 0.98rem;
+            }
         }
     </style>
 </head>
@@ -73,6 +93,7 @@
             {% endif %}
 
             {% if details %}
+            <div class="table-wrap">
             <table>
                 <tr><th>School</th><td>{{ details.school_name or details.school_id or '-' }}</td></tr>
                 <tr><th>Student Name</th><td>{{ details.student_name or '-' }}</td></tr>
@@ -85,6 +106,7 @@
                 <tr><th>Status</th><td>{{ details.status or '-' }}</td></tr>
                 <tr><th>Published At</th><td>{{ details.published_at or '-' }}</td></tr>
             </table>
+            </div>
             {% endif %}
         </div>
     </div>

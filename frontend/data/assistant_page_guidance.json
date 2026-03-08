@@ -1,0 +1,102 @@
+{
+  "school_admin": [
+    {
+      "prefix": "/school-admin/messages",
+      "title": "Messages",
+      "summary": "Use this page to compose and track official notices for teachers, students, and parents.",
+      "steps": [
+        "Select audience scope first (all/class/subject).",
+        "Write a clear title and action-focused message.",
+        "Send and monitor unread/read trends."
+      ]
+    },
+    {
+      "prefix": "/school-admin/bulk-tools",
+      "title": "Bulk Tools",
+      "summary": "Use this page for CSV import/export, backup, restore, and storage monitoring.",
+      "steps": [
+        "Export a backup before bulk import operations.",
+        "Use dry-run mode first to validate file quality.",
+        "Use restore dry-run to verify backup integrity before applying."
+      ]
+    }
+  ],
+  "teacher": [
+    {
+      "prefix": "/teacher",
+      "title": "Teacher Dashboard",
+      "summary": "Use this page to manage score, attendance, messages, and assignment workflows for your current assignment scope.",
+      "steps": [
+        "Confirm term/year and assigned class-subject scope.",
+        "Open the relevant task card (scores, attendance, or message).",
+        "Submit only actions that match your assignment scope."
+      ]
+    },
+    {
+      "prefix": "/teacher/class-list",
+      "title": "Class List",
+      "summary": "Use this page to view students in your class-teacher scope and students offering your assigned subjects.",
+      "steps": [
+        "Check scope/status tags before taking any action.",
+        "Open score actions only for eligible students.",
+        "Use the list to identify pending score-entry work quickly."
+      ]
+    },
+    {
+      "prefix": "/teacher/notifications",
+      "title": "Teacher Notifications",
+      "summary": "Use this page to review missing-score alerts and pending-entry counts for your current scope.",
+      "steps": [
+        "Review each alert row by class and subject.",
+        "Open Enter Scores and complete missing entries.",
+        "Return to confirm alert count has reduced."
+      ]
+    },
+    {
+      "prefix": "/teacher/enter-scores",
+      "title": "Enter Scores",
+      "summary": "Use this page to enter or update subject results for assigned classes only.",
+      "steps": [
+        "Select class, subject, term, and year correctly.",
+        "Validate CA/exam entries before save.",
+        "Submit according to class-teacher/subject-teacher workflow."
+      ]
+    }
+  ],
+  "parent": [
+    {
+      "prefix": "/parent/timetable",
+      "title": "Parent Timetable",
+      "summary": "Use this page to view child-specific timetable rows filtered by class and offered subjects.",
+      "steps": [
+        "Pick the child first when multiple children are linked.",
+        "Review only periods shown for that child's class/subjects.",
+        "Use print view if you need an offline copy."
+      ]
+    }
+  ],
+  "student": [
+    {
+      "prefix": "/student/view-result",
+      "title": "View Result",
+      "summary": "Use this page to review published term results, grades, and verification details.",
+      "steps": [
+        "Confirm the selected term/year context.",
+        "Review subject rows and average carefully.",
+        "Use print/download where available."
+      ]
+    }
+  ],
+  "super_admin": [
+    {
+      "prefix": "/super-admin/error-logs",
+      "title": "Error Logs",
+      "summary": "Use this page to monitor production/runtime errors across schools and roles.",
+      "steps": [
+        "Filter by role, endpoint, or keyword.",
+        "Open details to inspect traceback and request context.",
+        "Use error UID when coordinating fixes."
+      ]
+    }
+  ]
+}

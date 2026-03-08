@@ -74,6 +74,24 @@
         .back-link a:hover {
             text-decoration: underline;
         }
+        @media (max-width: 640px) {
+            .container {
+                margin: 16px auto;
+                padding: 12px;
+            }
+            .issue-form {
+                padding: 16px;
+                border-radius: 12px;
+            }
+            .form-group textarea {
+                min-height: 130px;
+                padding: 12px;
+                font-size: 15px;
+            }
+            .btn-submit {
+                padding: 12px 16px;
+            }
+        }
     </style>
 </head>
 <body>
@@ -95,6 +113,7 @@
 
             <form method="POST">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <input type="hidden" name="source_page" id="source_page" value="{{ source_page or '' }}">
                 <div class="form-group">
                     <label for="issue_description">
                         <i class="fas fa-comment"></i> Describe the Issue
@@ -112,6 +131,9 @@
                     <i class="fas fa-paper-plane"></i> Submit Report
                 </button>
             </form>
+            <p style="margin-top:12px; color:#6c757d; font-size:14px;">
+                Your report includes your role, school, and page context for faster support.
+            </p>
         </div>
 
         <div class="back-link">
@@ -120,6 +142,16 @@
             </a>
         </div>
     </div>
+    <script>
+        (function () {
+            var sourceInput = document.getElementById('source_page');
+            if (!sourceInput) return;
+            var current = (sourceInput.value || '').trim();
+            if (!current) {
+                sourceInput.value = (document.referrer || window.location.pathname || '').trim();
+            }
+        })();
+    </script>
 </body>
 </html>
 

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Reported Issues - Report Viewer</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260303c') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260307f') }}">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         :root {
@@ -285,6 +285,17 @@
             line-height: 1.7;
             font-size: 1rem;
         }
+        .report-meta {
+            margin-top: 10px;
+            display: grid;
+            gap: 6px;
+            color: #4b5563;
+            font-size: 0.95rem;
+        }
+        .report-meta span i {
+            margin-right: 6px;
+            color: #64748b;
+        }
 
         .no-reports {
             text-align: center;
@@ -490,16 +501,16 @@
 
         <div class="stats">
             <div class="stat-card">
-                <span class="stat-number">{{ reports|length }}</span>
+                <span class="stat-number">{{ total_rows or 0 }}</span>
                 <span class="stat-label">Total Reports</span>
             </div>
             <div class="stat-card">
                 <span class="stat-number">{{ reports|selectattr('status', 'equalto', 'unread')|list|length }}</span>
-                <span class="stat-label">Unread Reports</span>
+                <span class="stat-label">Unread (This Page)</span>
             </div>
             <div class="stat-card">
                 <span class="stat-number">{{ reports|selectattr('status', 'equalto', 'read')|list|length }}</span>
-                <span class="stat-label">Read Reports</span>
+                <span class="stat-label">Read (This Page)</span>
             </div>
         </div>
 
@@ -514,6 +525,11 @@
                     </select>
                     <input type="text" name="user" value="{{ user_filter or '' }}" placeholder="Filter by user id">
                     <input type="text" name="q" value="{{ text_filter or '' }}" placeholder="Search description">
+                    <select name="per_page">
+                        {% for opt in [20, 40, 80, 120, 200] %}
+                        <option value="{{ opt }}" {% if per_page == opt %}selected{% endif %}>{{ opt }} rows</option>
+                        {% endfor %}
+                    </select>
                     <button type="submit" class="btn-mini btn-blue">Apply</button>
                     <a href="{{ url_for('view_reports') }}" class="btn-mini btn-gray">Reset</a>
                 </form>
@@ -535,6 +551,11 @@
                     </div>
                     <div class="report-description">
                         {{ report.description }}
+                    </div>
+                    <div class="report-meta">
+                        <span><i class="fas fa-user-tag"></i> Role: {{ report.reporter_role or 'Unknown' }}</span>
+                        <span><i class="fas fa-school"></i> School: {{ report.reporter_school_name or report.reporter_school_id or 'N/A' }}</span>
+                        <span><i class="fas fa-location-arrow"></i> Reported from: {{ report.source_page or 'N/A' }}</span>
                     </div>
                     <div class="item-actions">
                         {% if report.status != 'read' %}
@@ -564,11 +585,23 @@
                     <p>No reports have been submitted yet.</p>
                 </div>
             {% endif %}
+            {% if total_pages > 1 %}
+            <div class="toolbar" style="justify-content:center; margin-top: 14px;">
+                {% if page > 1 %}
+                <a class="btn-mini btn-gray" href="{{ url_for('view_reports', status=status_filter, user=user_filter, q=text_filter, per_page=per_page, page=page-1) }}">Previous</a>
+                {% endif %}
+                <span style="font-weight:700; color:#334155;">Page {{ page }} / {{ total_pages }}</span>
+                {% if page < total_pages %}
+                <a class="btn-mini btn-gray" href="{{ url_for('view_reports', status=status_filter, user=user_filter, q=text_filter, per_page=per_page, page=page+1) }}">Next</a>
+                {% endif %}
+            </div>
+            {% endif %}
         </div>
     </div>
     </div>
     </div>
-    <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260303c') }}"></script>
+    <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260306e') }}"></script>
 </body>
 </html>
+
 

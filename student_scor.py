@@ -9,6 +9,7 @@ Version: 2.0.0
 """
 
 from flask import Flask, render_template, request, redirect, url_for, session, flash, send_file, Response, g, has_request_context
+from flask import got_request_exception
 from flask_wtf.csrf import CSRFProtect, CSRFError
 import argparse
 import json
@@ -31,6 +32,7 @@ import time
 import urllib.request
 import threading
 from collections import deque
+import traceback
 
 import os
 import secrets
@@ -43,6 +45,10 @@ try:
     from dotenv import load_dotenv
 except Exception:
     load_dotenv = None
+try:
+    from PIL import Image
+except Exception:
+    Image = None
 from services import parent_queries as parent_queries_service
 
 if load_dotenv:
@@ -168,6 +174,8 @@ BACKUP_ENCRYPTION_PBKDF2_ITERS = max(120000, int((os.environ.get('BACKUP_ENCRYPT
 SESSION_TIMEOUT_MINUTES = max(15, int((os.environ.get('SESSION_TIMEOUT_MINUTES', '120') or '120').strip() or '120'))
 # OTP retired: keep settings readable but force mode off.
 ADMIN_OTP_MODE = 'off'
+SUPER_ADMIN_EMAIL_2FA_ENABLED = (os.environ.get('SUPER_ADMIN_EMAIL_2FA_ENABLED', '0') or '0').strip().lower() in ('1', 'true', 'yes')
+SUPER_ADMIN_EMAIL_2FA_TTL_MINUTES = max(2, int((os.environ.get('SUPER_ADMIN_EMAIL_2FA_TTL_MINUTES', '10') or '10').strip() or '10'))
 RESULT_VERIFY_TOKEN_TTL_MINUTES = max(5, int((os.environ.get('RESULT_VERIFY_TOKEN_TTL_MINUTES', '10080') or '10080').strip() or '10080'))
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=SESSION_TIMEOUT_MINUTES)
 
@@ -183,6 +191,11 @@ _SCHOOL_CACHE_TTL = max(5, int((os.environ.get('SCHOOL_CACHE_TTL_SECONDS', '30')
 _SCHOOL_CACHE_MAX_ENTRIES = max(20, int((os.environ.get('SCHOOL_CACHE_MAX_ENTRIES', '500') or '500').strip() or '500'))
 _ENABLE_RUNTIME_PWA_INJECT = os.environ.get('ENABLE_RUNTIME_PWA_INJECT', '').strip().lower() in ('1', 'true', 'yes')
 _SCHEMA_DDL_ALLOWED = False
+_BACKGROUND_WORKER_THREAD = None
+_BACKGROUND_WORKER_STOP = threading.Event()
+_BACKGROUND_WORKER_STARTED = False
+_LAST_AUTO_BACKUP_SWEEP_AT = None
+_LAST_ACCESS_AUTOMATION_SWEEP_AT = None
 
 def _prune_school_cache():
     """Bound cache size and remove expired entries."""
@@ -342,16 +355,98 @@ def inject_post_login_welcome_context():
         'post_login_welcome_name': welcome_name,
     }
 
+@app.context_processor
+def inject_assistant_preferences_context():
+    role = _current_role()
+    default_mode = _assistant_default_response_mode_for_role(role)
+    preferred_mode = get_assistant_user_preference(role=role, key='response_mode', default=default_mode)
+    if preferred_mode not in APP_ASSISTANT_RESPONSE_MODES:
+        preferred_mode = default_mode
+    return {
+        'assistant_preferred_mode': preferred_mode,
+    }
+
+@app.context_processor
+def inject_school_access_ui_context():
+    """Expose current school access state for role dashboards/pages."""
+    role = (session.get('role') or '').strip().lower()
+    if role not in {'school_admin', 'teacher', 'student', 'parent'}:
+        return {'school_access_state': None}
+    school_id = (session.get('school_id') or '').strip()
+    if not school_id:
+        return {'school_access_state': None}
+    try:
+        school = get_school(school_id) or {}
+        return {'school_access_state': build_school_access_state(school)}
+    except Exception:
+        return {'school_access_state': None}
+
 def _current_role():
     return (session.get('role') or '').strip().lower()
 
-APP_ASSISTANT_MAX_QUESTION_CHARS = 320
+APP_ASSISTANT_MAX_QUESTION_CHARS = 1200
 APP_ASSISTANT_OPENAI_MODEL = (os.environ.get('APP_ASSISTANT_OPENAI_MODEL', 'gpt-4.1-mini') or 'gpt-4.1-mini').strip()
 APP_ASSISTANT_OPENAI_TIMEOUT_SECONDS = max(4, int((os.environ.get('APP_ASSISTANT_OPENAI_TIMEOUT_SECONDS', '18') or '18').strip() or '18'))
 APP_ASSISTANT_FUZZY_CUTOFF = 0.76
+APP_ASSISTANT_RESPONSE_MODES = {'standard', 'simple', 'detailed', 'local', 'pidgin'}
+APP_ASSISTANT_SAFETY_NOTE = 'Guidance only: I cannot execute actions, publish results, or change app data.'
+APP_ASSISTANT_RATE_LIMIT_PER_MIN = max(6, int((os.environ.get('APP_ASSISTANT_RATE_LIMIT_PER_MIN', '40') or '40').strip() or '40'))
+APP_ASSISTANT_MEMORY_DAYS = max(1, min(7, int((os.environ.get('APP_ASSISTANT_MEMORY_DAYS', '2') or '2').strip() or '2')))
+APP_ASSISTANT_MEMORY_MAX_EXCHANGES = max(6, min(80, int((os.environ.get('APP_ASSISTANT_MEMORY_MAX_EXCHANGES', '30') or '30').strip() or '30')))
+APP_ASSISTANT_PAGE_GUIDANCE_FILE = (os.environ.get('APP_ASSISTANT_PAGE_GUIDANCE_FILE', 'frontend/data/assistant_page_guidance.json') or 'frontend/data/assistant_page_guidance.json').strip()
+
+def _assistant_default_response_mode_for_role(role=''):
+    role_name = (role or '').strip().lower()
+    global_default = (os.environ.get('APP_ASSISTANT_DEFAULT_MODE', 'standard') or 'standard').strip().lower()
+    teacher_default = (os.environ.get('APP_ASSISTANT_DEFAULT_MODE_TEACHER', 'detailed') or 'detailed').strip().lower()
+    school_admin_default = (os.environ.get('APP_ASSISTANT_DEFAULT_MODE_SCHOOL_ADMIN', 'detailed') or 'detailed').strip().lower()
+    if role_name == 'teacher':
+        mode = teacher_default
+    elif role_name == 'school_admin':
+        mode = school_admin_default
+    else:
+        mode = global_default
+    if mode not in APP_ASSISTANT_RESPONSE_MODES:
+        mode = 'standard'
+    return mode
+
+APP_ASSISTANT_TYPO_MAP = {
+    'scool': 'school',
+    'techer': 'teacher',
+    'teachar': 'teacher',
+    'tearm': 'term',
+    'tem': 'term',
+    'arrengement': 'arrangement',
+    'arrenge': 'arrange',
+    'parrent': 'parent',
+    'assigend': 'assigned',
+    'assigment': 'assignment',
+    'assinged': 'assigned',
+    'assisance': 'assistance',
+    'assistase': 'assistant',
+    'notifcation': 'notification',
+    'notifcations': 'notifications',
+    'contect': 'content',
+    'for what use': 'used for',
+    'whae': 'when',
+    'un straingt': 'unclear',
+    'guied': 'guide',
+    'imorte': 'import',
+    'configuer': 'configure',
+    'configuering': 'configuring',
+    'gendre': 'gender',
+    'ansewer': 'answer',
+    'quesion': 'question',
+    'funcion': 'function',
+}
 STUDENT_MESSAGE_MAX_CHARS = max(1000, int((os.environ.get('STUDENT_MESSAGE_MAX_CHARS', '12000') or '12000').strip() or '12000'))
 STUDENT_MESSAGE_ATTACHMENT_MAX_BYTES = max(256 * 1024, int((os.environ.get('STUDENT_MESSAGE_ATTACHMENT_MAX_BYTES', str(8 * 1024 * 1024)) or str(8 * 1024 * 1024)).strip() or str(8 * 1024 * 1024)))
 STUDENT_MESSAGE_ATTACHMENT_ALLOWED_EXTS = {'jpg', 'jpeg', 'png', 'gif', 'webp'}
+SCHOOL_STORAGE_QUOTA_BYTES = max(100 * 1024 * 1024, int((os.environ.get('SCHOOL_STORAGE_QUOTA_BYTES', str(2 * 1024 * 1024 * 1024)) or str(2 * 1024 * 1024 * 1024)).strip() or str(2 * 1024 * 1024 * 1024)))
+BACKGROUND_WORKER_INTERVAL_SECONDS = max(20, int((os.environ.get('BACKGROUND_WORKER_INTERVAL_SECONDS', '90') or '90').strip() or '90'))
+APP_ERROR_LOG_TRACEBACK_MAX_CHARS = max(2000, int((os.environ.get('APP_ERROR_LOG_TRACEBACK_MAX_CHARS', '14000') or '14000').strip() or '14000'))
+APP_ERROR_LOG_MESSAGE_MAX_CHARS = max(250, int((os.environ.get('APP_ERROR_LOG_MESSAGE_MAX_CHARS', '1500') or '1500').strip() or '1500'))
+APP_ERROR_LOG_REQUEST_META_MAX_CHARS = max(400, int((os.environ.get('APP_ERROR_LOG_REQUEST_META_MAX_CHARS', '4000') or '4000').strip() or '4000'))
 APP_ASSISTANT_INDIRECT_ALIASES = {
     'school_admin': [
         (('archive teacher', 'archived teacher', 'teacher archive', 'deactivate teacher'), 'archive teacher restore teacher assignment'),
@@ -365,16 +460,38 @@ APP_ASSISTANT_INDIRECT_ALIASES = {
         (('score history', 'mark history', 'change log score'), 'score audit revert score'),
         (('lock edit', 'unlock term', 'relock term'), 'unlock term edit relock term publish results'),
         (('where setting', 'config page', 'school config'), 'settings security school admin'),
+        (('communication button', 'communication tab', 'message button'), 'communication messages notices'),
+        (('unlock correction', 'unlock result correction', 'unlock results'), 'unlock term edit relock term correction'),
+        (('change timetable', 'edit timetable', 'update timetable'), 'timetable period teacher assignment'),
+        (('class arm', 'arms ranking', 'arm mode'), 'class arm ranking settings'),
+        (('system health', 'health page', 'service status'), 'system health monitoring'),
+        (('recovery drill', 'disaster recovery', 'drill'), 'recovery drill backup validate'),
+        (('what can i do here', 'this page use', 'this page for what'), 'page help guidance workflow'),
     ],
     'teacher': [
         (('score entry', 'enter mark', 'upload result csv'), 'enter scores upload csv submit result'),
         (('class attendance', 'take attendance', 'period mark'), 'period attendance attendance'),
+        (('send assignment', 'send note', 'class note'), 'teacher send student message assignment note'),
+        (('subject assigned', 'my assignment scope', 'what class and subject'), 'teacher assignment scope class subject'),
+        (('rank position', 'subject rank', 'top students'), 'teacher subject ranks'),
+        (('communication button', 'communication tab', 'message button', 'messages button'), 'teacher messages communication notices'),
+        (('class list', 'recent students', 'classroom list'), 'teacher class list view students'),
+        (('missing score alert', 'notification bell', 'teacher notifications'), 'teacher notifications missing score'),
+        (('can i do admin work', 'can teacher do admin work', 'admin work as teacher'), 'teacher role boundary admin workflow'),
     ],
     'student': [
         (('result card', 'report card', 'my score'), 'view result grade'),
+        (('message page', 'notice', 'announcement'), 'student messages notifications'),
     ],
     'parent': [
         (('child score', 'result complaint', 'report issue result'), 'child result compare terms dispute'),
+        (('time table', 'class schedule', 'period schedule'), 'parent timetable child subjects'),
+        (('more than one child', 'multiple children', 'many children'), 'parent multi child switching'),
+    ],
+    'super_admin': [
+        (('data request', 'privacy request', 'privacy requests', 'personal data request'), 'privacy requests resolve reject note'),
+        (('reported issues', 'issue queue', 'support queue', 'bug queue'), 'reported issues read unread delete'),
+        (('resolve issue', 'how to resolve issue', 'super admin resolve issue', 'supper admin resolve issue'), 'reported issues vs privacy requests'),
     ],
 }
 
@@ -397,9 +514,23 @@ APP_ASSISTANT_ROLE_KB = {
         {
             'topic': 'reports_queue',
             'title': 'Review reported issues',
-            'summary': 'Use Reported Issues to read reports, mark read/unread, and track support items.',
-            'steps': ['Open Reported Issues.', 'Filter by status/text.', 'Mark items as read or unread.'],
-            'keywords': ['reported issues', 'reports', 'bugs', 'tickets', 'support queue'],
+            'summary': 'Use Reported Issues to review user-submitted app/support reports and manage queue visibility.',
+            'steps': ['Open Reported Issues.', 'Filter by status/text/user.', 'Mark reports read/unread or delete invalid/duplicate reports.'],
+            'keywords': ['reported issues', 'reports', 'bugs', 'tickets', 'support queue', '/view-reports', 'mark read', 'mark unread', 'delete report'],
+        },
+        {
+            'topic': 'privacy_requests',
+            'title': 'Resolve privacy/data requests',
+            'summary': 'Privacy Requests handle personal-data rights requests (export, correction, deletion/restriction) with formal resolution tracking.',
+            'steps': ['Open Privacy Requests.', 'Filter to pending and review request details.', 'Set status to resolved/rejected, add resolution note, then update.'],
+            'keywords': ['privacy request', 'data request', 'personal data', 'export data', 'delete data', 'correction request', '/super-admin/privacy-requests', '/super-admin/privacy-requests/resolve', 'resolved', 'rejected'],
+        },
+        {
+            'topic': 'reported_vs_privacy',
+            'title': 'Difference: Reported Issues vs Privacy Requests',
+            'summary': 'Reported Issues is for support/bug queue handling, while Privacy Requests is for personal-data rights workflows with resolved/rejected status.',
+            'steps': ['Use Reported Issues for bug/support tickets (read/unread/delete workflow).', 'Use Privacy Requests for data-rights requests (resolved/rejected + note).', 'Do not mix the two queues; resolve in the correct page.'],
+            'keywords': ['difference report issue and data request', 'reported issues vs privacy requests', 'resolve issue vs resolve privacy request', 'gdpr workflow'],
         },
     ],
     'school_admin': [
@@ -594,6 +725,414 @@ APP_ASSISTANT_ROLE_KB = {
     ],
 }
 
+# Extra workflow coverage for assistant routing (kept outside base map for easier maintenance).
+APP_ASSISTANT_ROLE_KB.setdefault('school_admin', []).extend([
+    {
+        'topic': 'unlock_relock_term_edit',
+        'title': 'Unlock and relock correction window',
+        'summary': 'Use unlock/relock term edit to allow temporary corrections on locked results under control.',
+        'steps': ['Open Publish Results or student result correction flow.', 'Unlock with required authorization and time window.', 'Relock immediately after corrections are completed.'],
+        'keywords': ['unlock term edit', 'relock term edit', 'unlock correction', 'correction window', '/school-admin/unlock-term-edit', '/school-admin/relock-term-edit'],
+    },
+    {
+        'topic': 'timetable_management',
+        'title': 'Manage timetable and teacher period setup',
+        'summary': 'Timetable page is used to create, import, and update class periods and teacher/subject schedule rows.',
+        'steps': ['Open Timetable and select class.', 'Add/edit period rows or import timetable CSV.', 'Validate conflicts and save changes.'],
+        'keywords': ['timetable', 'period', 'schedule', 'change timetable', 'import timetable', '/school-admin/timetable', '/school-admin/timetable-template'],
+    },
+    {
+        'topic': 'class_arm_controls',
+        'title': 'Class arm ranking controls',
+        'summary': 'Class arm settings control whether ranking is separated by arm or combined across arms.',
+        'steps': ['Open school setup/settings where arm mode is configured.', 'Choose arms separate or together policy.', 'Save and verify ranking outputs reflect the selected mode.'],
+        'keywords': ['class arm', 'arms ranking', 'arm mode', 'together', 'separate'],
+    },
+    {
+        'topic': 'issue_reporting_visibility',
+        'title': 'Report issue traceability',
+        'summary': 'Reported issues include role, school, and source context to help super admin review where reports came from.',
+        'steps': ['Use Report Issue from the current page.', 'Include exact error text and action attempted.', 'Super admin reviews with role/school/source context.'],
+        'keywords': ['report issue', 'reported issues', 'where report came from', 'role school source'],
+    },
+])
+
+APP_ASSISTANT_ROLE_KB.setdefault('teacher', []).extend([
+    {
+        'topic': 'teacher_assignment_scope',
+        'title': 'Teacher assignment scope',
+        'summary': 'Teacher actions are limited by class assignment and subject assignment for current term/year.',
+        'steps': ['Check assigned classes and subjects in dashboard context.', 'Enter scores only for assigned subject-class scope.', 'Class-only tasks (attendance/behaviour) require class-teacher assignment.'],
+        'keywords': ['assigned class', 'assigned subject', 'scope', 'what can i do', 'teacher role', 'subject assigned', 'class assigned'],
+    },
+    {
+        'topic': 'teacher_student_messages',
+        'title': 'Send assignment or notes to students',
+        'summary': 'Teachers can send notes/assignments to students within allowed class and subject scope.',
+        'steps': ['Open teacher dashboard message form.', 'Select class and subject context.', 'Send message so only eligible students in that scope receive it.'],
+        'keywords': ['send assignment', 'send note', 'student message', 'class note', '/teacher/send-student-message'],
+    },
+    {
+        'topic': 'teacher_timetable_ranks',
+        'title': 'Teacher timetable and subject ranks',
+        'summary': 'Teacher can view timetable and subject rank history for assigned classes/subjects.',
+        'steps': ['Open Timetable for period schedule.', 'Open Subject Ranks for history/export.', 'Use filters by class, term, and year.'],
+        'keywords': ['teacher timetable', 'subject ranks', 'rank export', '/teacher/timetable', '/teacher/subject-ranks'],
+    },
+    {
+        'topic': 'teacher_class_list_scope',
+        'title': 'Teacher class list and scope',
+        'summary': 'Class List shows students in your class-teacher scope and students offering your assigned subjects.',
+        'steps': ['Open Classroom > Class List.', 'Use status/scope tags to understand each row.', 'Open score actions only for allowed students/subjects.'],
+        'keywords': ['class list', 'recent students', 'classroom list', '/teacher/class-list'],
+    },
+    {
+        'topic': 'teacher_notifications_missing_scores',
+        'title': 'Teacher missing score notifications',
+        'summary': 'Notifications page shows missing score alerts for your class-owner and subject-teacher scope.',
+        'steps': ['Open the notification bell or /teacher/notifications.', 'Review pending students per class/subject.', 'Complete missing entries, then refresh notifications.'],
+        'keywords': ['missing score alerts', 'teacher notifications', 'notification bell', '/teacher/notifications'],
+    },
+    {
+        'topic': 'teacher_role_boundary',
+        'title': 'Teacher vs school-admin responsibilities',
+        'summary': 'Teacher can enter and submit scoped records, while school admin controls setup, approvals, publishing, and global settings.',
+        'steps': ['Teacher: scores, attendance, class list, messages, subject ranks.', 'School admin: assignments, class subjects, timetable setup, approvals/publishing.', 'Escalate admin-only requests to school admin.'],
+        'keywords': ['teacher role', 'admin role', 'can teacher do admin work', 'role boundary', 'permission'],
+    },
+])
+
+APP_ASSISTANT_ROLE_KB.setdefault('student', []).extend([
+    {
+        'topic': 'student_messages_deadlines',
+        'title': 'Student message deadlines',
+        'summary': 'Student messages include notices and deadline tracking with unread status.',
+        'steps': ['Open Messages page.', 'Review unread and due-soon notices.', 'Mark as read after completing action.'],
+        'keywords': ['message deadline', 'student notice', 'due soon', '/student/messages'],
+    },
+])
+
+APP_ASSISTANT_ROLE_KB.setdefault('parent', []).extend([
+    {
+        'topic': 'parent_timetable_scope',
+        'title': 'Parent timetable scope',
+        'summary': 'Parent timetable view is filtered to each child class and offered subjects, not unrelated classes.',
+        'steps': ['Open Parent Timetable.', 'Select child where applicable.', 'Review only periods relevant to that child schedule.'],
+        'keywords': ['parent timetable', 'child timetable', 'period schedule', '/parent/timetable'],
+    },
+    {
+        'topic': 'parent_multi_child',
+        'title': 'Parent with multiple children',
+        'summary': 'Parent dashboard supports child-specific links for results, compare, attendance, timetable, and disputes.',
+        'steps': ['Use the child-specific links/cards.', 'Switch child before running a workflow.', 'Submit disputes per child/term context.'],
+        'keywords': ['multiple children', 'more than one child', 'switch child', 'child specific links'],
+    },
+])
+
+APP_ASSISTANT_MICRO_FAQ = {
+    'common': [
+        {
+            'aliases': ['help', 'help page', 'where is help'],
+            'where': 'Open Support > Help from your sidebar, or open /help directly.',
+            'use': 'Help explains app workflows for your role and common troubleshooting steps.',
+            'steps': ['Open Help from the Support group.', 'If issue persists, use Report Issue with exact error text.'],
+            'next_question': 'Do you want help for a specific page?',
+        },
+        {
+            'aliases': ['report issue', 'bug report', 'complaint report', 'support ticket'],
+            'where': 'Open Support > Report Issue.',
+            'use': 'Report Issue sends role, school, and page context to support so super admin can trace quickly.',
+            'steps': ['Open Report Issue from current page.', 'Paste exact error text and what you clicked before the error.'],
+            'next_question': 'Do you want a sample report message format?',
+        },
+        {
+            'aliases': ['data request', 'privacy request', 'privacy requests', 'personal data request', 'the data request is for what'],
+            'where': 'Open footer `Data Request` or `/privacy-request`. Super admin reviews requests in `/super-admin/privacy-requests`.',
+            'use': 'Data Request is for personal-data rights actions like export, correction, deletion/restriction requests.',
+            'steps': ['Choose request type and provide details.', 'Submit and keep the reference ID.', 'Super admin reviews and updates status with a resolution note.'],
+            'next_question': 'Do you want the exact super-admin resolution steps too?',
+        },
+        {
+            'aliases': ['how do super admin resolve data request', 'how does super admin resolve privacy request', 'resolve privacy request', 'privacy request workflow'],
+            'where': 'Open Super Admin > Privacy Requests.',
+            'use': 'Super admin resolves privacy requests by setting `Resolved` or `Rejected` with a required resolution note.',
+            'steps': ['Open `/super-admin/privacy-requests`.', 'Filter pending and open target request.', 'Select status (resolved/rejected), enter note, and click Update.'],
+            'next_question': 'Do you want a resolution-note template for approval/rejection?',
+        },
+        {
+            'aliases': ['how do super admin resolve issue', 'how do supper admin resolve issue', 'resolve reported issue', 'reported issues workflow', 'issue queue workflow'],
+            'where': 'Open Super Admin > Reported Issues (`/view-reports`).',
+            'use': 'Reported Issues queue supports read/unread/delete management. It is not the same workflow as Privacy Requests.',
+            'steps': ['Filter/search the issue queue.', 'Mark read/unread to track handling state.', 'Delete duplicates/spam when necessary.'],
+            'next_question': 'Do you want me to explain Reported Issues vs Privacy Requests difference?',
+        },
+        {
+            'aliases': ['difference between data request and report issue', 'privacy request vs report issue', 'reported issues vs privacy requests', 'data request and report issue difference'],
+            'use': 'Report Issue is for bug/support tickets, while Data/Privacy Request is for personal-data rights handling with resolved/rejected status.',
+            'steps': ['Use `/view-reports` for support queue actions (read/unread/delete).', 'Use `/super-admin/privacy-requests` for privacy workflow (resolved/rejected + note).'],
+            'next_question': 'Do you want exact clicks for one of the two pages?',
+        },
+    ],
+    'school_admin': [
+        {
+            'aliases': ['add student', 'add students', 'student intake', 'register student'],
+            'where': 'Open Students > Add Students.',
+            'use': 'Add Students is for manual intake or CSV import by class and term.',
+            'steps': ['Select class and term.', 'Add rows manually or upload CSV.', 'Save and review validation messages.'],
+            'next_question': 'Do you want manual entry steps or CSV format?',
+        },
+        {
+            'aliases': ['view students', 'student list', 'students page'],
+            'where': 'Open Students > View Students.',
+            'use': 'View Students is for searching, filtering, and opening student result/correction actions.',
+            'steps': ['Use class/term filters.', 'Search by student name or ID.', 'Open Result or Correct action as needed.'],
+            'next_question': 'Do you want filter tips for large student lists?',
+        },
+        {
+            'aliases': ['class subjects', 'configure subjects', 'subject configuration', 'subject offer', 'subjects offered'],
+            'where': 'Open Academics > Class Subjects.',
+            'use': 'Class Subjects defines what each class offers and controls score-entry structure.',
+            'steps': ['Choose class.', 'Set core/elective subjects.', 'Save and verify teacher subject assignments match.'],
+            'next_question': 'Do you want setup order for JSS/SSS classes?',
+        },
+        {
+            'aliases': ['timetable', 'period setup', 'schedule', 'change timetable', 'edit timetable'],
+            'where': 'Open Academics > Timetable.',
+            'use': 'Timetable manages class periods, subject slots, and teacher-period assignments.',
+            'steps': ['Select class.', 'Add/edit period rows.', 'Save and check for conflicts.'],
+            'next_question': 'Do you want CSV timetable import format?',
+        },
+        {
+            'aliases': ['publish result', 'publish results', 'approve result', 'reject result'],
+            'where': 'Open Academics > Publish Results.',
+            'use': 'Publish Results reviews submitted scores, then approves/rejects and publishes class results.',
+            'steps': ['Select class + term + year.', 'Check missing score warnings.', 'Approve/reject and publish.'],
+            'next_question': 'Do you want pre-publish checklist steps?',
+        },
+        {
+            'aliases': ['principal signature', 'upload principal signature', 'signature upload', 'principal sign', 'school signature'],
+            'where': 'Open School Admin Dashboard and go to the Principal Signature upload section.',
+            'use': 'Principal Signature is used on signed/published result outputs and approval-related documents.',
+            'steps': ['Open dashboard principal signature card/section.', 'Choose image file and upload.', 'Verify preview appears before publishing results.'],
+            'next_question': 'Do you want the recommended signature image size/format?',
+        },
+        {
+            'aliases': ['dispute', 'result dispute', 'complaint', 'correction issue'],
+            'where': 'Open Monitoring > Result Disputes.',
+            'use': 'Result Disputes tracks complaints on published results and their resolution status.',
+            'steps': ['Open the dispute.', 'Review evidence/details.', 'Update status and communicate outcome.'],
+            'next_question': 'Do you want status workflow (pending/resolved/rejected)?',
+        },
+        {
+            'aliases': ['promotion audit', 'promotion log', 'promote audit', 'promotion history'],
+            'where': 'Open Monitoring > Promotion Audit.',
+            'use': 'Promotion Audit shows who was promoted/demoted, from which class, and when.',
+            'steps': ['Filter by class/term/year.', 'Review audit rows.', 'Confirm before running new promotions.'],
+            'next_question': 'Do you want the difference between Promote Students and Promotion Audit?',
+        },
+        {
+            'aliases': ['data integrity', 'integrity check', 'consistency check'],
+            'where': 'Open Monitoring > Data Integrity.',
+            'use': 'Data Integrity finds mismatches like missing links, assignment gaps, and configuration conflicts.',
+            'steps': ['Run check for current term/year.', 'Fix high-severity issues first.', 'Re-run to confirm clean state.'],
+            'next_question': 'Do you want issue-priority order for fixing?',
+        },
+        {
+            'aliases': ['analytics', 'dashboard analytics', 'performance chart'],
+            'where': 'Open Monitoring > Analytics.',
+            'use': 'Analytics shows trends and summaries for school operations and academics.',
+            'steps': ['Set filters (term/year/class).', 'Review charts and summary cards.', 'Use findings to plan corrections.'],
+            'next_question': 'Do you want key metrics to watch weekly?',
+        },
+        {
+            'aliases': ['communication', 'communication button', 'messages', 'message button'],
+            'where': 'Open Communication > Messages.',
+            'use': 'Communication/Messages is for sending announcements and targeted notices to users.',
+            'steps': ['Choose recipient scope.', 'Write clear title/body.', 'Send and track delivery/read status.'],
+            'next_question': 'Do you want message templates for announcement/reminder/escalation?',
+        },
+        {
+            'aliases': ['can i do the work of a teacher', 'work of a teacher', 'teacher work', 'can admin do teacher work', 'do teacher work'],
+            'yesno': 'Not directly as a role switch. Access is role-based. School admin uses admin pages, while teacher-only actions depend on teacher assignment and teacher role context.',
+            'steps': [
+                'Use school admin workflows for assignment, review, approval, and publishing.',
+                'Teacher-only entry/attendance actions require teacher role and assignment scope.',
+                'If urgent, assign a teacher or sign in with a valid teacher account.',
+            ],
+            'next_question': 'Do you want a quick list of what is school-admin-only vs teacher-only?',
+        },
+        {
+            'aliases': ['gender required', 'select gender before add student', 'must select gender', 'student gender'],
+            'yesno': 'Yes. In the current app flow, student gender is required before a student is saved.',
+            'steps': ['Select gender for each row in Add Students.', 'Rows without gender are skipped with a validation message.'],
+            'next_question': 'Do you want me to make gender optional in the form?',
+        },
+    ],
+    'teacher': [
+        {
+            'aliases': ['enter score', 'enter scores', 'upload csv', 'mark score'],
+            'where': 'Open dashboard action: Enter Scores (or Upload CSV).',
+            'use': 'Enter Scores/Upload CSV is for recording marks within your assigned class-subject scope.',
+            'steps': ['Select class + term + subject.', 'Save entries.', 'Submit to class teacher/admin workflow.'],
+            'next_question': 'Do you want subject-assigned or class-assigned flow?',
+        },
+        {
+            'aliases': ['class list', 'recent students', 'classroom list', 'view class list'],
+            'where': 'Open Classroom > Class List.',
+            'use': 'Class List shows students in your class-teacher scope and students offering your assigned subjects.',
+            'steps': ['Open Class List from Classroom group.', 'Use scope/status tags to review rows.', 'Open score actions only for allowed students/subjects.'],
+            'next_question': 'Do you want class-owner vs subject-teacher scope explained?',
+        },
+        {
+            'aliases': ['send assignment', 'send note', 'student note', 'teacher message to student'],
+            'where': 'Open dashboard message/assignment section.',
+            'use': 'This sends notes/assignments to students in allowed class-subject scope only.',
+            'steps': ['Choose class and subject.', 'Write note and optional attachment.', 'Send to eligible students only.'],
+            'next_question': 'Do you want scope rules (subject-assigned vs class-assigned)?',
+        },
+        {
+            'aliases': ['messages', 'communication button', 'message button', 'teacher communication'],
+            'where': 'Open Communication > Messages.',
+            'use': 'Messages is for reading school notices and tracking unread/read status.',
+            'steps': ['Open Messages from the sidebar.', 'Read unread notices first.', 'Use mark-read or mark-all-read actions.'],
+            'next_question': 'Do you want message filtering and follow-up steps?',
+        },
+        {
+            'aliases': ['missing score alerts', 'notification bell', 'teacher notifications', 'score notifications'],
+            'where': 'Click the floating bell icon or open /teacher/notifications.',
+            'use': 'Notifications shows pending score entries by class/subject in your scope.',
+            'steps': ['Open Notifications page.', 'Review pending counts and details.', 'Complete pending entries, then refresh the page.'],
+            'next_question': 'Do you want exact steps to clear one notification item?',
+        },
+        {
+            'aliases': ['image attachment', 'send image', 'can i send image', 'photo attachment'],
+            'yesno': 'Yes. Teachers can attach image files (jpg, jpeg, png, gif, webp) when sending student notes.',
+            'steps': [
+                'Use supported image types only.',
+                f'Current per-file limit is about {max(1, int(STUDENT_MESSAGE_ATTACHMENT_MAX_BYTES / (1024 * 1024)))} MB.',
+                f'Current note text limit is {int(STUDENT_MESSAGE_MAX_CHARS)} characters.',
+            ],
+            'next_question': 'Do you want me to increase the file-size limit?',
+        },
+        {
+            'aliases': ['attendance', 'period attendance', 'take attendance'],
+            'where': 'Open Attendance/Period Attendance from teacher sidebar.',
+            'use': 'Attendance records class presence by date/period (class-assigned teachers).',
+            'steps': ['Choose class/date/period.', 'Mark each student.', 'Save and verify summary.'],
+            'next_question': 'Do you want attendance export steps?',
+        },
+        {
+            'aliases': ['can i do admin work', 'can teacher do admin work', 'work of admin', 'school admin work as teacher'],
+            'yesno': 'No. Teacher account cannot run school-admin-only setup or approval actions.',
+            'steps': ['Teacher handles assigned score/attendance/message workflows.', 'School admin handles assignments, setup, approvals, and publishing.', 'Escalate admin-only requests to school admin.'],
+            'next_question': 'Do you want a side-by-side list of teacher-only vs admin-only actions?',
+        },
+    ],
+    'parent': [
+        {
+            'aliases': ['view result', 'child result', 'my child result'],
+            'where': 'Open child-specific View Result from parent dashboard.',
+            'use': 'This shows published result for the selected child only.',
+            'steps': ['Choose child first (if multiple).', 'Open View Result.', 'Select term/year when prompted.'],
+            'next_question': 'Do you want compare-terms steps too?',
+        },
+        {
+            'aliases': ['timetable', 'child timetable', 'class schedule'],
+            'where': 'Open parent timetable view from child links.',
+            'use': 'Parent timetable is filtered to your child class and offered subjects only.',
+            'steps': ['Select child.', 'Open Timetable.', 'Review only that child schedule rows.'],
+            'next_question': 'Do you want timetable print/export support?',
+        },
+        {
+            'aliases': ['multiple children', 'more than one child', 'many children'],
+            'use': 'When a parent is linked to multiple children, actions are child-specific per selected child.',
+            'steps': ['Switch child before each action.', 'Run result/attendance/timetable/dispute per child context.'],
+            'next_question': 'Do you want a child-switching UI improvement?',
+        },
+    ],
+    'student': [
+        {
+            'aliases': ['view result', 'result', 'my score', 'report card'],
+            'where': 'Open View Result from student sidebar.',
+            'use': 'View Result shows published term results for your account.',
+            'steps': ['Open View Result.', 'Select term/year.', 'Download PDF if available.'],
+            'next_question': 'Do you want term-comparison support too?',
+        },
+        {
+            'aliases': ['messages', 'notice', 'notification', 'inbox'],
+            'where': 'Open Messages from student sidebar.',
+            'use': 'Messages shows school notices and updates for you.',
+            'steps': ['Open Messages.', 'Read unread first.', 'Mark read/all read after review.'],
+            'next_question': 'Do you want unread-only filter?',
+        },
+    ],
+}
+
+def _assistant_match_micro_faq(role, q_norm):
+    role_name = (role or '').strip().lower()
+    text = _assistant_normalize_text(q_norm or '')
+    if role_name not in {'super_admin', 'school_admin', 'teacher', 'student', 'parent'} or not text:
+        return None
+    tokens = set(text.split())
+    ask_where = any(t in text for t in ('where', 'locate', 'find', 'open', 'go to'))
+    ask_use = any(t in text for t in ('what is', 'used for', 'for what', 'purpose', 'button', 'tab', 'menu'))
+    ask_how = any(t in text for t in ('how', 'steps', 'process', 'guide'))
+    ask_yesno = any(t in text for t in ('can i', 'can we', 'must', 'required', 'need', 'is it', 'should i'))
+
+    def _alias_score(alias_text):
+        alias_norm = _assistant_normalize_text(alias_text or '')
+        if not alias_norm:
+            return 0
+        if alias_norm in text:
+            return 8 + len(alias_norm.split())
+        parts = [p for p in alias_norm.split() if len(p) >= 3]
+        if not parts:
+            return 0
+        hits = sum(1 for p in parts if p in tokens)
+        if hits == len(parts):
+            return 5 + hits
+        if len(parts) >= 3 and hits >= (len(parts) - 1):
+            return 3 + hits
+        if len(parts) <= 2 and hits == len(parts):
+            return 4 + hits
+        return 0
+
+    pool = list(APP_ASSISTANT_MICRO_FAQ.get('common') or [])
+    pool.extend(list(APP_ASSISTANT_MICRO_FAQ.get(role_name) or []))
+    best = None
+    best_score = 0
+    for entry in pool:
+        aliases = [str(a).strip() for a in (entry.get('aliases') or []) if str(a).strip()]
+        score = 0
+        for alias in aliases:
+            score = max(score, _alias_score(alias))
+        if score > best_score:
+            best_score = score
+            best = entry
+    if not best or best_score < 5:
+        return None
+    answer = ''
+    if ask_where and best.get('where'):
+        answer = str(best.get('where') or '').strip()
+    elif ask_use and best.get('use'):
+        answer = str(best.get('use') or '').strip()
+    elif ask_yesno and best.get('yesno'):
+        answer = str(best.get('yesno') or '').strip()
+    elif ask_how and best.get('how'):
+        answer = str(best.get('how') or '').strip()
+    if not answer:
+        answer = str(best.get('use') or best.get('where') or best.get('yesno') or '').strip()
+    if not answer:
+        return None
+    steps = [str(s).strip() for s in (best.get('steps') or []) if str(s).strip()][:6]
+    next_question = str(best.get('next_question') or '').strip()
+    return {
+        'answer': answer,
+        'steps': steps,
+        'next_question': next_question or 'Do you want exact clicks for this workflow?',
+        'confidence': 0.95 if best_score >= 8 else 0.88,
+    }
+
 def _assistant_infer_parent_school_id():
     keys = session.get('parent_student_keys') or []
     if not isinstance(keys, (list, tuple)):
@@ -705,21 +1244,43 @@ def _assistant_nav_links(role, school_id='', teacher_scope=None):
         _add('Dashboard', 'super_admin_dashboard')
         _add('Add School', 'super_admin_add_school_page')
         _add('View Schools', 'super_admin_view_schools')
+        _add('Onboarding Requests', 'super_admin_onboarding_requests')
+        _add('Privacy Requests', 'super_admin_privacy_requests')
         _add('Reported Issues', 'view_reports')
+        _add('Error Logs', 'super_admin_error_logs')
+        _add('Change Password', 'super_admin_change_password')
     elif role == 'school_admin':
         _add('Dashboard', 'school_admin_dashboard')
+        _add('View Students', 'view_students')
+        _add('Add Students', 'school_admin_add_students_by_class')
+        _add('Teachers', 'school_admin_teachers')
+        _add('Assign Teachers', 'school_admin_teacher_assignments')
         _add('Messages', 'school_admin_messages')
         _add('Disputes', 'school_admin_disputes')
         _add('Publish Results', 'school_admin_publish_results')
+        _add('Class Subjects', 'school_admin_class_subjects')
+        _add('Timetable', 'school_admin_timetable')
+        _add('Promotion Audit', 'school_admin_promotion_audit')
+        _add('Data Integrity', 'school_admin_data_integrity')
+        _add('Analytics', 'school_admin_analytics')
+        _add('Term Programs', 'school_admin_term_programs')
+        _add('System Health', 'school_admin_health')
         _add('Settings', 'school_admin_settings')
         _add('Help', 'help', role='school_admin')
     elif role == 'teacher':
         _add('Dashboard', 'teacher_dashboard')
+        _add('Class List', 'teacher_class_list')
         _add('Messages', 'teacher_messages')
+        _add('Notifications', 'teacher_notifications')
         if (teacher_scope or {}).get('has_class_assignment') or (teacher_scope or {}).get('has_subject_assignment'):
             _add('Enter Scores', 'teacher_enter_scores')
+            _add('Upload CSV', 'teacher_upload_csv')
         if (teacher_scope or {}).get('has_class_assignment'):
+            _add('Attendance', 'teacher_attendance')
             _add('Period Attendance', 'teacher_period_attendance')
+            _add('Behaviour', 'teacher_behaviour_assessment')
+        _add('Timetable', 'teacher_timetable')
+        _add('Subject Ranks', 'teacher_subject_rank_history')
         _add('Help', 'help', role='teacher')
     elif role == 'student':
         _add('Dashboard', 'student_dashboard')
@@ -731,8 +1292,10 @@ def _assistant_nav_links(role, school_id='', teacher_scope=None):
         _add('Dashboard', 'parent_dashboard')
         _add('Messages', 'parent_messages')
         _add('Attendance', 'parent_period_attendance')
+        _add('Timetable', 'parent_timetable')
+        _add('Compare Results', 'parent_compare_results')
         _add('Help', 'help', role='parent')
-    return links[:6]
+    return links[:16]
 
 def _assistant_role_quick_prompts(role, teacher_scope=None):
     role = (role or '').strip().lower()
@@ -741,12 +1304,9 @@ def _assistant_role_quick_prompts(role, teacher_scope=None):
             'How do I add a new school?',
             'Where can I view reported issues?',
             'How do I switch school operations on/off?',
+            'How do I resolve a privacy/data request?',
         ],
         'school_admin': [
-            'What are result disputes used for?',
-            'What is promotion audit used for?',
-            'How do I run data integrity checks?',
-            'How do I publish class results?',
             'Where do I manage teacher assignments?',
             'How do I send messages to teachers or students?',
         ],
@@ -755,6 +1315,8 @@ def _assistant_role_quick_prompts(role, teacher_scope=None):
             'How do I submit results to class teacher?',
             'What classes and subjects am I assigned to?',
             'Where do I mark period attendance?',
+            'What are missing score notifications for?',
+            'Where is Class List and what is it used for?',
         ],
         'student': [
             'How do I view my published result?',
@@ -777,8 +1339,20 @@ def _assistant_role_quick_prompts(role, teacher_scope=None):
             role_prompts = [p for p in role_prompts if 'submit results to class teacher' not in p.lower()]
     return role_prompts
 
+def _assistant_apply_typo_map(value):
+    text = str(value or '').strip().lower()
+    if not text:
+        return ''
+    for src, dst in (APP_ASSISTANT_TYPO_MAP or {}).items():
+        src_n = str(src or '').strip().lower()
+        dst_n = str(dst or '').strip().lower()
+        if src_n and dst_n and src_n in text:
+            text = text.replace(src_n, dst_n)
+    return text
+
 def _assistant_normalize_text(text):
     value = (text or '').strip().lower()
+    value = _assistant_apply_typo_map(value)
     value = re.sub(r'[^a-z0-9]+', ' ', value)
     return re.sub(r'\s+', ' ', value).strip()
 
@@ -822,7 +1396,459 @@ def _assistant_expand_indirect_intent(role, q_norm):
             if term_norm and term_norm in q_norm:
                 expanded = f'{expanded} {_assistant_normalize_text(canonical)}'.strip()
                 break
+            if term_norm and len(term_norm) >= 5:
+                sim = difflib.SequenceMatcher(None, q_norm, term_norm).ratio()
+                if sim >= 0.84:
+                    expanded = f'{expanded} {_assistant_normalize_text(canonical)}'.strip()
+                    break
     return expanded
+
+def _assistant_extract_route_hint(text):
+    raw = (text or '').strip().lower()
+    if not raw:
+        return ''
+    match = re.search(r'(https?://[^\s]+|/[a-z0-9\-_./]+)', raw)
+    if not match:
+        return ''
+    candidate = match.group(1).strip()
+    if candidate.startswith('http://') or candidate.startswith('https://'):
+        try:
+            parsed = urllib.parse.urlparse(candidate)
+            path = (parsed.path or '').strip().lower()
+        except Exception:
+            path = ''
+    else:
+        path = candidate
+    path = re.sub(r'/+', '/', path).strip()
+    if not path.startswith('/'):
+        return ''
+    return path.rstrip('/') or '/'
+
+def _assistant_is_page_help_question(q_norm):
+    checks = (
+        'what can i do',
+        'what can i do here',
+        'what can i do in this page',
+        'what can i do on this page',
+        'what is this page',
+        'this page is for',
+        'this page for',
+        'use of this page',
+        'purpose of this page',
+        'how to use this page',
+    )
+    return any(token in (q_norm or '') for token in checks)
+
+def _assistant_is_contextual_page_question(q_norm):
+    text = (q_norm or '').strip()
+    if not text:
+        return False
+    hints = (
+        'this page',
+        'on this page',
+        'in this page',
+        'here',
+        'this tab',
+        'this section',
+        'this menu',
+        'this button',
+        'on this screen',
+        'in here',
+        'what can i do',
+        'how do i use this',
+        'what is this for',
+    )
+    return any(h in text for h in hints)
+
+def _assistant_page_relevance_score(q_norm, page_guidance):
+    text = _assistant_normalize_text(q_norm or '')
+    if not text or not isinstance(page_guidance, dict):
+        return 0
+    tokens = set(text.split())
+    title = _assistant_normalize_text(page_guidance.get('title') or '')
+    summary = _assistant_normalize_text(page_guidance.get('summary') or '')
+    steps = ' '.join(_assistant_normalize_text(s) for s in (page_guidance.get('steps') or []))
+    keywords = set((title + ' ' + summary + ' ' + steps).split())
+    overlap = len(tokens & keywords)
+    score = overlap
+    if title and title in text:
+        score += 3
+    if _assistant_is_contextual_page_question(text):
+        score += 2
+    return score
+
+def _assistant_is_purpose_question(q_norm):
+    text = (q_norm or '')
+    checks = (
+        'what is',
+        'what are',
+        'used for',
+        'use for',
+        'purpose of',
+        'meaning of',
+        'what does',
+    )
+    return any(token in text for token in checks) and any(token in text for token in ('use', 'used', 'purpose', 'what is', 'what are', 'what does'))
+
+def _assistant_is_overview_question(q_norm):
+    text = (q_norm or '')
+    checks = (
+        'how things are done in app',
+        'how things are done',
+        'how app works',
+        'how this app works',
+        'how does this app work',
+        'how workflow works',
+        'explain app workflow',
+        'what can i do in app',
+        'guide me app flow',
+        'overall workflow',
+    )
+    return any(token in text for token in checks)
+
+def _assistant_build_page_answer(page_guidance, role='', nav_group_hint=''):
+    role_name = (role or '').strip().lower()
+    if not isinstance(page_guidance, dict):
+        return ('This page contains role-specific actions.', [])
+    title = str(page_guidance.get('title') or '').strip()
+    summary = str(page_guidance.get('summary') or '').strip()
+    raw_steps = [str(s).strip() for s in (page_guidance.get('steps') or []) if str(s).strip()]
+    steps = raw_steps[:4]
+    if nav_group_hint:
+        steps = [str(nav_group_hint).strip()] + steps
+    role_prefix = {
+        'school_admin': 'As school admin,',
+        'teacher': 'As teacher,',
+        'parent': 'As parent,',
+        'student': 'As student,',
+        'super_admin': 'As super admin,',
+    }.get(role_name, '')
+    if title and summary:
+        answer = f'{role_prefix} you are on {title}. {summary}'.strip() if role_prefix else f'You are on {title}. {summary}'
+    elif summary:
+        answer = f'{role_prefix} {summary}'.strip() if role_prefix else summary
+    elif title:
+        answer = f'{role_prefix} you are on {title}.'.strip() if role_prefix else f'You are on {title}.'
+    else:
+        answer = f'{role_prefix} this page contains role-specific actions.'.strip() if role_prefix else 'This page contains role-specific actions.'
+    if role_name == 'school_admin' and title.lower() == 'school admin dashboard':
+        steps.append('Use sidebar groups (Students, Academics, Monitoring, Communication, System, Support) to open exact workflows.')
+    elif role_name == 'teacher':
+        steps.append('Actions here apply only to your assigned class/subject scope for this term/year.')
+    elif role_name == 'parent':
+        steps.append('This view should stay child-specific; switch child first if multiple children are linked.')
+    elif role_name == 'student':
+        steps.append('If a page action is blocked, contact your class teacher or school admin for permission.')
+    elif role_name == 'super_admin':
+        steps.append('Confirm target school before saving because super admin changes can affect multiple schools.')
+    # Keep steps clean and unique.
+    cleaned = []
+    seen = set()
+    for step in steps:
+        key = _assistant_normalize_text(step)
+        if key and key not in seen:
+            cleaned.append(step)
+            seen.add(key)
+        if len(cleaned) >= 5:
+            break
+    return (answer, cleaned)
+
+def _assistant_page_next_question(role='', page_guidance=None):
+    role_name = (role or '').strip().lower()
+    title = str((page_guidance or {}).get('title') or 'this page').strip() or 'this page'
+    prompts = {
+        'school_admin': f'Do you want exact clicks for the {title} workflow?',
+        'teacher': f'Do you want exact steps for {title} based on your assigned class/subject?',
+        'parent': f'Do you want step-by-step guidance on {title} for one specific child?',
+        'student': f'Do you want step-by-step actions to complete {title} as a student?',
+        'super_admin': f'Do you want safe step-by-step actions for {title} across schools?',
+    }
+    return prompts.get(role_name, 'Do you want step-by-step actions for this page right now?')
+
+def _assistant_build_low_confidence_question(role='', q_norm='', page_guidance=None, ranked_topics=None, links=None):
+    role_name = (role or '').strip().lower()
+    text = _assistant_normalize_text(q_norm or '')
+    title = str((page_guidance or {}).get('title') or '').strip()
+    if title:
+        return f'Are you asking about {title}?'
+
+    if role_name == 'school_admin':
+        if any(t in text for t in ('student', 'admission', 'intake', 'register')):
+            return 'Do you mean Add Students or View Students?'
+        if any(t in text for t in ('subject', 'curriculum', 'offer')):
+            return 'Do you mean Class Subjects setup?'
+        if any(t in text for t in ('publish', 'approve', 'result')):
+            return 'Do you mean Publish Results workflow?'
+        if any(t in text for t in ('dispute', 'complaint')):
+            return 'Do you mean Result Disputes workflow?'
+        if any(t in text for t in ('audit', 'promotion')):
+            return 'Do you mean Promotion Audit or Score Audit?'
+        if any(t in text for t in ('message', 'communication', 'notice')):
+            return 'Do you mean Messages workflow?'
+    elif role_name == 'teacher':
+        if any(t in text for t in ('score', 'mark', 'csv')):
+            return 'Do you mean Enter Scores or Upload CSV?'
+        if any(t in text for t in ('attendance', 'period')):
+            return 'Do you mean Attendance workflow?'
+        if any(t in text for t in ('assignment', 'note', 'message')):
+            return 'Do you mean Send Assignment/Note workflow?'
+        if any(t in text for t in ('class list', 'student list', 'recent students')):
+            return 'Do you mean Classroom > Class List?'
+        if any(t in text for t in ('notification', 'alert', 'missing score')):
+            return 'Do you mean Teacher Notifications page?'
+    elif role_name == 'parent':
+        if any(t in text for t in ('result', 'score', 'report')):
+            return 'Do you mean View Child Result or Compare Results?'
+        if any(t in text for t in ('attendance', 'absent')):
+            return 'Do you mean Parent Attendance view?'
+        if any(t in text for t in ('timetable', 'schedule', 'period')):
+            return 'Do you mean Parent Timetable view?'
+    elif role_name == 'student':
+        if any(t in text for t in ('result', 'score', 'report')):
+            return 'Do you mean Student View Result page?'
+        if any(t in text for t in ('message', 'notice', 'notification')):
+            return 'Do you mean Student Messages page?'
+        if any(t in text for t in ('password', 'login', 'security')):
+            return 'Do you mean Change Password page?'
+    elif role_name == 'super_admin':
+        if any(t in text for t in ('school', 'add', 'create')):
+            return 'Do you mean Add School workflow?'
+        if any(t in text for t in ('view', 'manage', 'operation')):
+            return 'Do you mean View Schools management?'
+        if any(t in text for t in ('privacy', 'data request', 'personal data')):
+            return 'Do you mean Privacy Requests workflow?'
+        if any(t in text for t in ('issue', 'report', 'bug')):
+            return 'Do you mean Reported Issues queue?'
+
+    if ranked_topics:
+        top = ranked_topics[0][1] if isinstance(ranked_topics[0], (list, tuple)) and len(ranked_topics[0]) > 1 else None
+        top_title = str((top or {}).get('title') or '').strip()
+        if top_title:
+            return f'Are you asking about {top_title}?'
+
+    labels = [str(item.get('label') or '').strip() for item in (links or []) if str(item.get('label') or '').strip()][:3]
+    if len(labels) == 1:
+        return f'Are you asking about {labels[0]}?'
+    if len(labels) == 2:
+        return f'Do you mean {labels[0]} or {labels[1]}?'
+    if len(labels) >= 3:
+        return f'Do you mean {labels[0]}, {labels[1]}, or {labels[2]}?'
+
+    defaults = {
+        'school_admin': 'Do you mean Add Students, Class Subjects, Publish Results, or Messages?',
+        'teacher': 'Do you mean Enter Scores, Class List, Messages, or Notifications?',
+        'parent': 'Do you mean Child Result, Attendance, or Timetable?',
+        'student': 'Do you mean View Result, Messages, or Change Password?',
+        'super_admin': 'Do you mean Add School, View Schools, Privacy Requests, or Reported Issues?',
+    }
+    return defaults.get(role_name, 'Which exact page do you mean?')
+
+def _assistant_extract_error_guidance(question_text, q_norm=''):
+    raw = str(question_text or '').strip()
+    low = raw.lower()
+    norm = str(q_norm or '').strip()
+    if not raw:
+        return None
+
+    def _guidance(answer, steps, confidence=0.86, unresolved=False, next_question='Do you want me to explain the exact fix step by step?', fix_snippet=''):
+        return {
+            'answer': str(answer or '').strip(),
+            'steps': [str(s).strip() for s in (steps or []) if str(s).strip()][:6],
+            'confidence': confidence,
+            'unresolved': bool(unresolved),
+            'next_question': next_question,
+            'fix_snippet': str(fix_snippet or '').strip(),
+        }
+
+    if 'school settings updated successfully' in low and 'open days' in low:
+        match = re.search(r'([A-Za-z]+\s+Term)\s*\((\d{4}-\d{4})\)\s*open days:\s*(\d+)', raw, flags=re.IGNORECASE)
+        term_label = ''
+        year_label = ''
+        days_label = ''
+        if match:
+            term_label = str(match.group(1) or '').strip()
+            year_label = str(match.group(2) or '').strip()
+            days_label = str(match.group(3) or '').strip()
+        scope = f' for {term_label} ({year_label})' if term_label and year_label else ''
+        days_part = f' {days_label} open day(s)' if days_label else ' the current open-day count'
+        return _guidance(
+            f'This is a success message: school settings were saved, and{scope} the system calculated{days_part} after excluding weekends and mid-term break dates from School Programs.',
+            [
+                'If the open-day count is too low, check term open/close dates in School Settings.',
+                'Then check mid-term break dates in Term Programs for the same term/year.',
+                'Save again and confirm the recalculated open-day value.',
+            ],
+            confidence=0.97,
+            unresolved=False,
+            next_question='Do you want exact steps to edit term dates vs mid-term break dates?'
+        )
+
+    if 'nameerror' in low and 'not defined' in low:
+        missing = ''
+        m1 = re.search(r"NameError:\s*name\s*'([^']+)'", raw, flags=re.IGNORECASE)
+        m2 = re.search(r'NameError:\s*name\s*"([^"]+)"', raw, flags=re.IGNORECASE)
+        if m1:
+            missing = (m1.group(1) or '').strip()
+        elif m2:
+            missing = (m2.group(1) or '').strip()
+        if missing == 'get_class_assignments_with_names':
+            return _guidance(
+                'This error means the app is calling an old/missing helper. Use `get_class_assignments(...)` instead.',
+                [
+                    'Open the function where the traceback points (for example `build_school_data_integrity_report`).',
+                    'Replace `get_class_assignments_with_names(...)` with `get_class_assignments(...)`.',
+                    'Restart the app and open Data Integrity again.',
+                    'If needed, search all files for the old function name and replace remaining calls.',
+                ],
+                confidence=0.97,
+                unresolved=False,
+                next_question='Do you want the exact file/function to change for this traceback?',
+                fix_snippet="class_rows = get_class_assignments(sid)\n# replace old get_class_assignments_with_names(...) call"
+            )
+        missing_label = missing or 'the referenced name'
+        return _guidance(
+            f'This `NameError` means `{missing_label}` is used before it is defined or imported.',
+            [
+                'Go to the line shown in the traceback.',
+                'Define the missing function/variable before use, or import it from the correct module.',
+                'Check for spelling mismatch between definition and call.',
+                'Restart the app and test the same page again.',
+            ],
+            confidence=0.9,
+            unresolved=False,
+            fix_snippet=f"# define or import before use\n# e.g. from module import {missing_label}" if missing else '# define or import the missing symbol before use'
+        )
+
+    if (
+        'property assignment expected' in low
+        or "declaration or statement expected" in low
+        or "expression expected" in low
+        or "',' expected" in raw
+        or "')' expected" in raw
+        or ('source": "javascript"' in low and ('expected' in low or 'line' in low))
+    ):
+        return _guidance(
+            'This is a JavaScript syntax error. One broken line can cause many follow-up errors.',
+            [
+                'Open the first reported line number in the file and fix that line first.',
+                'Check for unclosed quotes, missing commas, missing `)` or `}` in script blocks.',
+                'If the file is Jinja/HTML, ensure template braces are not breaking JavaScript objects.',
+                'Save and re-check diagnostics; later errors usually clear after the first fix.',
+            ],
+            confidence=0.93,
+            unresolved=False,
+            fix_snippet="const payload = {\n  key: value,\n  anotherKey: anotherValue\n};\n// check commas, quotes, and closing braces"
+        )
+
+    if 'attributeerror' in low and 'has no attribute' in low:
+        return _guidance(
+            'This error means code is calling a method/field that the object does not have.',
+            [
+                'Check the exact object type in the traceback frame.',
+                'Verify the method name and expected object contract.',
+                'If this is a mocked object in tests, add the missing method used by the route.',
+                'Re-run the same action after adjusting the object or call path.',
+            ],
+            confidence=0.89,
+            unresolved=False
+        )
+
+    if 'csrf' in low or ('400' in low and 'bad request' in low and 'token' in low):
+        return _guidance(
+            'This usually means CSRF token is missing, expired, or not submitted with the form request.',
+            [
+                'Refresh the page and submit again to get a fresh token.',
+                'Ensure form includes hidden `csrf_token` field.',
+                'For fetch/XHR requests, include token in payload as required.',
+                'Avoid submitting old cached pages after login/logout.',
+            ],
+            confidence=0.88,
+            unresolved=False,
+            fix_snippet="<input type=\"hidden\" name=\"csrf_token\" value=\"{{ csrf_token() }}\">"
+        )
+
+    if 'password authentication failed' in low and '5432' in low:
+        return _guidance(
+            'Database credentials are failing for PostgreSQL connection.',
+            [
+                'Check DB user/password/host/port environment variables.',
+                'Confirm the PostgreSQL user has access to the target database.',
+                'Update credentials and restart the app worker/server.',
+                'Retry the action after connection is healthy.',
+            ],
+            confidence=0.9,
+            unresolved=False
+        )
+
+    if 'traceback' in low or 'exception' in low or 'error' in norm:
+        return _guidance(
+            'I can help troubleshoot this error if you paste the exact first error line and file/line number.',
+            [
+                'Share the first error message (not only the last one).',
+                'Include file path and line number from traceback/diagnostics.',
+                'Tell me what action you did before the error appeared.',
+            ],
+            confidence=0.52,
+            unresolved=True,
+            next_question='Paste the exact error text and I will give a targeted fix.'
+        )
+
+    return None
+
+def _assistant_enforce_guide_only_text(answer_text):
+    text = str(answer_text or '').strip()
+    if not text:
+        return ''
+    lowered = text.lower()
+    blocked_prefix = (
+        'done',
+        'completed',
+        'i have published',
+        'i published',
+        'i have sent',
+        'i sent',
+        'i changed',
+        'i updated',
+        'i deleted',
+        'i removed',
+        'i executed',
+        'i ran',
+    )
+    if lowered.startswith(blocked_prefix):
+        return 'I cannot execute actions in the app. I can guide you with exact steps only.'
+    if re.search(r'\b(i|we)\s+(have|has|did)\s+(publish|published|send|sent|update|updated|change|changed|delete|deleted|remove|removed|execute|executed|run|ran)\b', lowered):
+        return 'I cannot execute actions in the app. I can guide you with exact steps only.'
+    return text
+
+def _assistant_build_explanatory_steps(topic, nav_group_hint='', role=''):
+    item = topic or {}
+    steps = []
+    role_name = (role or '').strip().lower()
+    raw_steps = [str(s).strip() for s in (item.get('steps') or []) if str(s).strip()]
+    summary = str(item.get('summary') or '').strip()
+    title = str(item.get('title') or '').strip()
+    if nav_group_hint:
+        steps.append(nav_group_hint)
+    if summary and role_name in {'school_admin', 'teacher'}:
+        steps.append('Why this matters: ' + summary)
+    if raw_steps:
+        max_steps = 4 if role_name in {'school_admin', 'teacher'} else 3
+        steps.extend(raw_steps[:max_steps])
+    else:
+        if title:
+            steps.append(f'Open the {title} page from your sidebar.')
+        steps.append('Follow the form/page prompts in order and save changes.')
+    if role_name == 'school_admin':
+        steps.append('Before major changes, verify term/year context and keep audit traceability.')
+    elif role_name == 'teacher':
+        steps.append('Confirm your assigned class/subject scope before submitting.')
+    elif role_name == 'parent':
+        steps.append('If you have multiple children linked, confirm the selected child before taking action.')
+    elif role_name == 'student':
+        steps.append('If you cannot access a required action, report it to your class teacher or school admin.')
+    elif role_name == 'super_admin':
+        steps.append('Confirm the target school before saving because these actions can affect multiple schools.')
+    return steps[:6 if role_name in {'school_admin', 'teacher'} else 5]
 
 def _assistant_role_kb(role):
     return APP_ASSISTANT_ROLE_KB.get((role or '').strip().lower(), [])
@@ -895,6 +1921,49 @@ def _assistant_build_knowledge_context(role, ranked_topics, teacher_scope=None):
             lines.append('Assigned subjects: ' + ', '.join(subjects[:10]))
     return '\n'.join(lines[:20]).strip()
 
+def _assistant_load_page_guidance_map():
+    """
+    Optional JSON map for route-to-guidance. Enables no-code updates to assistant page knowledge.
+    JSON shape:
+    {
+      "school_admin": [{"prefix": "/school-admin/xyz", "title": "...", "summary": "...", "steps": ["..."]}],
+      "teacher": [...]
+    }
+    """
+    global _ASSISTANT_PAGE_GUIDANCE_CACHE
+    path = (APP_ASSISTANT_PAGE_GUIDANCE_FILE or '').strip()
+    if not path:
+        return {}
+    try:
+        abs_path = path if os.path.isabs(path) else os.path.join(os.getcwd(), path)
+        mtime = os.path.getmtime(abs_path)
+        cache = _ASSISTANT_PAGE_GUIDANCE_CACHE or {}
+        if cache.get('mtime') == mtime and isinstance(cache.get('map'), dict):
+            return cache.get('map') or {}
+        with open(abs_path, 'r', encoding='utf-8') as fh:
+            data = json.load(fh)
+        normalized = {}
+        if isinstance(data, dict):
+            for role_name, rows in data.items():
+                role_key = (role_name or '').strip().lower()
+                out = []
+                if isinstance(rows, list):
+                    for item in rows:
+                        if not isinstance(item, dict):
+                            continue
+                        prefix = str(item.get('prefix') or '').strip().lower()
+                        title = str(item.get('title') or '').strip()
+                        summary = str(item.get('summary') or '').strip()
+                        steps = [str(s).strip() for s in (item.get('steps') or []) if str(s).strip()]
+                        if prefix and prefix.startswith('/'):
+                            out.append((prefix, title, summary, steps))
+                if out:
+                    normalized[role_key] = out
+        _ASSISTANT_PAGE_GUIDANCE_CACHE = {'mtime': mtime, 'map': normalized}
+        return normalized
+    except Exception:
+        return (_ASSISTANT_PAGE_GUIDANCE_CACHE or {}).get('map') or {}
+
 def _assistant_page_guidance(role, source_page=''):
     role_name = (role or '').strip().lower()
     page = (source_page or '').strip().lower()
@@ -903,7 +1972,9 @@ def _assistant_page_guidance(role, source_page=''):
 
     by_role = {
         'school_admin': [
-            ('/school-admin/dashboard', 'School Admin Dashboard', 'Use this page to monitor school operations and run admin workflows.', ['Review alerts and pending actions.', 'Open quick actions to manage teachers/students/results.', 'Use sidebar links for publish, disputes, audit, and settings.']),
+            ('/school-admin', 'School Admin Dashboard', 'Use this page to monitor school operations and run admin workflows.', ['Review alerts and pending actions.', 'Open quick actions to manage teachers/students/results.', 'Use sidebar links for publish, disputes, audit, and settings.']),
+            ('/school-admin/teachers', 'Teachers', 'Use this page to view teachers in tabular form and review their current class/subject assignments.', ['Review active/archived teachers.', 'Check current class/subject assignment columns.', 'Archive or restore teacher records when needed.']),
+            ('/school-admin/teacher-assignments', 'Assign Teachers', 'Use this page to assign teachers to classes/subjects and review current assignment tables.', ['Assign class teacher for term/year.', 'Assign subject teacher to class/subject.', 'Review and remove current class/subject assignments as needed.']),
             ('/school-admin/messages', 'Messages', 'Use this page to send and track messages to teachers and students.', ['Compose student or teacher message.', 'Set target scope (all/class/stream/subject).', 'Review recent messages and update as needed.']),
             ('/school-admin/publish-results', 'Publish Results', 'Use this page to review submissions, approve/reject, and publish class results.', ['Select class, term, and academic year.', 'Check readiness and validation status.', 'Approve/reject then publish when ready.']),
             ('/school-admin/disputes', 'Result Disputes', 'Use this page to review and resolve result complaints.', ['Open dispute details and evidence.', 'Set status to pending/resolved/rejected.', 'Communicate resolution and keep audit clarity.']),
@@ -915,29 +1986,53 @@ def _assistant_page_guidance(role, source_page=''):
             ('/school-admin/data-integrity', 'Data Integrity', 'Use this page to detect data consistency and assignment mismatch issues.', ['Run checks by term/year.', 'Review high severity issues first.', 'Fix assignment/user-link conflicts and rerun checks.']),
             ('/school-admin/security', 'Security Logs', 'Use this page to review login/security activity.', ['Search/filter logins.', 'Investigate failed attempts.', 'Apply password/security policy actions.']),
             ('/school-admin/bulk-tools', 'Bulk Tools', 'Use this page for import/export and backup workflows.', ['Export backup before major imports.', 'Import CSV files for supported entities.', 'Download and review import error report if needed.']),
+            ('/school-admin/action-audit', 'Action Audit', 'Use this page to review admin operation history and exported audit records.', ['Filter by action/actor/date.', 'Inspect payload details for each audit row.', 'Export filtered audit logs for review.']),
+            ('/school-admin/health', 'System Health', 'Use this page to monitor service health, queue status, and storage usage.', ['Check database and worker status.', 'Review queue/scan counters.', 'Track storage and backup schedule.']),
+            ('/school-admin/disaster-recovery-drill', 'Recovery Drill', 'Use this page to run and review disaster recovery drill checks.', ['Run drill safely.', 'Review missing sections/errors.', 'Use history to verify readiness over time.']),
+            ('/school-admin/add-students-by-class', 'Add Students', 'Use this page to add students manually or import names by CSV into a class.', ['Choose class and term context.', 'Add rows or import CSV.', 'Save and review import errors if any.']),
+            ('/school-admin/parents', 'Parents', 'Use this page to review and manage linked parent records.', ['Search parent/student links.', 'Review contact details.', 'Update through supported correction flows.']),
+            ('/school-admin/settings', 'School Settings', 'Use this page to configure school profile, academic/session settings, and visual identity.', ['Review current school configuration.', 'Update fields carefully.', 'Save and verify dashboard/header changes.']),
         ],
         'teacher': [
             ('/teacher', 'Teacher Dashboard', 'Use this page to manage assigned classes/subjects and pending tasks.', ['Check assignment and pending score cards.', 'Send assignment/note to students in assigned scope.', 'Open score entry or attendance workflows.']),
+            ('/teacher/class-list', 'Class List', 'Use this page to review students in your class-teacher scope and subject-assigned scope.', ['Use status and scope indicators on each row.', 'Open score actions only for allowed students/subjects.', 'Use this page to quickly find pending student records.']),
             ('/teacher/messages', 'Teacher Messages', 'Use this page to read school notices and mark read status.', ['Review unread items.', 'Mark one or all as read.', 'Follow linked workflow instructions.']),
+            ('/teacher/notifications', 'Teacher Notifications', 'Use this page to review missing score alerts for your class/subject scope.', ['Open each alert and identify pending students.', 'Complete missing score entries in Enter Scores.', 'Refresh notifications to confirm reduction.']),
             ('/teacher/enter-scores', 'Enter Scores', 'Use this page to enter/edit scores only for your assigned scope.', ['Pick class/subject/term context.', 'Enter CA and exam components.', 'Save and submit according to your assignment role.']),
+            ('/teacher/enter-subject-scores', 'Enter Subject Scores', 'Use this page to enter one subject score block for eligible students in your assignment scope.', ['Confirm selected subject and class.', 'Enter score components and save.', 'Repeat for pending students in that subject/class.']),
             ('/teacher/period-attendance', 'Period Attendance', 'Use this page to mark attendance by period/date.', ['Select class, date, and period.', 'Mark student attendance states.', 'Submit and verify summary.']),
+            ('/teacher/attendance', 'Attendance', 'Use this page to mark class attendance for valid school days.', ['Pick class and date.', 'Set student statuses.', 'Save and confirm summary counts.']),
+            ('/teacher/timetable', 'Teacher Timetable', 'Use this page to view your teaching periods by class/day/time.', ['Open timetable view.', 'Check day and period blocks.', 'Use it to plan lesson and attendance windows.']),
+            ('/teacher/upload-csv', 'Upload CSV', 'Use this page to upload score CSV files for assigned classes/subjects.', ['Download template first.', 'Fill columns correctly.', 'Upload and fix any error report rows.']),
+            ('/teacher/subject-ranks', 'Subject Ranks', 'Use this page to review subject ranking history and export ranked sheets.', ['Choose year, term, class, and subject.', 'Review ranked students and trends.', 'Export rank CSV when needed.']),
+            ('/teacher/behaviour-assessment', 'Behaviour Assessment', 'Use this page to score student behaviour attributes in class-teacher scope.', ['Select class context.', 'Enter behaviour values/comments.', 'Save before publishing workflow.']),
         ],
         'student': [
             ('/student', 'Student Dashboard', 'Use this page to track your result status and account actions.', ['Check dashboard notices.', 'Open messages and result pages.', 'Use change password for account security.']),
             ('/student/messages', 'Student Messages', 'Use this page to read school messages and deadlines.', ['Review unread messages.', 'Mark messages as read.', 'Follow deadlines in each message.']),
             ('/student/view-result', 'View Result', 'Use this page to view your published result by term/year.', ['Select term/year/class if needed.', 'Review scores, grade, and positions.', 'Download result PDF where available.']),
+            ('/student/change-password', 'Change Password', 'Use this page to update your account password.', ['Enter current password.', 'Enter new password and confirm.', 'Save and use the new password for next login.']),
         ],
         'parent': [
             ('/parent', 'Parent Dashboard', 'Use this page to monitor your child performance and updates.', ['Open child result links.', 'Use compare terms and attendance views.', 'Report dispute when needed.']),
             ('/parent/messages', 'Parent Messages', 'Use this page to read parent-targeted school updates.', ['Review unread messages.', 'Mark as read.', 'Follow suggested next steps in messages.']),
+            ('/parent/attendance', 'Parent Attendance', 'Use this page to review attendance records for your linked child.', ['Select child and context if prompted.', 'Review attendance table/summary.', 'Follow up with class teacher if anomalies exist.']),
+            ('/parent/timetable', 'Parent Timetable', 'Use this page to view your child timetable filtered by class and offered subjects.', ['Open timetable page.', 'Switch child when multiple are linked.', 'Review only the displayed child schedule.']),
+            ('/parent/student-result', 'Child Result View', 'Use this page to see one child published result details.', ['Choose child result link.', 'Select term/year context.', 'Review grades and comments.']),
+            ('/parent/compare-results', 'Compare Results', 'Use this page to compare child performance across terms.', ['Open compare page for selected child.', 'Choose terms to compare.', 'Review trend differences by subject and average.']),
+            ('/parent/dispute', 'Parent Dispute', 'Use this page to submit result dispute for a child.', ['Select child and term context.', 'Describe issue clearly with details.', 'Submit and monitor messages for updates.']),
         ],
         'super_admin': [
-            ('/super-admin/dashboard', 'Super Admin Dashboard', 'Use this page to monitor system-wide school operations.', ['Review overview statistics.', 'Go to add/view school workflows.', 'Track reported issues queue.']),
+            ('/super-admin', 'Super Admin Dashboard', 'Use this page to monitor system-wide school operations.', ['Review overview statistics.', 'Go to add/view school workflows.', 'Track reported issues queue.']),
+            ('/super-admin/schools/add', 'Add School', 'Use this page to create a new school and admin account.', ['Enter school profile details.', 'Set school admin credentials.', 'Save and verify in View Schools.']),
             ('/super-admin/view-schools', 'View Schools', 'Use this page to manage school records and operations state.', ['Edit school/admin details.', 'Toggle operations per school.', 'Validate tenant setup consistency.']),
+            ('/super-admin/privacy-requests', 'Privacy Requests', 'Use this page to process personal-data rights requests.', ['Filter by status/search.', 'Review request details and context.', 'Resolve or reject with a required note.']),
             ('/view-reports', 'Reported Issues', 'Use this page to process submitted issue reports.', ['Filter/search issue queue.', 'Mark report read/unread.', 'Track support resolution.']),
+            ('/super-admin/error-logs', 'Error Logs', 'Use this page to inspect application exceptions and traceback details.', ['Filter by role/endpoint/text.', 'Review traceback and suggested resolution.', 'Apply fix then verify logs no longer repeat.']),
         ],
     }
-    items = by_role.get(role_name, [])
+    external_map = _assistant_load_page_guidance_map()
+    items = list(external_map.get(role_name, [])) + list(by_role.get(role_name, []))
     for prefix, title, summary, steps in items:
         if page == prefix or page.startswith(prefix + '/'):
             return {
@@ -947,26 +2042,219 @@ def _assistant_page_guidance(role, source_page=''):
             }
     return None
 
-def _assistant_build_response(role, question, teacher_scope=None, source_page=''):
+def _assistant_grouped_nav_hint(role, page=''):
+    role_name = (role or '').strip().lower()
+    route = (page or '').strip().lower()
+    if not route.startswith('/'):
+        return ''
+    if role_name == 'school_admin':
+        mapping = [
+            ('Students', ('/school-admin/parents', '/school-admin/add-students-by-class', '/view-students')),
+            ('Teachers', ('/school-admin/teachers', '/school-admin/teacher-assignments')),
+            ('Academics', ('/school-admin/publish-results', '/school-admin/class-subjects', '/school-admin/timetable', '/school-admin/term-programs', '/school-admin/promote-students')),
+            ('Monitoring', ('/school-admin/analytics', '/school-admin/data-integrity', '/school-admin/score-audit', '/school-admin/disputes', '/school-admin/promotion-audit')),
+            ('Communication', ('/school-admin/messages',)),
+            ('System', ('/school-admin/settings', '/school-admin/bulk-tools', '/school-admin/security', '/school-admin/action-audit', '/school-admin/health', '/school-admin/disaster-recovery-drill')),
+            ('Support', ('/report-issue', '/help')),
+        ]
+        for group, prefixes in mapping:
+            for prefix in prefixes:
+                if route == prefix or route.startswith(prefix + '/'):
+                    return f'Open the `{group}` group in the sidebar, then select this page.'
+    if role_name == 'teacher':
+        mapping = [
+            ('Classroom', ('/teacher/class-list', '/view-students', '/teacher/behaviour-assessment', '/teacher/attendance', '/teacher/period-attendance')),
+            ('Academics', ('/teacher/enter-scores', '/teacher/enter-subject-scores', '/teacher/upload-csv', '/teacher/timetable', '/teacher/subject-ranks')),
+            ('Communication', ('/teacher/messages', '/teacher/notifications')),
+            ('Support', ('/report-issue', '/help', '/change_password')),
+        ]
+        for group, prefixes in mapping:
+            for prefix in prefixes:
+                if route == prefix or route.startswith(prefix + '/'):
+                    return f'Open the `{group}` group in the sidebar, then select this page.'
+    return ''
+
+def _assistant_page_example_hint(page_guidance):
+    if not isinstance(page_guidance, dict):
+        return ''
+    title = str(page_guidance.get('title') or '').strip()
+    steps = [str(s).strip() for s in (page_guidance.get('steps') or []) if str(s).strip()]
+    if steps:
+        lead = steps[0]
+        if title:
+            return f'On this page ({title}), start with: {lead}'
+        return f'On this page, start with: {lead}'
+    if title:
+        return f'On this page ({title}), use the visible action buttons in order and save after each change.'
+    return ''
+
+def _assistant_build_response(role, question, teacher_scope=None, source_page='', conversation_history=None, response_mode='standard'):
     role = (role or '').strip().lower()
     q = (question or '').strip()
     q_low = q.lower()
+    mode = (response_mode or 'standard').strip().lower()
+    if mode not in APP_ASSISTANT_RESPONSE_MODES:
+        mode = 'standard'
     q_norm = _assistant_normalize_text(q_low)
+    history_rows = []
+    for row in (conversation_history or []):
+        if isinstance(row, dict):
+            role_val = (row.get('role') or '').strip().lower()
+            text_val = str(row.get('text') or '').strip()
+            if role_val in {'user', 'assistant'} and text_val:
+                history_rows.append({'role': role_val, 'text': text_val[:400]})
+    user_history = [r.get('text', '') for r in history_rows if r.get('role') == 'user']
+    if len(q_norm.split()) <= 5 and user_history:
+        last_context = _assistant_normalize_text(' '.join(user_history[-2:]))
+        if last_context:
+            q_norm = (q_norm + ' ' + last_context).strip()
     q_norm = _assistant_expand_indirect_intent(role, q_norm)
     links = _assistant_nav_links(role, teacher_scope=teacher_scope)
     quick_prompts = _assistant_role_quick_prompts(role, teacher_scope=teacher_scope)
     ranked_topics = _assistant_rank_role_topics(role, q_norm)
     knowledge_context = _assistant_build_knowledge_context(role, ranked_topics, teacher_scope=teacher_scope)
-    page_guidance = _assistant_page_guidance(role, source_page)
+    route_hint = _assistant_extract_route_hint(q_low)
+    effective_page = route_hint or source_page
+    page_guidance = _assistant_page_guidance(role, effective_page)
+    nav_group_hint = _assistant_grouped_nav_hint(role, effective_page)
+    page_relevance_score = _assistant_page_relevance_score(q_norm, page_guidance)
 
-    def _payload(answer, steps=None, needs_llm=False, action_blocked=False):
+    def _default_followups():
+        suggestions = []
+        for _, topic in (ranked_topics or [])[:3]:
+            title = str(topic.get('title') or '').strip()
+            if title:
+                suggestions.append(f'Explain {title} with an example')
+        for item in (quick_prompts or []):
+            t = str(item or '').strip()
+            if not t:
+                continue
+            t_norm = _assistant_normalize_text(t)
+            if t_norm and t_norm not in q_norm:
+                suggestions.append(t)
+        out = []
+        seen = set()
+        for s in suggestions:
+            key = _assistant_normalize_text(s)
+            if key and key not in seen:
+                out.append(s)
+                seen.add(key)
+            if len(out) >= 4:
+                break
+        return out
+
+    def _mode_tune_answer(answer_text):
+        text = str(answer_text or '').strip()
+        if not text:
+            return ''
+        if mode == 'simple':
+            return text[:240]
+        if mode in {'local', 'pidgin'}:
+            # Lightweight local style without changing meaning.
+            text = text.replace('You can', 'You fit').replace('cannot', 'no fit').replace('Use', 'Use am')
+            return text[:420]
+        if mode == 'detailed' and not text.endswith('.'):
+            return text + '.'
+        return text
+
+    def _mode_tune_steps(step_rows):
+        rows = [str(x).strip() for x in (step_rows or []) if str(x).strip()]
+        if mode == 'simple':
+            return rows[:3]
+        if mode == 'detailed':
+            return rows[:6]
+        return rows[:4]
+
+    def _confidence_default(needs_llm=False):
+        if ranked_topics:
+            top_score = float((ranked_topics[0] or [0])[0] or 0)
+            base = 0.44 + min(0.50, top_score / 18.0)
+        elif page_guidance:
+            base = 0.62
+        else:
+            base = 0.34
+        if needs_llm:
+            base -= 0.06
+        return max(0.05, min(0.99, round(base, 3)))
+
+    def _pick_smart_links():
+        out = []
+        tokens = set(q_norm.split())
+        for item in (links or []):
+            label = str(item.get('label') or '').strip()
+            if not label:
+                continue
+            label_norm = _assistant_normalize_text(label)
+            if label_norm and (label_norm in q_norm or set(label_norm.split()) & tokens):
+                out.append(item)
+        if page_guidance:
+            page_title = _assistant_normalize_text(page_guidance.get('title') or '')
+            for item in (links or []):
+                label = str(item.get('label') or '').strip()
+                if not label:
+                    continue
+                if _assistant_normalize_text(label) == page_title and item not in out:
+                    out.insert(0, item)
+        if not out:
+            out = list(links or [])[:3]
+        return out[:3]
+
+    def _payload(answer, steps=None, needs_llm=False, action_blocked=False, follow_ups=None, next_question='', confidence=None, unresolved=None, clarification_needed=False, fix_snippet=''):
+        follow_up_rows = [str(x).strip() for x in (follow_ups or []) if str(x).strip()][:4]
+        if not follow_up_rows:
+            follow_up_rows = _default_followups()
+        conf = _confidence_default(needs_llm=needs_llm) if confidence is None else max(0.0, min(1.0, float(confidence or 0.0)))
+        unresolved_flag = bool(unresolved) if unresolved is not None else bool(conf < 0.50)
+        low_conf = bool(clarification_needed or conf < 0.50)
+        step_rows = _mode_tune_steps(steps or [])
+        answer_text = _assistant_enforce_guide_only_text(_mode_tune_answer(answer))
+        if low_conf:
+            # Keep low-confidence replies short and ask one clear clarifying question.
+            follow_up_rows = []
+            if not step_rows:
+                step_rows = ['Reply with the exact page/menu name you are trying to use.']
+            else:
+                step_rows = step_rows[:1]
+        if page_guidance:
+            example_hint = _assistant_page_example_hint(page_guidance)
+            if example_hint and example_hint not in step_rows and len(step_rows) < 6:
+                step_rows.append(example_hint)
+        next_q = (next_question or '').strip()
+        generic_low_conf_prompts = {
+            '',
+            'Which page or workflow are you trying to use?',
+            'Can you tell me the page name or paste the URL you are on?',
+            'Can you paste the exact page URL and the first error line so I can guide precisely?',
+            'Tell me what you want to do next, and I will guide you step by step.',
+        }
+        if low_conf and next_q in generic_low_conf_prompts:
+            next_q = _assistant_build_low_confidence_question(
+                role=role,
+                q_norm=q_norm,
+                page_guidance=page_guidance,
+                ranked_topics=ranked_topics,
+                links=links,
+            )
+        if not next_q:
+            next_q = 'Tell me what you want to do next, and I will guide you step by step.'
+        source_hints = [str(item.get('label') or '').strip() for item in (links or []) if str(item.get('label') or '').strip()][:4]
         return {
-            'answer': answer,
-            'steps': steps or [],
+            'answer': answer_text,
+            'steps': step_rows,
             'quick_prompts': quick_prompts,
+            'follow_ups': follow_up_rows,
+            'next_question': next_q,
             'links': links,
+            'smart_links': _pick_smart_links(),
+            'source_hints': source_hints,
+            'confidence': conf,
+            'unresolved': unresolved_flag,
+            'clarification_needed': bool(clarification_needed or unresolved_flag),
+            'response_mode': mode,
+            'safety_note': APP_ASSISTANT_SAFETY_NOTE,
             'needs_llm': bool(needs_llm),
             'action_blocked': bool(action_blocked),
+            'fix_snippet': str(fix_snippet or '').strip(),
             'knowledge_context': knowledge_context,
         }
 
@@ -985,37 +2273,282 @@ def _assistant_build_response(role, question, teacher_scope=None, source_page=''
             'I cannot execute actions in the app. I only provide guidance for your role.',
             ['Tell me what you want done, and I will give exact steps.', 'Then perform the steps in the relevant page.'],
             needs_llm=False,
-            action_blocked=True
+            action_blocked=True,
+            next_question='Which exact page are you on now?',
+            confidence=0.99,
+            unresolved=False
         )
+
+    error_guidance = _assistant_extract_error_guidance(q, q_norm=q_norm)
+    if error_guidance:
+        return _payload(
+            error_guidance.get('answer') or 'I can guide you to fix this error.',
+            error_guidance.get('steps') or ['Paste the exact first error line and traceback location.'],
+            confidence=error_guidance.get('confidence'),
+            unresolved=error_guidance.get('unresolved'),
+            next_question=error_guidance.get('next_question') or 'Do you want the exact fix steps for this error?',
+            fix_snippet=error_guidance.get('fix_snippet') or ''
+        )
+
+    if _assistant_is_overview_question(q_norm):
+        if role == 'school_admin':
+            return _payload(
+                'School admin workflow runs in groups: Students, Academics, Monitoring, Communication, System, and Support.',
+                [
+                    'Students: manage student and parent records.',
+                    'Academics: class subjects, timetable, publish/approve results, term programs, promotions.',
+                    'Monitoring: analytics, data integrity, score audit, disputes, promotion audit.',
+                    'System/Support: settings, security, backups, health, recovery drill, help, report issue.',
+                ],
+                next_question='Which workflow do you want first: Students, Academics, Monitoring, or System?'
+            )
+        if role == 'teacher':
+            scope = teacher_scope or {}
+            scope_line = 'Scope: class and subject assignments.' if scope.get('mode') == 'class_and_subject' else (
+                'Scope: class-assigned tasks.' if scope.get('mode') == 'class_only' else (
+                    'Scope: subject-assigned tasks.' if scope.get('mode') == 'subject_only' else 'Scope: no active assignment found yet.'
+                )
+            )
+            return _payload(
+                'Teacher workflow is assignment-based and follows score/attendance/message steps by term and year.',
+                [
+                    scope_line,
+                    'Open Dashboard to see pending tasks and assignment context.',
+                    'Use Enter Scores/Upload CSV for assigned subject-class scope.',
+                    'Use attendance/behaviour pages only if class-teacher assignment is active.',
+                ],
+                next_question='Do you want score entry steps, attendance steps, or message/assignment steps?'
+            )
+        if role == 'parent':
+            return _payload(
+                'Parent workflow is child-specific: results, compare, attendance, timetable, messages, and disputes.',
+                [
+                    'Select the child first when multiple children are linked.',
+                    'Use Child Result and Compare Results for academic tracking.',
+                    'Use Attendance and Timetable to monitor class schedule and attendance.',
+                    'Use Dispute and Messages for issue resolution and follow-up.',
+                ],
+                next_question='Which child workflow do you want now: result, compare, attendance, timetable, or dispute?'
+            )
+        if role == 'student':
+            return _payload(
+                'Student workflow is simple: dashboard, messages, result view, and account security.',
+                [
+                    'Check dashboard notices first.',
+                    'Read messages and deadline notes.',
+                    'Open View Result for published term output.',
+                    'Use Change Password to secure account access.',
+                ],
+                next_question='Which student task do you want now: messages, result, or password change?'
+            )
+        if role == 'super_admin':
+            return _payload(
+                'Super admin workflow covers school setup, operations control, and support oversight.',
+                [
+                    'Add School to create new school tenants.',
+                    'View Schools to edit records and switch operations ON/OFF.',
+                    'Review Reported Issues to track support and escalation.',
+                ],
+                next_question='Which super admin task do you want now: add school, manage schools, or reported issues?'
+            )
 
     # Interpret pasted in-app URLs and route-like prompts.
     if '/school-admin/promotion-audit' in q_low or 'promotion audit' in q_norm:
         return _payload(
             'Promotion Audit is used to review promotion history and verify class-transition records for students.',
-            ['Open Promotion Audit.', 'Filter records by class/term/year.', 'Use the log to confirm promotion decisions before new changes.']
+            ['Open `Monitoring` group in sidebar, then `Promotion Audit`.', 'Filter records by class/term/year.', 'Use the log to confirm promotion decisions before new changes.']
         )
     if '/school-admin/disputes' in q_low or ('dispute' in q_norm and role == 'school_admin'):
         return _payload(
             'Disputes page is used to track and resolve concerns raised on published results.',
-            ['Open Disputes from sidebar.', 'Review complaint details and evidence.', 'Update status and communicate resolution.']
+            ['Open `Monitoring` group in sidebar, then `Result Disputes`.', 'Review complaint details and evidence.', 'Update status and communicate resolution.']
         )
     if '/help' in q_low or ('where is help' in q_norm) or ('help page' in q_norm):
         return _payload(
             'Help page is available from the sidebar Help link for your role.',
             ['Click Help in your sidebar.', 'Or open /help directly in the browser.', 'Use Report Issue if you need support escalation.']
         )
+    if role == 'school_admin' and (
+        ('add student' in q_norm or 'add students' in q_norm or 'student intake' in q_norm or 'register student' in q_norm)
+        and ('where' in q_norm or 'which page' in q_norm or 'where can i' in q_norm or 'where do i' in q_norm)
+    ):
+        return _payload(
+            'Add students from the `Students` group in your sidebar.',
+            [
+                'Open `Students` group.',
+                'Click `Add Students` (Add Students by Class).',
+                'Choose class/term and add manually or import CSV.',
+            ],
+            confidence=0.97,
+            unresolved=False,
+            next_question='Do you want manual entry steps or CSV import steps?'
+        )
+    if role == 'school_admin' and (
+        any(token in q_norm for token in ('gender', 'sex'))
+        and (
+            any(token in q_norm for token in ('add student', 'add students', 'student intake', 'register student'))
+            or ('student' in q_norm and any(token in q_norm for token in ('add ', ' added', ' register', ' intake')))
+        )
+        and any(token in q_norm for token in ('must', 'required', 'need', 'before', 'select', 'mandatory', 'compulsory'))
+    ):
+        return _payload(
+            'Yes. In the current app flow, student gender is required before a student can be added.',
+            [
+                'On Add Students by Class, choose gender for each student row before saving.',
+                'Rows without gender are skipped with a validation message.',
+                'For CSV import, include the gender column with valid values (male/female).',
+            ],
+            confidence=0.98,
+            unresolved=False,
+            next_question='Do you want me to make gender optional instead?'
+        )
+    if role == 'school_admin' and (
+        'class subjects' in q_norm
+        or 'configure subject' in q_norm
+        or 'config subject' in q_norm
+        or 'subject offer' in q_norm
+        or 'subjects offer' in q_norm
+        or 'subject configuration' in q_norm
+        or 'add subject' in q_norm
+    ):
+        return _payload(
+            'Configure subjects your school offers in Class Subjects.',
+            [
+                'Open `Academics` group in sidebar, then `Class Subjects`.',
+                'Select the class and set core/elective subjects for that class.',
+                'Save changes, then verify teacher subject assignments still match.',
+            ],
+            confidence=0.95,
+            unresolved=False,
+            next_question='Do you want the exact clicks for Class Subjects setup?'
+        )
+
+    micro_hit = _assistant_match_micro_faq(role, q_norm)
+    if micro_hit:
+        return _payload(
+            micro_hit.get('answer') or 'I can guide that workflow.',
+            micro_hit.get('steps') or [],
+            confidence=micro_hit.get('confidence', 0.9),
+            unresolved=False,
+            next_question=micro_hit.get('next_question') or 'Do you want exact clicks for this workflow?'
+        )
 
     if _assistant_is_greeting(q_norm):
         return _payload(
-            "I can guide you through app tasks for your role. Ask direct questions like 'how do I publish results' or 'where is messages'.",
-            ['Ask one task at a time for precise steps.', 'Use the quick prompts below to get started.']
+            "I can guide you through app tasks for your role and explain each feature clearly.",
+            ['Ask one task at a time for precise steps.', 'Ask about the page you are on for direct guidance.'],
+            next_question='What are you trying to do right now?',
+            confidence=0.95,
+            unresolved=False
         )
 
-    if page_guidance and any(token in q_norm for token in ('what can i do', 'what can i do in this page', 'what can i do here', 'this page', 'what is this page', 'page for', 'help on this page')):
-        return _payload(
-            page_guidance.get('summary') or 'This page contains role-specific actions.',
-            list(page_guidance.get('steps') or [])[:4]
+    if role == 'school_admin':
+        school_group_help = [
+            ('students', 'Students group is for managing learners and parent links.',
+             ['View Students to review records and class arms.',
+              'Add Students to register/import new students.',
+              'View Parents to manage parent-child linking.']),
+            ('academics', 'Academics group is for teaching setup and result workflows.',
+             ['Publish Results handles review/approval/publishing.',
+              'Class Subjects and Timetable define teaching structure.',
+              'Term Programs and Promote Students manage term flow and transitions.']),
+            ('monitoring', 'Monitoring group is for oversight, checks, and audit visibility.',
+             ['Analytics shows trends and performance insights.',
+              'Data Integrity flags mismatch/missing configuration issues.',
+              'Score Audit, Result Disputes, and Promotion Audit track corrections and decisions.']),
+            ('communication', 'Communication group is for official school messaging workflows.',
+             ['Open Messages to send notices to teachers/students/parents by scope.',
+              'Track unread/read status and follow-up responses.',
+              'Use it for announcements, reminders, and escalation updates.']),
+            ('system', 'System group is for configuration, security, and platform operations.',
+             ['Settings controls school-wide behavior and preferences.',
+              'Bulk/Backup manages import/export and recovery files.',
+              'Security Logs, Action Audit, Health, and Recovery Drill support operations monitoring.']),
+            ('support', 'Support group is for help and issue escalation.',
+             ['Report Issue sends support tickets with role/school/page context.',
+              'Help provides guided documentation for your current role.',
+              'Use Support when workflow errors need investigation.']),
+        ]
+        query_tokens = set(q_norm.split())
+        for group_name, group_summary, group_steps in school_group_help:
+            group_hit = (
+                group_name in q_norm
+                or difflib.SequenceMatcher(None, q_norm, group_name).ratio() >= 0.78
+                or any(difflib.SequenceMatcher(None, tok, group_name).ratio() >= 0.84 for tok in query_tokens if len(tok) >= 4)
+            )
+            if not group_hit:
+                continue
+            if any(x in q_norm for x in ('what', 'use', 'used', 'purpose', 'for what', 'button', 'tab', 'menu', 'group')):
+                return _payload(
+                    group_summary,
+                    group_steps,
+                    follow_ups=[
+                        f'Where is {group_name.title()} in the sidebar?',
+                        f'Give me step-by-step for one {group_name} task',
+                        'What can I do on this page?'
+                    ],
+                    next_question=f'Which {group_name} task do you want to do now?'
+                )
+
+    if role == 'teacher':
+        teacher_group_help = [
+            ('classroom', 'Classroom group is for student-facing class work in your assignment scope.',
+             ['Class List shows students under your class/subject scope.',
+              'View Students opens student records/actions you are permitted to access.',
+              'Attendance/Period Attendance/Behaviour require class-teacher assignment.']),
+            ('academics', 'Academics group is for scoring and teaching output workflows.',
+             ['Enter Scores and Upload CSV are limited to your assigned subjects/classes.',
+              'Timetable shows your scheduled periods.',
+              'Subject Ranks helps review ranking history by class/subject.']),
+            ('communication', 'Communication group is for notices and alert tracking.',
+             ['Messages shows school notices and read/unread states.',
+              'Notifications shows missing score alerts and pending counts.',
+              'Use these pages to prioritize pending academic tasks.']),
+            ('support', 'Support group is for escalation and guidance only.',
+             ['Report Issue sends the error context for review.',
+              'Help provides workflow guidance by role and page.',
+              'Change Password secures your teacher account.']),
+        ]
+        query_tokens = set(q_norm.split())
+        for group_name, group_summary, group_steps in teacher_group_help:
+            group_hit = (
+                group_name in q_norm
+                or difflib.SequenceMatcher(None, q_norm, group_name).ratio() >= 0.78
+                or any(difflib.SequenceMatcher(None, tok, group_name).ratio() >= 0.84 for tok in query_tokens if len(tok) >= 4)
+            )
+            if not group_hit:
+                continue
+            if any(x in q_norm for x in ('what', 'use', 'used', 'purpose', 'for what', 'button', 'tab', 'menu', 'group')):
+                return _payload(
+                    group_summary,
+                    group_steps,
+                    follow_ups=[
+                        f'Where is {group_name.title()} in the sidebar?',
+                        f'Give me step-by-step for one {group_name} task',
+                        'What can I do on this page?'
+                    ],
+                    next_question=f'Which {group_name} task do you want to do now?'
+                )
+
+    if page_guidance:
+        contextual_page_ask = _assistant_is_contextual_page_question(q_norm)
+        page_help_ask = _assistant_is_page_help_question(q_norm)
+        short_page_prompt = len(q_norm.split()) <= 8 and (
+            route_hint
+            or contextual_page_ask
+            or _assistant_is_purpose_question(q_norm)
         )
+        if page_help_ask or short_page_prompt or page_relevance_score >= 3:
+            answer, steps = _assistant_build_page_answer(page_guidance, role=role, nav_group_hint=nav_group_hint)
+            if _assistant_is_purpose_question(q_norm):
+                answer = answer.replace('Use this page to', 'This page is used to')
+            return _payload(
+                answer,
+                steps,
+                confidence=0.9 if (page_help_ask or page_relevance_score >= 4) else 0.86,
+                unresolved=False,
+                next_question=_assistant_page_next_question(role=role, page_guidance=page_guidance)
+            )
 
     if role == 'teacher':
         scope = teacher_scope or {}
@@ -1024,6 +2557,54 @@ def _assistant_build_response(role, question, teacher_scope=None, source_page=''
         subject_map = scope.get('subject_assignments_by_class') or {}
         all_classes = scope.get('all_scope_classes') or []
         all_subjects = scope.get('all_scope_subjects') or []
+        if (
+            ('admin' in q_norm or 'school admin' in q_norm)
+            and any(token in q_norm for token in ('work', 'do', 'can i', 'allowed', 'permission', 'role'))
+        ):
+            return _payload(
+                'Teacher account cannot run school-admin-only workflows directly.',
+                [
+                    'Teacher can: Enter Scores, Upload CSV, Class List, Attendance (if class-assigned), Messages, and Subject Ranks.',
+                    'School admin can: assignments, class subjects, timetable setup, approvals, and publishing.',
+                    'If you need admin action, send request to school admin with the exact class/term/task.',
+                ],
+                confidence=0.97,
+                unresolved=False,
+                next_question='Do you want a checklist to send to school admin for this request?'
+            )
+        if any(token in q_norm for token in ('communication button', 'messages button', 'message tab', 'message button')):
+            return _payload(
+                'Communication button opens Teacher Messages.',
+                [
+                    'Open `Communication` group, then `Messages`.',
+                    'Read unread notices and mark as read when done.',
+                    'Use `Notifications` for missing score alerts and pending counts.',
+                ],
+                confidence=0.95,
+                unresolved=False
+            )
+        if any(token in q_norm for token in ('class list', 'recent students', 'classroom list')):
+            return _payload(
+                'Class List is used to view students in your class-teacher scope and students offering your assigned subjects.',
+                [
+                    'Open `Classroom` group, then `Class List`.',
+                    'Use scope/status tags to understand each student row.',
+                    'Open score actions only for eligible class-subject combinations.',
+                ],
+                confidence=0.95,
+                unresolved=False
+            )
+        if any(token in q_norm for token in ('notification bell', 'missing score alert', 'teacher notifications', 'score notifications')):
+            return _payload(
+                'Notifications page shows missing score alerts for your current scope.',
+                [
+                    'Click floating bell icon or open `/teacher/notifications`.',
+                    'Review pending counts by class/subject.',
+                    'Complete missing entries in Enter Scores, then refresh notifications.',
+                ],
+                confidence=0.96,
+                unresolved=False
+            )
         if any(token in q_norm for token in ('what class', 'which class', 'assigned class', 'my classes', 'my class assignment')):
             if all_classes:
                 return _payload(
@@ -1072,6 +2653,22 @@ def _assistant_build_response(role, question, teacher_scope=None, source_page=''
         return _payload(
             'Result disputes are used to track and resolve concerns raised about published results (for example score or subject issues).',
             ['Open Disputes from the school admin sidebar.', 'Review each dispute details and evidence.', 'Update status (pending/resolved/rejected) and communicate outcome.']
+        )
+
+    if ranked_topics and _assistant_is_purpose_question(q_norm):
+        top_score, top = ranked_topics[0]
+        title = str(top.get('title') or '').strip()
+        summary = str(top.get('summary') or '').strip()
+        steps = _assistant_build_explanatory_steps(top, nav_group_hint=nav_group_hint, role=role)
+        purpose_line = summary or f'{title} is used for role-specific workflow actions.'
+        if title and title.lower() not in purpose_line.lower():
+            answer = f'{title} is used for {purpose_line[0].lower() + purpose_line[1:] if purpose_line else "this workflow."}'
+        else:
+            answer = purpose_line
+        return _payload(
+            answer,
+            steps or ['Open the related sidebar page.', 'Follow the workflow prompts step by step.'],
+            needs_llm=(top_score < 8)
         )
 
     if role in {'teacher', 'school_admin'} and (
@@ -1139,22 +2736,39 @@ def _assistant_build_response(role, question, teacher_scope=None, source_page=''
             ['Choose the child from dashboard links.', 'Open Compare Terms or Attendance.', 'Use Report Dispute when needed.']
         )
 
-    if role == 'super_admin' and any(token in q_low for token in ('school', 'add school', 'operations', 'report')):
+    if role == 'super_admin' and any(token in q_low for token in ('school', 'add school', 'operations', 'report', 'privacy', 'data request')):
         return _payload(
-            'Super Admin manages schools, operations status, and reported issues from the super dashboard.',
-            ['Use Add School for new tenants.', 'Use View Schools to edit or toggle operations.', 'Use Reported Issues for support queue.']
+            'Super Admin manages schools, operations status, reported issues, and privacy/data request resolution.',
+            [
+                'Use Add School and View Schools for tenant setup and operations control.',
+                'Use Reported Issues (`/view-reports`) for support queue actions (read/unread/delete).',
+                'Use Privacy Requests (`/super-admin/privacy-requests`) for data-rights requests (resolved/rejected + note).',
+            ]
+        )
+
+    if not page_guidance and (not ranked_topics or float((ranked_topics[0] or [0])[0] or 0) < 4):
+        return _payload(
+            'I need one more detail so I can guide correctly.',
+            ['Tell me the exact feature name or menu group.', 'You can also paste the current page URL.'],
+            needs_llm=True,
+            confidence=0.33,
+            unresolved=True,
+            clarification_needed=True,
+            next_question='Which page or workflow are you trying to use?'
         )
 
     if ranked_topics:
         top_score, top = ranked_topics[0]
-        answer = str(top.get('summary') or '').strip() or 'I can guide you through that area of the app.'
-        steps = [str(s).strip() for s in (top.get('steps') or []) if str(s).strip()][:4]
+        top_title = str(top.get('title') or '').strip()
+        top_summary = str(top.get('summary') or '').strip()
+        answer = (f'{top_title}: {top_summary}' if top_title and top_summary else (top_summary or 'I can guide you through that area of the app.'))
+        steps = _assistant_build_explanatory_steps(top, nav_group_hint=nav_group_hint, role=role)
         related = _related_titles(ranked_topics[1:3], limit=2)
         if related:
             steps = list(steps)
             steps.append('Related: ' + ', '.join(related) + '.')
         return _payload(
-            answer + ' I cannot perform actions, but I can guide each click.',
+            answer,
             steps or ['Open the related sidebar page.', 'Follow the form prompts and confirm changes.'],
             needs_llm=(top_score < 8)
         )
@@ -1162,23 +2776,28 @@ def _assistant_build_response(role, question, teacher_scope=None, source_page=''
     if role == 'school_admin':
         broad = _related_titles([(1, t) for t in _assistant_role_kb(role)[:4]], limit=3)
         if page_guidance:
+            steps = list(page_guidance.get('steps') or [])[:4] or ['Use this page actions first.', 'Then open related sidebar workflows as needed.']
+            if nav_group_hint:
+                steps = [nav_group_hint] + steps
             return _payload(
                 (page_guidance.get('summary') or '').strip() or 'I can guide what to do on this page.',
-                list(page_guidance.get('steps') or [])[:4] or ['Use this page actions first.', 'Then open related sidebar workflows as needed.'],
+                steps,
                 needs_llm=True
             )
         return _payload(
-            'I could not map that exactly yet, but I can guide related school-admin workflows.',
-            ['Try naming the workflow directly (for example: archive teacher, promotion audit, score audit, term programs).',
-             ('Related topics: ' + ', '.join(broad) + '.') if broad else 'Use sidebar pages and ask with the page name.',
-             'I cannot execute changes, but I can guide each step.'],
+            'Use the sidebar groups directly and ask with the exact workflow.',
+            ['Students: View Students, Add Students, View Parents.',
+             'Academics: Publish Results, Class Subjects, Timetable, Term Programs, Promote Students.',
+             'Monitoring: Analytics, Data Integrity, Score Audit, Result Disputes, Promotion Audit.',
+             ('Related topics: ' + ', '.join(broad) + '.') if broad else 'System: Settings, Bulk/Backup, Security Logs, Action Audit, System Health, Recovery Drill.'],
             needs_llm=True
         )
 
     return _payload(
-        'I could not match that exactly, but I can still guide you. Rephrase with the feature name (messages, publish results, attendance, settings, disputes).',
+        'I did not map that exactly yet, but I can still guide you.',
         ['Use the related sidebar page first.', 'If something fails, open Help or submit Report Issue with the exact error text.'],
-        needs_llm=True
+        needs_llm=True,
+        next_question='Can you tell me the page name or paste the URL you are on?'
     )
 
 def _assistant_extract_openai_text(payload):
@@ -1206,12 +2825,15 @@ def _assistant_extract_openai_text(payload):
         return ''
     return ''
 
-def _assistant_call_openai(role, question, links, knowledge_context=''):
+def _assistant_call_openai(role, question, links, knowledge_context='', response_mode='standard'):
     api_key = (os.environ.get('OPENAI_API_KEY', '') or '').strip()
     if not api_key:
         return None
 
     role = (role or '').strip().lower()
+    mode = (response_mode or 'standard').strip().lower()
+    if mode not in APP_ASSISTANT_RESPONSE_MODES:
+        mode = 'standard'
     safe_links = []
     for item in (links or []):
         if not isinstance(item, dict):
@@ -1232,10 +2854,14 @@ def _assistant_call_openai(role, question, links, knowledge_context=''):
     )
     user_prompt = (
         f'Role: {role}\n'
+        f'Response mode: {mode}\n'
         f'Question: {question}\n'
         f'Known app context:\n{(knowledge_context or "No extra context.")}\n\n'
         f'Useful links:\n{links_text}\n\n'
         'Return JSON with keys: answer (string), steps (array of up to 4 short strings). '
+        'If response mode is simple, use very plain language. '
+        'If detailed, include extra clarity. '
+        'If local or pidgin, use easy Nigerian-style plain phrasing without slang excess. '
         'Keep answer under 120 words.'
     )
     req_body = {
@@ -1305,11 +2931,14 @@ def _env_int(name, default):
 
 RATE_LIMIT_ENABLED = os.environ.get('RATE_LIMIT_ENABLED', '1').strip().lower() in ('1', 'true', 'yes')
 RATE_LIMIT_LOGIN_PER_MIN = max(1, _env_int('RATE_LIMIT_LOGIN_PER_MIN', 25))
+RATE_LIMIT_LOGIN_USER_PER_MIN = max(1, _env_int('RATE_LIMIT_LOGIN_USER_PER_MIN', 12))
 RATE_LIMIT_PARENT_PORTAL_PER_MIN = max(1, _env_int('RATE_LIMIT_PARENT_PORTAL_PER_MIN', 20))
 RATE_LIMIT_CHECK_RESULT_PER_MIN = max(1, _env_int('RATE_LIMIT_CHECK_RESULT_PER_MIN', 25))
 RATE_LIMIT_MUTATION_PER_MIN = max(1, _env_int('RATE_LIMIT_MUTATION_PER_MIN', 40))
+RATE_LIMIT_REPORT_ISSUE_PER_MIN = max(1, _env_int('RATE_LIMIT_REPORT_ISSUE_PER_MIN', 10))
 _RATE_LIMIT_EVENTS = {}
 _RATE_LIMIT_LOCK = threading.Lock()
+_ASSISTANT_PAGE_GUIDANCE_CACHE = {'mtime': None, 'map': {}}
 
 def _rate_limit_consume(key, limit, window_seconds):
     """Sliding-window in-memory rate limit."""
@@ -1795,6 +3424,7 @@ _STUDENTS_HAS_ARCHIVE_COLS = None
 _TEACHERS_HAS_ARCHIVE_COLS = None
 _USERS_HAS_PASSWORD_CHANGED_AT = None
 _USERS_HAS_TUTORIAL_SEEN_AT = None
+_REPORTS_HAS_CONTEXT_COLS = None
 
 def students_has_user_id_column():
     """Detect whether students.user_id exists on this DB."""
@@ -1964,6 +3594,33 @@ def users_has_tutorial_seen_at_column():
     except Exception:
         _USERS_HAS_TUTORIAL_SEEN_AT = False
     return _USERS_HAS_TUTORIAL_SEEN_AT
+
+def reports_has_context_columns():
+    """Detect whether reports context columns exist (reporter_role/school_id/source_page)."""
+    global _REPORTS_HAS_CONTEXT_COLS
+    if _REPORTS_HAS_CONTEXT_COLS is not None:
+        return _REPORTS_HAS_CONTEXT_COLS
+    try:
+        with db_connection() as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """SELECT column_name
+                   FROM information_schema.columns
+                   WHERE table_schema = 'public'
+                     AND table_name = 'reports'
+                     AND column_name = ANY(%s)""",
+                (['reporter_role', 'reporter_school_id', 'source_page'],),
+            )
+            cols = {str(row[0]) for row in c.fetchall() if row and row[0]}
+            _REPORTS_HAS_CONTEXT_COLS = (
+                'reporter_role' in cols
+                and 'reporter_school_id' in cols
+                and 'source_page' in cols
+            )
+    except Exception:
+        _REPORTS_HAS_CONTEXT_COLS = False
+    return _REPORTS_HAS_CONTEXT_COLS
 
 def has_parent_seen_first_login_tutorial(parent_phone):
     phone = normalize_parent_phone(parent_phone)
@@ -2307,9 +3964,26 @@ def init_db():
                         class_arm_ranking_mode TEXT DEFAULT 'separate',
                         combine_third_term_results INTEGER DEFAULT 0,
                         ss1_stream_mode TEXT DEFAULT 'separate',
+                        parent_timetable_show_teacher INTEGER DEFAULT 1,
                         theme_primary_color TEXT DEFAULT '#1E3C72',
                         theme_secondary_color TEXT DEFAULT '#2A5298',
                         theme_accent_color TEXT DEFAULT '#1F7A8C',
+                        access_status TEXT DEFAULT 'trial_free',
+                        trial_start_date TEXT,
+                        trial_end_date TEXT,
+                        subscription_plan TEXT DEFAULT '',
+                        subscription_start_date TEXT,
+                        subscription_end_date TEXT,
+                        payment_due_date TEXT,
+                        payment_grace_days INTEGER DEFAULT 14,
+                        payment_reference TEXT DEFAULT '',
+                        access_note TEXT DEFAULT '',
+                        plan_max_students INTEGER DEFAULT 0,
+                        plan_max_teachers INTEGER DEFAULT 0,
+                        plan_storage_quota_mb INTEGER DEFAULT 0,
+                        plan_features_json TEXT DEFAULT '{}',
+                        access_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        access_updated_by TEXT DEFAULT '',
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )""")
     safe_exec_ignore('ALTER TABLE schools ADD COLUMN operations_enabled INTEGER DEFAULT 1')
@@ -2328,6 +4002,7 @@ def init_db():
     safe_exec_ignore("ALTER TABLE schools ADD COLUMN theme_primary_color TEXT DEFAULT '#1E3C72'")
     safe_exec_ignore("ALTER TABLE schools ADD COLUMN theme_secondary_color TEXT DEFAULT '#2A5298'")
     safe_exec_ignore("ALTER TABLE schools ADD COLUMN theme_accent_color TEXT DEFAULT '#1F7A8C'")
+    safe_exec_ignore("ALTER TABLE schools ADD COLUMN parent_timetable_show_teacher INTEGER DEFAULT 1")
     safe_exec_ignore("ALTER TABLE schools ADD COLUMN location TEXT")
     safe_exec_ignore("ALTER TABLE schools ADD COLUMN phone TEXT")
     safe_exec_ignore("ALTER TABLE schools ADD COLUMN email TEXT")
@@ -2335,6 +4010,22 @@ def init_db():
     safe_exec_ignore("ALTER TABLE schools ADD COLUMN motto TEXT")
     safe_exec_ignore("ALTER TABLE schools ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
     safe_exec_ignore("ALTER TABLE schools ADD COLUMN principal_signature_image TEXT")
+    safe_exec_ignore("ALTER TABLE schools ADD COLUMN access_status TEXT DEFAULT 'trial_free'")
+    safe_exec_ignore("ALTER TABLE schools ADD COLUMN trial_start_date TEXT")
+    safe_exec_ignore("ALTER TABLE schools ADD COLUMN trial_end_date TEXT")
+    safe_exec_ignore("ALTER TABLE schools ADD COLUMN subscription_plan TEXT DEFAULT ''")
+    safe_exec_ignore("ALTER TABLE schools ADD COLUMN subscription_start_date TEXT")
+    safe_exec_ignore("ALTER TABLE schools ADD COLUMN subscription_end_date TEXT")
+    safe_exec_ignore("ALTER TABLE schools ADD COLUMN payment_due_date TEXT")
+    safe_exec_ignore("ALTER TABLE schools ADD COLUMN payment_grace_days INTEGER DEFAULT 14")
+    safe_exec_ignore("ALTER TABLE schools ADD COLUMN payment_reference TEXT DEFAULT ''")
+    safe_exec_ignore("ALTER TABLE schools ADD COLUMN access_note TEXT DEFAULT ''")
+    safe_exec_ignore("ALTER TABLE schools ADD COLUMN plan_max_students INTEGER DEFAULT 0")
+    safe_exec_ignore("ALTER TABLE schools ADD COLUMN plan_max_teachers INTEGER DEFAULT 0")
+    safe_exec_ignore("ALTER TABLE schools ADD COLUMN plan_storage_quota_mb INTEGER DEFAULT 0")
+    safe_exec_ignore("ALTER TABLE schools ADD COLUMN plan_features_json TEXT DEFAULT '{}'")
+    safe_exec_ignore("ALTER TABLE schools ADD COLUMN access_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+    safe_exec_ignore("ALTER TABLE schools ADD COLUMN access_updated_by TEXT DEFAULT ''")
 
     # School term calendar (per school + academic year + term)
     db_execute(c, """CREATE TABLE IF NOT EXISTS school_term_calendars (
@@ -2752,8 +4443,145 @@ def init_db():
                         description TEXT NOT NULL,
                         timestamp TEXT NOT NULL,
                         status TEXT DEFAULT 'unread',
-                        read_at TEXT
+                        read_at TEXT,
+                        reporter_role TEXT DEFAULT '',
+                        reporter_school_id TEXT DEFAULT '',
+                        source_page TEXT DEFAULT ''
                     )""")
+    safe_exec_ignore("ALTER TABLE reports ADD COLUMN reporter_role TEXT DEFAULT ''")
+    safe_exec_ignore("ALTER TABLE reports ADD COLUMN reporter_school_id TEXT DEFAULT ''")
+    safe_exec_ignore("ALTER TABLE reports ADD COLUMN source_page TEXT DEFAULT ''")
+    db_execute(c, """CREATE TABLE IF NOT EXISTS school_onboarding_requests (
+                        id SERIAL PRIMARY KEY,
+                        request_id TEXT UNIQUE NOT NULL,
+                        school_name TEXT NOT NULL,
+                        location TEXT DEFAULT '',
+                        phone TEXT DEFAULT '',
+                        school_email TEXT DEFAULT '',
+                        principal_name TEXT DEFAULT '',
+                        admin_name TEXT DEFAULT '',
+                        admin_email TEXT NOT NULL,
+                        website_url TEXT DEFAULT '',
+                        proof_document_path TEXT DEFAULT '',
+                        expected_students INTEGER DEFAULT 0,
+                        note TEXT DEFAULT '',
+                        status TEXT NOT NULL DEFAULT 'pending_verification',
+                        school_email_verified INTEGER DEFAULT 0,
+                        school_email_verify_code_hash TEXT DEFAULT '',
+                        school_email_verify_expires_at TIMESTAMP,
+                        phone_verified INTEGER DEFAULT 0,
+                        document_verified INTEGER DEFAULT 0,
+                        verification_meta TEXT DEFAULT '{}',
+                        review_note TEXT DEFAULT '',
+                        reviewed_by TEXT DEFAULT '',
+                        reviewed_at TIMESTAMP,
+                        linked_school_id TEXT DEFAULT '',
+                        source_ip TEXT DEFAULT '',
+                        user_agent TEXT DEFAULT '',
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )""")
+    db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_school_onboarding_status_created ON school_onboarding_requests(status, created_at DESC)')
+    db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_school_onboarding_admin_email ON school_onboarding_requests(LOWER(admin_email))')
+    safe_exec_ignore("ALTER TABLE school_onboarding_requests ADD COLUMN school_email TEXT DEFAULT ''")
+    safe_exec_ignore("ALTER TABLE school_onboarding_requests ADD COLUMN principal_name TEXT DEFAULT ''")
+    safe_exec_ignore("ALTER TABLE school_onboarding_requests ADD COLUMN admin_name TEXT DEFAULT ''")
+    safe_exec_ignore("ALTER TABLE school_onboarding_requests ADD COLUMN website_url TEXT DEFAULT ''")
+    safe_exec_ignore("ALTER TABLE school_onboarding_requests ADD COLUMN proof_document_path TEXT DEFAULT ''")
+    safe_exec_ignore("ALTER TABLE school_onboarding_requests ADD COLUMN expected_students INTEGER DEFAULT 0")
+    safe_exec_ignore("ALTER TABLE school_onboarding_requests ADD COLUMN school_email_verified INTEGER DEFAULT 0")
+    safe_exec_ignore("ALTER TABLE school_onboarding_requests ADD COLUMN school_email_verify_code_hash TEXT DEFAULT ''")
+    safe_exec_ignore("ALTER TABLE school_onboarding_requests ADD COLUMN school_email_verify_expires_at TIMESTAMP")
+    safe_exec_ignore("ALTER TABLE school_onboarding_requests ADD COLUMN phone_verified INTEGER DEFAULT 0")
+    safe_exec_ignore("ALTER TABLE school_onboarding_requests ADD COLUMN document_verified INTEGER DEFAULT 0")
+    safe_exec_ignore("ALTER TABLE school_onboarding_requests ADD COLUMN verification_meta TEXT DEFAULT '{}'")
+    safe_exec_ignore("ALTER TABLE school_onboarding_requests ADD COLUMN review_note TEXT DEFAULT ''")
+    safe_exec_ignore("ALTER TABLE school_onboarding_requests ADD COLUMN linked_school_id TEXT DEFAULT ''")
+    safe_exec_ignore("ALTER TABLE school_onboarding_requests ADD COLUMN source_ip TEXT DEFAULT ''")
+    safe_exec_ignore("ALTER TABLE school_onboarding_requests ADD COLUMN user_agent TEXT DEFAULT ''")
+    safe_exec_ignore("ALTER TABLE school_onboarding_requests ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+    db_execute(c, """CREATE TABLE IF NOT EXISTS school_admin_invites (
+                        id SERIAL PRIMARY KEY,
+                        token TEXT UNIQUE NOT NULL,
+                        school_id TEXT NOT NULL,
+                        username TEXT NOT NULL,
+                        expires_at TIMESTAMP NOT NULL,
+                        used_at TIMESTAMP,
+                        created_by TEXT DEFAULT '',
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )""")
+    db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_school_admin_invites_lookup ON school_admin_invites(token, expires_at)')
+    db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_school_admin_invites_user ON school_admin_invites(LOWER(username), school_id, created_at DESC)')
+    db_execute(c, """CREATE TABLE IF NOT EXISTS privacy_data_requests (
+                        id SERIAL PRIMARY KEY,
+                        request_id TEXT UNIQUE NOT NULL,
+                        role TEXT DEFAULT '',
+                        user_id TEXT DEFAULT '',
+                        school_id TEXT DEFAULT '',
+                        request_type TEXT NOT NULL,
+                        subject_line TEXT DEFAULT '',
+                        details TEXT DEFAULT '',
+                        status TEXT NOT NULL DEFAULT 'pending',
+                        resolution_note TEXT DEFAULT '',
+                        resolved_by TEXT DEFAULT '',
+                        resolved_at TIMESTAMP,
+                        source_page TEXT DEFAULT '',
+                        source_ip TEXT DEFAULT '',
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )""")
+    db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_privacy_requests_status_created ON privacy_data_requests(status, created_at DESC)')
+    db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_privacy_requests_user_school ON privacy_data_requests(user_id, school_id, created_at DESC)')
+    db_execute(c, """CREATE TABLE IF NOT EXISTS school_billing_records (
+                        id SERIAL PRIMARY KEY,
+                        school_id TEXT NOT NULL,
+                        invoice_ref TEXT DEFAULT '',
+                        plan_name TEXT DEFAULT '',
+                        amount_due REAL NOT NULL DEFAULT 0,
+                        amount_paid REAL NOT NULL DEFAULT 0,
+                        currency TEXT DEFAULT 'NGN',
+                        due_date TEXT DEFAULT '',
+                        paid_at TEXT DEFAULT '',
+                        status TEXT NOT NULL DEFAULT 'pending',
+                        note TEXT DEFAULT '',
+                        created_by TEXT DEFAULT '',
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )""")
+    db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_school_billing_school_created ON school_billing_records(school_id, created_at DESC)')
+    db_execute(c, """CREATE TABLE IF NOT EXISTS school_access_audit_logs (
+                        id SERIAL PRIMARY KEY,
+                        school_id TEXT NOT NULL,
+                        old_status TEXT DEFAULT '',
+                        new_status TEXT DEFAULT '',
+                        old_payload_json TEXT DEFAULT '{}',
+                        new_payload_json TEXT DEFAULT '{}',
+                        note TEXT DEFAULT '',
+                        changed_by TEXT DEFAULT '',
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )""")
+    db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_school_access_audit_school_created ON school_access_audit_logs(school_id, created_at DESC)')
+    db_execute(c, """CREATE TABLE IF NOT EXISTS school_backup_drill_logs (
+                        id SERIAL PRIMARY KEY,
+                        school_id TEXT NOT NULL,
+                        actor_user_id TEXT DEFAULT '',
+                        actor_role TEXT DEFAULT '',
+                        ok INTEGER NOT NULL DEFAULT 0,
+                        duration_ms INTEGER NOT NULL DEFAULT 0,
+                        missing_sections_json TEXT DEFAULT '[]',
+                        backup_size_bytes INTEGER NOT NULL DEFAULT 0,
+                        error_text TEXT DEFAULT '',
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )""")
+    db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_school_backup_drill_school_created ON school_backup_drill_logs(school_id, created_at DESC)')
+    db_execute(c, """CREATE TABLE IF NOT EXISTS school_auto_backups (
+                        id SERIAL PRIMARY KEY,
+                        school_id TEXT NOT NULL,
+                        trigger_reason TEXT DEFAULT 'schedule',
+                        backup_size_bytes INTEGER NOT NULL DEFAULT 0,
+                        backup_json TEXT DEFAULT '',
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )""")
+    db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_school_auto_backups_school_created ON school_auto_backups(school_id, created_at DESC)')
     # Login attempt tracking for brute-force protection.
     db_execute(c, """CREATE TABLE IF NOT EXISTS login_attempts (
                         id SERIAL PRIMARY KEY,
@@ -2793,6 +4621,19 @@ def init_db():
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         UNIQUE(school_id, classname, day_of_week, period_label)
                     )""")
+    db_execute(c, """CREATE TABLE IF NOT EXISTS timetable_change_logs (
+                        id SERIAL PRIMARY KEY,
+                        school_id TEXT NOT NULL,
+                        action TEXT NOT NULL,
+                        classname TEXT NOT NULL,
+                        day_of_week INTEGER NOT NULL,
+                        period_label TEXT NOT NULL,
+                        before_json TEXT DEFAULT '{}',
+                        after_json TEXT DEFAULT '{}',
+                        changed_by TEXT DEFAULT '',
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )""")
+    db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_timetable_change_logs_school_created ON timetable_change_logs(school_id, created_at DESC)')
     db_execute(c, """CREATE TABLE IF NOT EXISTS period_attendance (
                         id SERIAL PRIMARY KEY,
                         school_id TEXT NOT NULL,
@@ -2865,9 +4706,11 @@ def init_db():
                         target_subject TEXT DEFAULT '',
                         deadline_date TEXT DEFAULT '',
                         attachment_path TEXT DEFAULT '',
+                        attachment_thumb_path TEXT DEFAULT '',
                         attachment_name TEXT DEFAULT '',
                         attachment_mime TEXT DEFAULT '',
                         attachment_size INTEGER DEFAULT 0,
+                        attachment_scan_status TEXT DEFAULT 'clean',
                         is_active INTEGER NOT NULL DEFAULT 1,
                         created_by TEXT DEFAULT '',
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -2951,9 +4794,11 @@ def init_db():
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_student_messages_school_active ON student_messages(school_id, is_active)')
     safe_exec_ignore("ALTER TABLE student_messages ADD COLUMN target_subject TEXT DEFAULT ''")
     safe_exec_ignore("ALTER TABLE student_messages ADD COLUMN attachment_path TEXT DEFAULT ''")
+    safe_exec_ignore("ALTER TABLE student_messages ADD COLUMN attachment_thumb_path TEXT DEFAULT ''")
     safe_exec_ignore("ALTER TABLE student_messages ADD COLUMN attachment_name TEXT DEFAULT ''")
     safe_exec_ignore("ALTER TABLE student_messages ADD COLUMN attachment_mime TEXT DEFAULT ''")
     safe_exec_ignore("ALTER TABLE student_messages ADD COLUMN attachment_size INTEGER DEFAULT 0")
+    safe_exec_ignore("ALTER TABLE student_messages ADD COLUMN attachment_scan_status TEXT DEFAULT 'clean'")
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_parent_tutorial_seen_phone ON parent_tutorial_seen(parent_phone)')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_teacher_messages_school_created ON teacher_messages(school_id, created_at DESC)')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_teacher_messages_school_active ON teacher_messages(school_id, is_active)')
@@ -3716,6 +5561,18 @@ def save_student_with_cursor(c, school_id, student_id, student_data):
         parent_values = []
         parent_placeholders = ""
 
+    db_execute(
+        c,
+        """SELECT 1
+           FROM students
+           WHERE school_id = ? AND student_id = ?
+           LIMIT 1""",
+        (school_id, student_id),
+    )
+    existing_student = bool(c.fetchone())
+    if not existing_student:
+        ensure_school_plan_capacity(school_id, add_students=1, add_teachers=0)
+
     if students_has_user_id_column():
         user_id = student_id
         db_execute(
@@ -4249,6 +6106,13 @@ def parse_uploaded_signature(file_storage):
         return '', 'Uploaded signature file is empty.'
     if len(raw) > (2 * 1024 * 1024):
         return '', 'Signature image is too large. Maximum size is 2MB.'
+    detected_ext = _detect_image_extension_from_bytes(raw)
+    allowed_magic = {'png', 'jpg', 'webp', 'gif'}
+    if detected_ext not in allowed_magic:
+        return '', 'Uploaded signature file is not a valid image.'
+    normalized_ext = 'jpg' if ext == 'jpeg' else ext
+    if normalized_ext and detected_ext and normalized_ext != detected_ext:
+        return '', 'File extension does not match image content.'
     mime = (file_storage.mimetype or '').strip().lower()
     if not mime.startswith('image/'):
         mime_by_ext = {
@@ -4256,8 +6120,9 @@ def parse_uploaded_signature(file_storage):
             'jpg': 'image/jpeg',
             'jpeg': 'image/jpeg',
             'webp': 'image/webp',
+            'gif': 'image/gif',
         }
-        mime = mime_by_ext.get(ext, 'image/png')
+        mime = mime_by_ext.get(detected_ext, 'image/png')
     encoded = base64.b64encode(raw).decode('ascii')
     return f'data:{mime};base64,{encoded}', ''
 
@@ -4280,6 +6145,13 @@ def parse_uploaded_profile_image(file_storage):
         return '', 'Uploaded profile image file is empty.'
     if len(raw) > (2 * 1024 * 1024):
         return '', 'Profile image is too large. Maximum size is 2MB.'
+    detected_ext = _detect_image_extension_from_bytes(raw)
+    allowed_magic = {'png', 'jpg', 'webp', 'gif'}
+    if detected_ext not in allowed_magic:
+        return '', 'Uploaded profile image is not a valid image.'
+    normalized_ext = 'jpg' if ext == 'jpeg' else ext
+    if normalized_ext and detected_ext and normalized_ext != detected_ext:
+        return '', 'File extension does not match image content.'
     mime = (file_storage.mimetype or '').strip().lower()
     if not mime.startswith('image/'):
         mime_by_ext = {
@@ -4287,8 +6159,9 @@ def parse_uploaded_profile_image(file_storage):
             'jpg': 'image/jpeg',
             'jpeg': 'image/jpeg',
             'webp': 'image/webp',
+            'gif': 'image/gif',
         }
-        mime = mime_by_ext.get(ext, 'image/png')
+        mime = mime_by_ext.get(detected_ext, 'image/png')
     encoded = base64.b64encode(raw).decode('ascii')
     return f'data:{mime};base64,{encoded}', ''
 
@@ -4421,6 +6294,32 @@ def class_arm_ranking_group(classname, mode='separate'):
     if level and number is not None:
         return f"{level}{number}"
     return class_key
+
+
+def related_classnames_for_class_arm_mode(school_id, classname, school=None):
+    """
+    Resolve class scope with class-arm awareness.
+    - separate mode: only exact class.
+    - together mode: all classes that share same base group (e.g. JSS1/JSS1A/JSS1B).
+    """
+    cls = canonicalize_classname(classname)
+    if not cls:
+        return []
+    mode = ((school or {}).get('class_arm_ranking_mode') or 'separate').strip().lower()
+    if mode != 'together':
+        return [cls]
+    target_group = class_arm_ranking_group(cls, mode='together')
+    classnames = get_school_classnames(school_id) or []
+    scoped = []
+    for item in classnames:
+        canonical = canonicalize_classname(item)
+        if not canonical:
+            continue
+        if class_arm_ranking_group(canonical, mode='together') == target_group:
+            scoped.append(canonical)
+    if cls not in scoped:
+        scoped.append(cls)
+    return sorted(set(scoped), key=lambda x: str(x).lower())
 
 def get_class_level(classname):
     """Map class name to level key: primary, jss, ss."""
@@ -5068,10 +6967,1427 @@ def create_school_with_index_id(school_name, location='', phone='', email='', pr
             motto=motto,
         )
 
-def _school_row_to_dict(row):
+SCHOOL_ONBOARDING_STATUSES = {'pending_verification', 'pending', 'approved', 'rejected', 'cancelled'}
+SCHOOL_ONBOARDING_PROOF_ALLOWED_EXTS = {'pdf', 'png', 'jpg', 'jpeg', 'webp'}
+SCHOOL_ONBOARDING_PROOF_MAX_BYTES = 5 * 1024 * 1024
+GENERIC_PUBLIC_EMAIL_DOMAINS = {
+    'gmail.com', 'googlemail.com', 'yahoo.com', 'ymail.com',
+    'outlook.com', 'hotmail.com', 'live.com', 'aol.com', 'icloud.com',
+    'proton.me', 'protonmail.com', 'zoho.com', 'mail.com',
+}
+
+
+def normalize_school_onboarding_status(value, default='pending'):
+    raw = (value or '').strip().lower()
+    fallback = (default or 'pending').strip().lower()
+    if fallback not in SCHOOL_ONBOARDING_STATUSES:
+        fallback = 'pending'
+    return raw if raw in SCHOOL_ONBOARDING_STATUSES else fallback
+
+
+def _mask_email_address(email):
+    value = (email or '').strip().lower()
+    if '@' not in value:
+        return value
+    local, domain = value.split('@', 1)
+    if len(local) <= 2:
+        local_masked = local[:1] + '*'
+    else:
+        local_masked = local[:2] + ('*' * max(1, len(local) - 2))
+    return f'{local_masked}@{domain}'
+
+
+def _is_generic_public_email_domain(email):
+    value = (email or '').strip().lower()
+    if '@' not in value:
+        return True
+    domain = value.split('@', 1)[1].strip()
+    return (not domain) or (domain in GENERIC_PUBLIC_EMAIL_DOMAINS)
+
+
+def _is_plausible_school_phone(phone):
+    clean = re.sub(r'[^0-9+]', '', (phone or '').strip())
+    if not clean:
+        return False
+    return bool(re.fullmatch(r'^\+?[0-9]{7,16}$', clean))
+
+
+def _hash_school_onboarding_email_code(request_id, school_email, code):
+    payload = f"{(request_id or '').strip().upper()}|{(school_email or '').strip().lower()}|{(code or '').strip()}|{app.secret_key}"
+    return hashlib.sha256(payload.encode('utf-8')).hexdigest()
+
+
+def _generate_school_onboarding_email_code():
+    return ''.join(str(secrets.randbelow(10)) for _ in range(6))
+
+
+def _resolve_onboarding_proof_file_path(rel_path):
+    value = (rel_path or '').replace('\\', '/').strip().lstrip('/')
+    if not value.startswith('uploads/onboarding_docs/'):
+        return None
+    static_root = os.path.abspath(app.static_folder or 'static')
+    target = os.path.abspath(os.path.join(static_root, value.replace('/', os.sep)))
+    if not target.startswith(static_root + os.sep):
+        return None
+    return target
+
+
+def save_school_onboarding_proof_document(file_storage):
+    if not file_storage or not (file_storage.filename or '').strip():
+        raise ValueError('Proof document file is required.')
+    original_name = (file_storage.filename or '').strip()
+    ext = original_name.rsplit('.', 1)[-1].strip().lower() if '.' in original_name else ''
+    if not ext or ext not in SCHOOL_ONBOARDING_PROOF_ALLOWED_EXTS:
+        raise ValueError('Proof document must be PDF or image (pdf, png, jpg, jpeg, webp).')
+    raw = file_storage.read() or b''
+    if not raw:
+        raise ValueError('Proof document is empty.')
+    if len(raw) > SCHOOL_ONBOARDING_PROOF_MAX_BYTES:
+        raise ValueError('Proof document is too large. Maximum size is 5MB.')
+
+    date_seg = datetime.now().strftime('%Y%m')
+    rel_dir = os.path.join('uploads', 'onboarding_docs', date_seg)
+    abs_dir = os.path.join(app.static_folder or 'static', rel_dir)
+    os.makedirs(abs_dir, exist_ok=True)
+    filename = f"onboarding_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{secrets.token_hex(6)}.{ext}"
+    abs_path = os.path.join(abs_dir, filename)
+    with open(abs_path, 'wb') as fh:
+        fh.write(raw)
+    rel_path = os.path.join(rel_dir, filename).replace('\\', '/')
+    return rel_path
+
+
+def ensure_school_onboarding_schema():
+    """Ensure school onboarding request table exists for remote registration flow."""
+    try:
+        with db_connection(commit=True) as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """CREATE TABLE IF NOT EXISTS school_onboarding_requests (
+                       id SERIAL PRIMARY KEY,
+                       request_id TEXT UNIQUE NOT NULL,
+                       school_name TEXT NOT NULL,
+                       location TEXT DEFAULT '',
+                       phone TEXT DEFAULT '',
+                       school_email TEXT DEFAULT '',
+                       principal_name TEXT DEFAULT '',
+                       admin_name TEXT DEFAULT '',
+                       admin_email TEXT NOT NULL,
+                       website_url TEXT DEFAULT '',
+                       proof_document_path TEXT DEFAULT '',
+                       expected_students INTEGER DEFAULT 0,
+                       note TEXT DEFAULT '',
+                       status TEXT NOT NULL DEFAULT 'pending_verification',
+                       school_email_verified INTEGER DEFAULT 0,
+                       school_email_verify_code_hash TEXT DEFAULT '',
+                       school_email_verify_expires_at TIMESTAMP,
+                       phone_verified INTEGER DEFAULT 0,
+                       document_verified INTEGER DEFAULT 0,
+                       verification_meta TEXT DEFAULT '{}',
+                       review_note TEXT DEFAULT '',
+                       reviewed_by TEXT DEFAULT '',
+                       reviewed_at TIMESTAMP,
+                       linked_school_id TEXT DEFAULT '',
+                       source_ip TEXT DEFAULT '',
+                       user_agent TEXT DEFAULT '',
+                       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                   )""",
+            )
+            db_execute(
+                c,
+                'CREATE INDEX IF NOT EXISTS idx_school_onboarding_status_created '
+                'ON school_onboarding_requests(status, created_at DESC)',
+            )
+            db_execute(
+                c,
+                'CREATE INDEX IF NOT EXISTS idx_school_onboarding_admin_email '
+                'ON school_onboarding_requests(LOWER(admin_email))',
+            )
+            db_execute(c, "ALTER TABLE school_onboarding_requests ADD COLUMN IF NOT EXISTS school_email TEXT DEFAULT ''")
+            db_execute(c, "ALTER TABLE school_onboarding_requests ADD COLUMN IF NOT EXISTS principal_name TEXT DEFAULT ''")
+            db_execute(c, "ALTER TABLE school_onboarding_requests ADD COLUMN IF NOT EXISTS admin_name TEXT DEFAULT ''")
+            db_execute(c, "ALTER TABLE school_onboarding_requests ADD COLUMN IF NOT EXISTS website_url TEXT DEFAULT ''")
+            db_execute(c, "ALTER TABLE school_onboarding_requests ADD COLUMN IF NOT EXISTS proof_document_path TEXT DEFAULT ''")
+            db_execute(c, "ALTER TABLE school_onboarding_requests ADD COLUMN IF NOT EXISTS expected_students INTEGER DEFAULT 0")
+            db_execute(c, "ALTER TABLE school_onboarding_requests ADD COLUMN IF NOT EXISTS school_email_verified INTEGER DEFAULT 0")
+            db_execute(c, "ALTER TABLE school_onboarding_requests ADD COLUMN IF NOT EXISTS school_email_verify_code_hash TEXT DEFAULT ''")
+            db_execute(c, "ALTER TABLE school_onboarding_requests ADD COLUMN IF NOT EXISTS school_email_verify_expires_at TIMESTAMP")
+            db_execute(c, "ALTER TABLE school_onboarding_requests ADD COLUMN IF NOT EXISTS phone_verified INTEGER DEFAULT 0")
+            db_execute(c, "ALTER TABLE school_onboarding_requests ADD COLUMN IF NOT EXISTS document_verified INTEGER DEFAULT 0")
+            db_execute(c, "ALTER TABLE school_onboarding_requests ADD COLUMN IF NOT EXISTS verification_meta TEXT DEFAULT '{}'")
+            db_execute(c, "ALTER TABLE school_onboarding_requests ADD COLUMN IF NOT EXISTS review_note TEXT DEFAULT ''")
+            db_execute(c, "ALTER TABLE school_onboarding_requests ADD COLUMN IF NOT EXISTS linked_school_id TEXT DEFAULT ''")
+            db_execute(c, "ALTER TABLE school_onboarding_requests ADD COLUMN IF NOT EXISTS source_ip TEXT DEFAULT ''")
+            db_execute(c, "ALTER TABLE school_onboarding_requests ADD COLUMN IF NOT EXISTS user_agent TEXT DEFAULT ''")
+            db_execute(c, "ALTER TABLE school_onboarding_requests ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+        return True
+    except Exception as exc:
+        logging.warning("Failed to ensure school onboarding schema: %s", exc)
+        return False
+
+
+def _next_school_onboarding_request_id_with_cursor(c):
+    """Generate a unique external onboarding request reference."""
+    day_prefix = datetime.now().strftime('%Y%m%d')
+    for _ in range(10):
+        candidate = f"REQ-{day_prefix}-{secrets.token_hex(3).upper()}"
+        db_execute(c, 'SELECT 1 FROM school_onboarding_requests WHERE request_id = ? LIMIT 1', (candidate,))
+        if not c.fetchone():
+            return candidate
+    return f"REQ-{day_prefix}-{secrets.token_hex(4).upper()}"
+
+
+def create_school_onboarding_request(
+    school_name,
+    location='',
+    phone='',
+    school_email='',
+    principal_name='',
+    admin_name='',
+    admin_email='',
+    website_url='',
+    proof_document_path='',
+    expected_students=0,
+    note='',
+    source_ip='',
+    user_agent='',
+):
+    """Create one school onboarding request and return request reference."""
+    if not ensure_school_onboarding_schema():
+        raise ValueError('Onboarding service is unavailable. Please try again.')
+
+    clean_school_name = (school_name or '').strip()
+    clean_location = (location or '').strip()
+    clean_phone = (phone or '').strip()
+    clean_school_email = (school_email or '').strip().lower()
+    clean_principal_name = (principal_name or '').strip()
+    clean_admin_name = (admin_name or '').strip()
+    clean_admin_email = (admin_email or '').strip().lower()
+    clean_website_url = (website_url or '').strip()
+    clean_proof_document_path = (proof_document_path or '').replace('\\', '/').strip().lstrip('/')
+    clean_note = (note or '').strip()
+    students_count = _normalize_non_negative_int(expected_students, 0, 200000)
+    ip_text = (source_ip or '').strip()[:80]
+    ua_text = (user_agent or '').strip()[:300]
+
+    if not clean_school_name:
+        raise ValueError('School name is required.')
+    if not clean_admin_email or not is_valid_email(clean_admin_email):
+        raise ValueError('Admin email must be a valid email address.')
+    if not clean_school_email or not is_valid_email(clean_school_email):
+        raise ValueError('School official email must be a valid email address.')
+    if not clean_phone:
+        raise ValueError('School official phone is required.')
+    if not _is_plausible_school_phone(clean_phone):
+        raise ValueError('School phone format is invalid.')
+    if not clean_proof_document_path:
+        raise ValueError('Proof document upload is required.')
+    if not _resolve_onboarding_proof_file_path(clean_proof_document_path):
+        raise ValueError('Proof document path is invalid.')
+
+    if clean_website_url:
+        has_scheme = bool(re.match(r'^https?://', clean_website_url, flags=re.I))
+        if not has_scheme:
+            clean_website_url = f'https://{clean_website_url}'
+        parsed = urllib.parse.urlparse(clean_website_url)
+        if parsed.scheme not in {'http', 'https'} or not parsed.netloc:
+            raise ValueError('Website/social URL is invalid.')
+
+    now = datetime.now()
+    verification_meta = {
+        'generic_email_domain': bool(_is_generic_public_email_domain(clean_school_email)),
+        'website_submitted': bool(clean_website_url),
+        'verification_required': ['school_email', 'phone_callback', 'document_review'],
+        'last_code_sent_at': '',
+    }
+
+    with db_connection(commit=True) as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """SELECT COUNT(*)
+               FROM school_onboarding_requests
+               WHERE LOWER(admin_email) = LOWER(?)
+                 AND status IN ('pending', 'pending_verification')""",
+            (clean_admin_email,),
+        )
+        pending_for_admin = int((c.fetchone() or [0])[0] or 0)
+        if pending_for_admin >= 3:
+            raise ValueError('Too many pending requests for this admin email. Wait for review.')
+        db_execute(
+            c,
+            """SELECT COUNT(*)
+               FROM school_onboarding_requests
+               WHERE status IN ('pending', 'pending_verification')
+                 AND LOWER(school_name) = LOWER(?)
+                 AND (
+                   (COALESCE(phone, '') <> '' AND COALESCE(phone, '') = ?)
+                   OR (COALESCE(school_email, '') <> '' AND LOWER(COALESCE(school_email, '')) = LOWER(?))
+                 )""",
+            (clean_school_name, clean_phone, clean_school_email),
+        )
+        duplicate_pending = int((c.fetchone() or [0])[0] or 0)
+        if duplicate_pending > 0:
+            raise ValueError('A pending request already exists for this school contact. Wait for review.')
+
+        request_id = _next_school_onboarding_request_id_with_cursor(c)
+        db_execute(
+            c,
+            """INSERT INTO school_onboarding_requests
+               (request_id, school_name, location, phone, school_email, principal_name,
+                admin_name, admin_email, website_url, proof_document_path,
+                expected_students, note, status, school_email_verified,
+                school_email_verify_code_hash, school_email_verify_expires_at, phone_verified, document_verified,
+                verification_meta,
+                source_ip, user_agent, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_verification', 0, '', NULL, 0, 0, ?, ?, ?, ?, ?)""",
+            (
+                request_id,
+                clean_school_name[:200],
+                clean_location[:200],
+                clean_phone[:60],
+                clean_school_email[:200],
+                clean_principal_name[:160],
+                clean_admin_name[:160],
+                clean_admin_email[:200],
+                clean_website_url[:300],
+                clean_proof_document_path[:500],
+                students_count,
+                clean_note[:2000],
+                json.dumps(verification_meta, ensure_ascii=True),
+                ip_text,
+                ua_text,
+                now,
+                now,
+            ),
+        )
+    try:
+        issue_school_onboarding_email_verification_code(request_id, ttl_minutes=30, force_new=True)
+    except Exception:
+        # Keep the request stored; user can use resend flow if mail service is unavailable.
+        pass
+    return request_id
+
+
+def issue_school_onboarding_email_verification_code(request_id, ttl_minutes=30, force_new=True):
+    rid = (request_id or '').strip().upper()
+    if not rid:
+        raise ValueError('Request reference is required.')
+    onboarding = get_school_onboarding_request(rid)
+    if not onboarding:
+        raise ValueError('Request not found.')
+    status = (onboarding.get('status') or '').strip().lower()
+    if status in {'approved', 'rejected', 'cancelled'}:
+        raise ValueError('Verification cannot be sent for closed request status.')
+
+    school_email = (onboarding.get('school_email') or '').strip().lower()
+    admin_email = (onboarding.get('admin_email') or '').strip().lower()
+    if not school_email or not is_valid_email(school_email):
+        raise ValueError('Request has no valid school email.')
+
+    code = _generate_school_onboarding_email_code()
+    now = datetime.now()
+    expires_at = now + timedelta(minutes=max(5, min(int(ttl_minutes or 30), 120)))
+    code_hash = _hash_school_onboarding_email_code(rid, school_email, code)
+    meta = _safe_json_object(onboarding.get('verification_meta'))
+    meta['last_code_sent_at'] = now.strftime('%Y-%m-%d %H:%M:%S')
+    meta['last_code_ttl_minutes'] = int(max(5, min(int(ttl_minutes or 30), 120)))
+    meta['last_code_target'] = _mask_email_address(school_email)
+    with db_connection(commit=True) as conn:
+        c = conn.cursor()
+        status_sql = "CASE WHEN school_email_verified = 1 THEN status ELSE 'pending_verification' END"
+        db_execute(
+            c,
+            f"""UPDATE school_onboarding_requests
+                SET school_email_verify_code_hash = ?,
+                    school_email_verify_expires_at = ?,
+                    verification_meta = ?,
+                    status = {status_sql},
+                    updated_at = ?
+                WHERE request_id = ?""",
+            (code_hash, expires_at, json.dumps(meta, ensure_ascii=True), now, rid),
+        )
+
+    subject = f'School onboarding verification code ({rid})'
+    body = (
+        f"Hello,\n\n"
+        f"Use this verification code to confirm your school email for onboarding.\n\n"
+        f"Reference: {rid}\n"
+        f"School: {(onboarding.get('school_name') or '').strip() or '-'}\n"
+        f"Code: {code}\n"
+        f"Expires: {expires_at.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        f"If you did not request this, ignore this message."
+    )
+    recipients = [school_email]
+    if admin_email and admin_email != school_email and is_valid_email(admin_email):
+        recipients.append(admin_email)
+    send_result = send_plain_email_message(subject, body, recipients)
+    return {
+        'request_id': rid,
+        'sent': int(send_result.get('sent', 0) or 0),
+        'errors': send_result.get('errors') or [],
+        'masked_email': _mask_email_address(school_email),
+        'expires_at': format_timestamp(expires_at),
+    }
+
+
+def verify_school_onboarding_email_code(request_id, code, school_email=''):
+    rid = (request_id or '').strip().upper()
+    input_code = (code or '').strip()
+    input_email = (school_email or '').strip().lower()
+    if not rid or not input_code:
+        raise ValueError('Request reference and verification code are required.')
+    onboarding = get_school_onboarding_request(rid)
+    if not onboarding:
+        raise ValueError('Request not found.')
+    status = (onboarding.get('status') or '').strip().lower()
+    if status in {'approved', 'rejected', 'cancelled'}:
+        raise ValueError('Request is closed and cannot be verified.')
+    if int(onboarding.get('school_email_verified', 0) or 0):
+        return {'already_verified': True, 'status': 'pending'}
+
+    stored_school_email = (onboarding.get('school_email') or '').strip().lower()
+    if input_email and input_email != stored_school_email:
+        raise ValueError('School email does not match this request.')
+    expires_at = onboarding.get('school_email_verify_expires_at_raw')
+    if not expires_at or datetime.now() > expires_at:
+        raise ValueError('Verification code expired. Request a new code.')
+
+    expected_hash = (onboarding.get('school_email_verify_code_hash') or '').strip()
+    if not expected_hash:
+        raise ValueError('No verification code found. Request a new code.')
+    candidate_hash = _hash_school_onboarding_email_code(rid, stored_school_email, input_code)
+    if not hmac.compare_digest(expected_hash, candidate_hash):
+        raise ValueError('Verification code is incorrect.')
+
+    now = datetime.now()
+    with db_connection(commit=True) as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """UPDATE school_onboarding_requests
+               SET school_email_verified = 1,
+                   status = 'pending',
+                   school_email_verify_code_hash = '',
+                   school_email_verify_expires_at = NULL,
+                   updated_at = ?
+               WHERE request_id = ?""",
+            (now, rid),
+        )
+    return {'already_verified': False, 'status': 'pending'}
+
+
+def set_school_onboarding_manual_verification(request_id, phone_verified=None, document_verified=None, reviewer=''):
+    rid = (request_id or '').strip().upper()
+    if not rid:
+        raise ValueError('Request reference is required.')
+    onboarding = get_school_onboarding_request(rid)
+    if not onboarding:
+        raise ValueError('Request not found.')
+    if (onboarding.get('status') or '').strip().lower() in {'approved', 'rejected', 'cancelled'}:
+        raise ValueError('Closed request cannot be updated.')
+
+    phone_flag = 1 if bool(phone_verified) else 0
+    doc_flag = 1 if bool(document_verified) else 0
+    reviewer_text = (reviewer or '').strip()[:120]
+    now = datetime.now()
+    with db_connection(commit=True) as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """UPDATE school_onboarding_requests
+               SET phone_verified = ?,
+                   document_verified = ?,
+                   status = CASE WHEN school_email_verified = 1 THEN 'pending' ELSE status END,
+                   reviewed_by = CASE WHEN ? <> '' THEN ? ELSE reviewed_by END,
+                   updated_at = ?
+               WHERE request_id = ?""",
+            (phone_flag, doc_flag, reviewer_text, reviewer_text, now, rid),
+        )
+
+
+def list_school_onboarding_requests(status_filter='', text_filter='', page=1, per_page=50, include_total=False):
+    """Return onboarding requests list (and optional total)."""
+    if not ensure_school_onboarding_schema():
+        return ([], 0) if include_total else []
+
+    try:
+        page = max(1, int(page))
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        per_page = max(1, min(200, int(per_page)))
+    except (TypeError, ValueError):
+        per_page = 50
+    offset = (page - 1) * per_page
+
+    status_value = normalize_school_onboarding_status(status_filter, default='pending') if (status_filter or '').strip() else ''
+    q = (text_filter or '').strip().lower()
+    where_parts = []
+    params = []
+    if status_value:
+        where_parts.append('status = ?')
+        params.append(status_value)
+    if q:
+        where_parts.append(
+            "(LOWER(request_id) LIKE ? OR LOWER(school_name) LIKE ? OR LOWER(admin_email) LIKE ? "
+            "OR LOWER(COALESCE(school_email, '')) LIKE ? OR LOWER(COALESCE(note, '')) LIKE ? "
+            "OR LOWER(COALESCE(website_url, '')) LIKE ?)"
+        )
+        like_q = f'%{q}%'
+        params.extend([like_q, like_q, like_q, like_q, like_q, like_q])
+
+    where_sql = f"WHERE {' AND '.join(where_parts)}" if where_parts else ''
+    query = (
+        "SELECT id, request_id, school_name, location, phone, school_email, principal_name, "
+        "admin_name, admin_email, website_url, proof_document_path, expected_students, note, status, "
+        "school_email_verified, school_email_verify_code_hash, school_email_verify_expires_at, "
+        "phone_verified, document_verified, verification_meta, review_note, reviewed_by, "
+        "reviewed_at, linked_school_id, source_ip, user_agent, created_at, updated_at "
+        f"FROM school_onboarding_requests {where_sql} "
+        "ORDER BY created_at DESC LIMIT ? OFFSET ?"
+    )
+    query_params = list(params) + [per_page, offset]
+
+    total_rows = 0
+    with db_connection() as conn:
+        c = conn.cursor()
+        if include_total:
+            count_query = f"SELECT COUNT(*) FROM school_onboarding_requests {where_sql}"
+            db_execute(c, count_query, tuple(params))
+            total_rows = int((c.fetchone() or [0])[0] or 0)
+        db_execute(c, query, tuple(query_params))
+        rows = c.fetchall() or []
+
+    payload = []
+    for row in rows:
+        payload.append(
+            {
+                'id': row['id'],
+                'request_id': (row['request_id'] or '').strip(),
+                'school_name': (row['school_name'] or '').strip(),
+                'location': (row['location'] or '').strip(),
+                'phone': (row['phone'] or '').strip(),
+                'school_email': (row['school_email'] or '').strip(),
+                'principal_name': (row['principal_name'] or '').strip(),
+                'admin_name': (row['admin_name'] or '').strip(),
+                'admin_email': (row['admin_email'] or '').strip(),
+                'website_url': (row['website_url'] or '').strip(),
+                'proof_document_path': (row['proof_document_path'] or '').strip(),
+                'expected_students': _normalize_non_negative_int(row['expected_students'], 0, 200000),
+                'note': (row['note'] or '').strip(),
+                'status': normalize_school_onboarding_status(row['status'], default='pending'),
+                'school_email_verified': int(row['school_email_verified'] or 0),
+                'school_email_verify_code_hash': (row['school_email_verify_code_hash'] or '').strip(),
+                'school_email_verify_expires_at': format_timestamp(row['school_email_verify_expires_at']),
+                'school_email_verify_expires_at_raw': row['school_email_verify_expires_at'],
+                'phone_verified': int(row['phone_verified'] or 0),
+                'document_verified': int(row['document_verified'] or 0),
+                'verification_meta': _safe_json_object(row['verification_meta']),
+                'review_note': (row['review_note'] or '').strip(),
+                'reviewed_by': (row['reviewed_by'] or '').strip(),
+                'reviewed_at': format_timestamp(row['reviewed_at']),
+                'linked_school_id': (row['linked_school_id'] or '').strip(),
+                'source_ip': (row['source_ip'] or '').strip(),
+                'user_agent': (row['user_agent'] or '').strip(),
+                'created_at': format_timestamp(row['created_at']),
+                'updated_at': format_timestamp(row['updated_at']),
+            }
+        )
+
+    if include_total:
+        return payload, total_rows
+    return payload
+
+
+def get_school_onboarding_request(request_id):
+    """Return one onboarding request row by external request reference."""
+    rid = (request_id or '').strip()
+    if not rid:
+        return None
+    if not ensure_school_onboarding_schema():
+        return None
+    with db_connection() as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """SELECT id, request_id, school_name, location, phone, school_email, principal_name,
+                      admin_name, admin_email, website_url, proof_document_path,
+                      expected_students, note, status, school_email_verified,
+                      school_email_verify_code_hash, school_email_verify_expires_at,
+                      phone_verified, document_verified, verification_meta,
+                      review_note, reviewed_by, reviewed_at, linked_school_id, source_ip, user_agent,
+                      created_at, updated_at
+               FROM school_onboarding_requests
+               WHERE request_id = ?
+               LIMIT 1""",
+            (rid,),
+        )
+        row = c.fetchone()
     if not row:
         return None
     return {
+        'id': row['id'],
+        'request_id': (row['request_id'] or '').strip(),
+        'school_name': (row['school_name'] or '').strip(),
+        'location': (row['location'] or '').strip(),
+        'phone': (row['phone'] or '').strip(),
+        'school_email': (row['school_email'] or '').strip(),
+        'principal_name': (row['principal_name'] or '').strip(),
+        'admin_name': (row['admin_name'] or '').strip(),
+        'admin_email': (row['admin_email'] or '').strip(),
+        'website_url': (row['website_url'] or '').strip(),
+        'proof_document_path': (row['proof_document_path'] or '').strip(),
+        'expected_students': _normalize_non_negative_int(row['expected_students'], 0, 200000),
+        'note': (row['note'] or '').strip(),
+        'status': normalize_school_onboarding_status(row['status'], default='pending'),
+        'school_email_verified': int(row['school_email_verified'] or 0),
+        'school_email_verify_code_hash': (row['school_email_verify_code_hash'] or '').strip(),
+        'school_email_verify_expires_at': format_timestamp(row['school_email_verify_expires_at']),
+        'school_email_verify_expires_at_raw': row['school_email_verify_expires_at'],
+        'phone_verified': int(row['phone_verified'] or 0),
+        'document_verified': int(row['document_verified'] or 0),
+        'verification_meta': _safe_json_object(row['verification_meta']),
+        'review_note': (row['review_note'] or '').strip(),
+        'reviewed_by': (row['reviewed_by'] or '').strip(),
+        'reviewed_at': format_timestamp(row['reviewed_at']),
+        'linked_school_id': (row['linked_school_id'] or '').strip(),
+        'source_ip': (row['source_ip'] or '').strip(),
+        'user_agent': (row['user_agent'] or '').strip(),
+        'created_at': format_timestamp(row['created_at']),
+        'updated_at': format_timestamp(row['updated_at']),
+    }
+
+
+def count_school_onboarding_requests(status_filter='pending'):
+    """Count onboarding requests by status."""
+    if not ensure_school_onboarding_schema():
+        return 0
+    status_value = normalize_school_onboarding_status(status_filter, default='pending')
+    with db_connection() as conn:
+        c = conn.cursor()
+        if status_value == 'pending':
+            db_execute(
+                c,
+                "SELECT COUNT(*) FROM school_onboarding_requests WHERE status IN ('pending', 'pending_verification')",
+            )
+        else:
+            db_execute(
+                c,
+                'SELECT COUNT(*) FROM school_onboarding_requests WHERE status = ?',
+                (status_value,),
+            )
+        row = c.fetchone()
+    return int((row or [0])[0] or 0)
+
+
+def send_plain_email_message(subject, body_text, recipients):
+    """
+    Send a plain-text email using SMTP env config.
+    Returns {'sent': int, 'errors': [..], 'recipients': [..]}.
+    """
+    clean_recipients = []
+    for item in (recipients or []):
+        email = (item or '').strip().lower()
+        if email and is_valid_email(email) and email not in clean_recipients:
+            clean_recipients.append(email)
+    if not clean_recipients:
+        return {'sent': 0, 'errors': ['No valid recipient email found.'], 'recipients': []}
+
+    smtp_host = (os.environ.get('SMTP_HOST', '') or '').strip()
+    smtp_port_raw = (os.environ.get('SMTP_PORT', '587') or '587').strip()
+    smtp_user = (os.environ.get('SMTP_USER', '') or '').strip()
+    smtp_pass = (os.environ.get('SMTP_PASS', '') or '').strip()
+    smtp_from = (os.environ.get('SMTP_FROM', smtp_user or 'noreply@localhost') or '').strip()
+    smtp_use_tls = (os.environ.get('SMTP_USE_TLS', '1') or '1').strip().lower() in ('1', 'true', 'yes')
+
+    try:
+        smtp_port = int(smtp_port_raw)
+    except Exception:
+        smtp_port = 587
+
+    if not smtp_host:
+        return {'sent': 0, 'errors': ['SMTP_HOST is not configured.'], 'recipients': clean_recipients}
+
+    try:
+        msg = EmailMessage()
+        msg['Subject'] = (subject or 'Notification').strip()[:200]
+        msg['From'] = smtp_from
+        msg['To'] = ', '.join(clean_recipients)
+        msg.set_content((body_text or '').strip() or 'No content.')
+
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as client:
+            if smtp_use_tls:
+                client.starttls()
+            if smtp_user and smtp_pass:
+                client.login(smtp_user, smtp_pass)
+            client.send_message(msg)
+        return {'sent': len(clean_recipients), 'errors': [], 'recipients': clean_recipients}
+    except Exception as exc:
+        return {'sent': 0, 'errors': [f'Email send failed: {exc}'], 'recipients': clean_recipients}
+
+
+def send_onboarding_event_notifications(event_name, request_payload, actor_user='', linked_school_id='', admin_username=''):
+    """
+    Send onboarding emails for request_submitted / approved / rejected.
+    This is best-effort and must not break main workflow.
+    """
+    event = (event_name or '').strip().lower()
+    payload = request_payload or {}
+    request_id = (payload.get('request_id') or '').strip()
+    school_name = (payload.get('school_name') or 'School').strip()
+    admin_email = (admin_username or payload.get('admin_email') or '').strip().lower()
+    school_email = (payload.get('school_email') or '').strip().lower()
+    actor = (actor_user or '').strip() or 'system'
+    review_note = (payload.get('review_note') or '').strip()
+    created_at = (payload.get('created_at') or '').strip()
+    invite_url = (payload.get('invite_url') or '').strip()
+
+    support_emails = []
+    for raw in [
+        os.environ.get('SUPPORT_EMAIL', ''),
+        os.environ.get('OPS_EMAIL', ''),
+        SUPER_ADMIN_USERNAME,
+    ]:
+        candidate = (raw or '').strip().lower()
+        if candidate and is_valid_email(candidate) and candidate not in support_emails:
+            support_emails.append(candidate)
+
+    school_recipients = []
+    for raw in [admin_email, school_email]:
+        candidate = (raw or '').strip().lower()
+        if candidate and is_valid_email(candidate) and candidate not in school_recipients:
+            school_recipients.append(candidate)
+
+    sent_total = 0
+    errors = []
+
+    if event == 'request_submitted':
+        school_subject = f'Onboarding request received ({request_id})'
+        school_body = (
+            f"Hello,\n\n"
+            f"We received your school onboarding request.\n\n"
+            f"Reference: {request_id}\n"
+            f"School: {school_name}\n"
+            f"Submitted At: {created_at or datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            f"Next Step: verify your school email with the code sent separately.\n"
+            f"After verification, super admin will review and contact you.\n"
+            f"This is an automated message from Osartech LTD."
+        )
+        support_subject = f'New school onboarding request: {request_id}'
+        support_body = (
+            f"A new school onboarding request has been submitted.\n\n"
+            f"Reference: {request_id}\n"
+            f"School: {school_name}\n"
+            f"Admin Email: {admin_email or '-'}\n"
+            f"School Email: {school_email or '-'}\n"
+            f"Phone: {(payload.get('phone') or '').strip() or '-'}\n"
+            f"Location: {(payload.get('location') or '').strip() or '-'}\n"
+            f"Website/Social: {(payload.get('website_url') or '').strip() or '-'}\n"
+            f"Principal: {(payload.get('principal_name') or '').strip() or '-'}\n"
+            f"Expected Students: {_normalize_non_negative_int(payload.get('expected_students'), 0, 200000)}\n"
+            f"Proof Document: {'Uploaded' if (payload.get('proof_document_path') or '').strip() else 'Not uploaded'}\n"
+            f"Note: {(payload.get('note') or '').strip() or '-'}\n"
+        )
+        if school_recipients:
+            result = send_plain_email_message(school_subject, school_body, school_recipients)
+            sent_total += int(result.get('sent', 0) or 0)
+            errors.extend(result.get('errors') or [])
+        if support_emails:
+            result = send_plain_email_message(support_subject, support_body, support_emails)
+            sent_total += int(result.get('sent', 0) or 0)
+            errors.extend(result.get('errors') or [])
+
+    elif event == 'approved':
+        school_subject = f'Onboarding approved ({request_id})'
+        school_body = (
+            f"Hello,\n\n"
+            f"Your school onboarding request has been approved.\n\n"
+            f"Reference: {request_id}\n"
+            f"School: {school_name}\n"
+            f"School ID: {linked_school_id or '-'}\n"
+            f"Admin Username: {admin_email or '-'}\n"
+            f"Reviewed By: {actor}\n"
+            f"Review Note: {review_note or '-'}\n\n"
+            f"Set your password securely using this invite link:\n"
+            f"{invite_url or '(Invite link unavailable. Contact support.)'}\n\n"
+            f"This link expires automatically. If expired, request a new invite."
+        )
+        support_subject = f'Onboarding approved: {request_id}'
+        support_body = (
+            f"Onboarding request approved.\n\n"
+            f"Reference: {request_id}\n"
+            f"School: {school_name}\n"
+            f"School ID: {linked_school_id or '-'}\n"
+            f"Admin Username: {admin_email or '-'}\n"
+            f"Approved By: {actor}\n"
+            f"Review Note: {review_note or '-'}\n"
+        )
+        if school_recipients:
+            result = send_plain_email_message(school_subject, school_body, school_recipients)
+            sent_total += int(result.get('sent', 0) or 0)
+            errors.extend(result.get('errors') or [])
+        if support_emails:
+            result = send_plain_email_message(support_subject, support_body, support_emails)
+            sent_total += int(result.get('sent', 0) or 0)
+            errors.extend(result.get('errors') or [])
+
+    elif event == 'rejected':
+        school_subject = f'Onboarding update ({request_id})'
+        school_body = (
+            f"Hello,\n\n"
+            f"Your school onboarding request was not approved at this time.\n\n"
+            f"Reference: {request_id}\n"
+            f"School: {school_name}\n"
+            f"Reviewed By: {actor}\n"
+            f"Reason: {review_note or 'Not provided'}\n\n"
+            f"You may submit a corrected request with accurate details."
+        )
+        support_subject = f'Onboarding rejected: {request_id}'
+        support_body = (
+            f"Onboarding request rejected.\n\n"
+            f"Reference: {request_id}\n"
+            f"School: {school_name}\n"
+            f"Admin Email: {admin_email or '-'}\n"
+            f"Rejected By: {actor}\n"
+            f"Reason: {review_note or '-'}\n"
+        )
+        if school_recipients:
+            result = send_plain_email_message(school_subject, school_body, school_recipients)
+            sent_total += int(result.get('sent', 0) or 0)
+            errors.extend(result.get('errors') or [])
+        if support_emails:
+            result = send_plain_email_message(support_subject, support_body, support_emails)
+            sent_total += int(result.get('sent', 0) or 0)
+            errors.extend(result.get('errors') or [])
+
+    return {'sent': sent_total, 'errors': errors}
+
+
+def ensure_school_admin_invite_schema():
+    """Ensure invite tokens table exists for password-setup onboarding."""
+    try:
+        with db_connection(commit=True) as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """CREATE TABLE IF NOT EXISTS school_admin_invites (
+                       id SERIAL PRIMARY KEY,
+                       token TEXT UNIQUE NOT NULL,
+                       school_id TEXT NOT NULL,
+                       username TEXT NOT NULL,
+                       expires_at TIMESTAMP NOT NULL,
+                       used_at TIMESTAMP,
+                       created_by TEXT DEFAULT '',
+                       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                   )""",
+            )
+            db_execute(
+                c,
+                'CREATE INDEX IF NOT EXISTS idx_school_admin_invites_lookup '
+                'ON school_admin_invites(token, expires_at)',
+            )
+            db_execute(
+                c,
+                'CREATE INDEX IF NOT EXISTS idx_school_admin_invites_user '
+                'ON school_admin_invites(LOWER(username), school_id, created_at DESC)',
+            )
+        return True
+    except Exception as exc:
+        logging.warning("Failed to ensure school admin invite schema: %s", exc)
+        return False
+
+
+def create_school_admin_invite(school_id, username, created_by='', ttl_hours=72):
+    """Create one invite token for school admin to set password."""
+    sid = (school_id or '').strip()
+    uname = (username or '').strip().lower()
+    if not sid or not uname:
+        raise ValueError('School ID and username are required for invite.')
+    if not is_valid_email(uname):
+        raise ValueError('Invite username must be a valid email address.')
+    if not ensure_school_admin_invite_schema():
+        raise ValueError('Invite service is unavailable.')
+
+    with db_connection(commit=True) as conn:
+        c = conn.cursor()
+        return create_school_admin_invite_with_cursor(
+            c,
+            school_id=sid,
+            username=uname,
+            created_by=created_by,
+            ttl_hours=ttl_hours,
+        )
+
+
+def create_school_admin_invite_with_cursor(c, school_id, username, created_by='', ttl_hours=72):
+    """Create invite token using existing transaction cursor."""
+    sid = (school_id or '').strip()
+    uname = (username or '').strip().lower()
+    now = datetime.now()
+    expiry = now + timedelta(hours=max(1, min(int(ttl_hours or 72), 24 * 14)))
+    token = secrets.token_urlsafe(36)
+    db_execute(
+        c,
+        """INSERT INTO school_admin_invites
+           (token, school_id, username, expires_at, created_by, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (token, sid, uname, expiry, (created_by or '').strip()[:120], now),
+    )
+    return {'token': token, 'expires_at': expiry}
+
+
+def get_school_admin_invite(token):
+    """Return invite details if token exists."""
+    raw_token = (token or '').strip()
+    if not raw_token or not ensure_school_admin_invite_schema():
+        return None
+    with db_connection() as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """SELECT token, school_id, username, expires_at, used_at, created_by, created_at
+               FROM school_admin_invites
+               WHERE token = ?
+               LIMIT 1""",
+            (raw_token,),
+        )
+        row = c.fetchone()
+    if not row:
+        return None
+    return {
+        'token': row[0] or '',
+        'school_id': row[1] or '',
+        'username': (row[2] or '').strip().lower(),
+        'expires_at': row[3],
+        'used_at': row[4],
+        'created_by': row[5] or '',
+        'created_at': row[6],
+    }
+
+
+def _mark_school_admin_invite_used_with_cursor(c, token):
+    db_execute(c, 'UPDATE school_admin_invites SET used_at = ? WHERE token = ?', (datetime.now(), (token or '').strip()))
+
+
+def ensure_privacy_request_schema():
+    """Ensure privacy/compliance request table exists."""
+    try:
+        with db_connection(commit=True) as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """CREATE TABLE IF NOT EXISTS privacy_data_requests (
+                       id SERIAL PRIMARY KEY,
+                       request_id TEXT UNIQUE NOT NULL,
+                       role TEXT DEFAULT '',
+                       user_id TEXT DEFAULT '',
+                       school_id TEXT DEFAULT '',
+                       request_type TEXT NOT NULL,
+                       subject_line TEXT DEFAULT '',
+                       details TEXT DEFAULT '',
+                       status TEXT NOT NULL DEFAULT 'pending',
+                       resolution_note TEXT DEFAULT '',
+                       resolved_by TEXT DEFAULT '',
+                       resolved_at TIMESTAMP,
+                       source_page TEXT DEFAULT '',
+                       source_ip TEXT DEFAULT '',
+                       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                   )""",
+            )
+            db_execute(
+                c,
+                'CREATE INDEX IF NOT EXISTS idx_privacy_requests_status_created '
+                'ON privacy_data_requests(status, created_at DESC)',
+            )
+            db_execute(
+                c,
+                'CREATE INDEX IF NOT EXISTS idx_privacy_requests_user_school '
+                'ON privacy_data_requests(user_id, school_id, created_at DESC)',
+            )
+        return True
+    except Exception as exc:
+        logging.warning("Failed to ensure privacy request schema: %s", exc)
+        return False
+
+
+def _next_privacy_request_id_with_cursor(c):
+    day_prefix = datetime.now().strftime('%Y%m%d')
+    for _ in range(10):
+        candidate = f"DPR-{day_prefix}-{secrets.token_hex(3).upper()}"
+        db_execute(c, 'SELECT 1 FROM privacy_data_requests WHERE request_id = ? LIMIT 1', (candidate,))
+        if not c.fetchone():
+            return candidate
+    return f"DPR-{day_prefix}-{secrets.token_hex(4).upper()}"
+
+
+def create_privacy_data_request(role, user_id, school_id, request_type, subject_line='', details='', source_page='', source_ip=''):
+    """Create one privacy request (export/delete/correction)."""
+    if not ensure_privacy_request_schema():
+        raise ValueError('Privacy request service is unavailable.')
+    kind = (request_type or '').strip().lower()
+    if kind not in {'export', 'delete', 'correction'}:
+        raise ValueError('Request type must be export, delete, or correction.')
+    role_name = (role or '').strip().lower()[:40]
+    uid = (user_id or '').strip().lower()[:120]
+    sid = (school_id or '').strip()[:40]
+    subj = (subject_line or '').strip()[:180]
+    body = (details or '').strip()
+    if not body:
+        raise ValueError('Please provide request details.')
+    with db_connection(commit=True) as conn:
+        c = conn.cursor()
+        req_id = _next_privacy_request_id_with_cursor(c)
+        now = datetime.now()
+        db_execute(
+            c,
+            """INSERT INTO privacy_data_requests
+               (request_id, role, user_id, school_id, request_type, subject_line, details,
+                status, source_page, source_ip, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)""",
+            (
+                req_id,
+                role_name,
+                uid,
+                sid,
+                kind,
+                subj,
+                body[:4000],
+                (source_page or '').strip()[:240],
+                (source_ip or '').strip()[:80],
+                now,
+                now,
+            ),
+        )
+    return req_id
+
+
+def list_privacy_data_requests(status_filter='', text_filter='', page=1, per_page=50, include_total=False):
+    """List privacy requests with optional pagination total."""
+    if not ensure_privacy_request_schema():
+        return ([], 0) if include_total else []
+    try:
+        page = max(1, int(page))
+    except Exception:
+        page = 1
+    try:
+        per_page = max(1, min(200, int(per_page)))
+    except Exception:
+        per_page = 50
+    offset = (page - 1) * per_page
+    status_value = (status_filter or '').strip().lower()
+    if status_value not in {'pending', 'resolved', 'rejected', ''}:
+        status_value = ''
+    q = (text_filter or '').strip().lower()
+    where_parts = []
+    params = []
+    if status_value:
+        where_parts.append('status = ?')
+        params.append(status_value)
+    if q:
+        like_q = f'%{q}%'
+        where_parts.append(
+            "(LOWER(request_id) LIKE ? OR LOWER(user_id) LIKE ? OR LOWER(COALESCE(school_id,'')) LIKE ? "
+            "OR LOWER(COALESCE(subject_line,'')) LIKE ? OR LOWER(details) LIKE ?)"
+        )
+        params.extend([like_q, like_q, like_q, like_q, like_q])
+    where_sql = f"WHERE {' AND '.join(where_parts)}" if where_parts else ''
+    base_select = (
+        "SELECT request_id, role, user_id, school_id, request_type, subject_line, details, status, "
+        "resolution_note, resolved_by, resolved_at, source_page, source_ip, created_at, updated_at "
+        f"FROM privacy_data_requests {where_sql} "
+        "ORDER BY created_at DESC LIMIT ? OFFSET ?"
+    )
+    total_rows = 0
+    with db_connection() as conn:
+        c = conn.cursor()
+        if include_total:
+            db_execute(c, f"SELECT COUNT(*) FROM privacy_data_requests {where_sql}", tuple(params))
+            total_rows = int((c.fetchone() or [0])[0] or 0)
+        db_execute(c, base_select, tuple(list(params) + [per_page, offset]))
+        rows = c.fetchall() or []
+    payload = []
+    for row in rows:
+        payload.append(
+            {
+                'request_id': (row[0] or '').strip(),
+                'role': (row[1] or '').strip(),
+                'user_id': (row[2] or '').strip(),
+                'school_id': (row[3] or '').strip(),
+                'request_type': (row[4] or '').strip(),
+                'subject_line': (row[5] or '').strip(),
+                'details': (row[6] or '').strip(),
+                'status': (row[7] or '').strip(),
+                'resolution_note': (row[8] or '').strip(),
+                'resolved_by': (row[9] or '').strip(),
+                'resolved_at': format_timestamp(row[10]),
+                'source_page': (row[11] or '').strip(),
+                'source_ip': (row[12] or '').strip(),
+                'created_at': format_timestamp(row[13]),
+                'updated_at': format_timestamp(row[14]),
+            }
+        )
+    if include_total:
+        return payload, total_rows
+    return payload
+
+
+def resolve_privacy_data_request(request_id, status='resolved', note='', actor=''):
+    """Resolve or reject a privacy data request."""
+    rid = (request_id or '').strip()
+    if not rid:
+        raise ValueError('Request ID is required.')
+    state = (status or '').strip().lower()
+    if state not in {'resolved', 'rejected'}:
+        raise ValueError('Status must be resolved or rejected.')
+    if not ensure_privacy_request_schema():
+        raise ValueError('Privacy request service is unavailable.')
+    with db_connection(commit=True) as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """UPDATE privacy_data_requests
+               SET status = ?, resolution_note = ?, resolved_by = ?, resolved_at = ?, updated_at = ?
+               WHERE request_id = ?""",
+            (state, (note or '').strip()[:2000], (actor or '').strip()[:120], datetime.now(), datetime.now(), rid),
+        )
+        if c.rowcount <= 0:
+            raise ValueError('Privacy request not found.')
+
+
+def count_privacy_data_requests(status_filter='pending'):
+    """Count privacy data requests by status."""
+    if not ensure_privacy_request_schema():
+        return 0
+    status_value = (status_filter or '').strip().lower()
+    if status_value not in {'pending', 'resolved', 'rejected'}:
+        status_value = 'pending'
+    with db_connection() as conn:
+        c = conn.cursor()
+        db_execute(c, 'SELECT COUNT(*) FROM privacy_data_requests WHERE status = ?', (status_value,))
+        row = c.fetchone()
+    return int((row or [0])[0] or 0)
+
+
+def verify_payment_webhook_signature(raw_body, provided_signature):
+    """Verify payment webhook signature using PAYMENT_WEBHOOK_SECRET when set."""
+    secret = (os.environ.get('PAYMENT_WEBHOOK_SECRET', '') or '').strip()
+    sig = (provided_signature or '').strip()
+    if not secret:
+        # Allow unsigned webhooks only when secret is not configured.
+        return True
+    if not sig:
+        return False
+    expected = hmac.new(secret.encode('utf-8'), raw_body or b'', hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, sig)
+
+
+SCHOOL_ACCESS_STATUSES = {'trial_free', 'active_paid', 'pending_payment', 'suspended'}
+SCHOOL_ACCESS_ACTIVE_STATUSES = {'trial_free', 'active_paid'}
+SCHOOL_BILLING_STATUSES = {'pending', 'part_paid', 'paid', 'overdue', 'waived'}
+
+
+def normalize_school_access_status(value, default='trial_free'):
+    raw = (value or '').strip().lower()
+    fallback = (default or 'trial_free').strip().lower()
+    if fallback not in SCHOOL_ACCESS_STATUSES:
+        fallback = 'trial_free'
+    return raw if raw in SCHOOL_ACCESS_STATUSES else fallback
+
+
+def ensure_school_access_schema():
+    """Ensure school access control columns exist for legacy deployments."""
+    try:
+        with db_connection(commit=True) as conn:
+            c = conn.cursor()
+            db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS access_status TEXT DEFAULT 'trial_free'")
+            db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS trial_start_date TEXT")
+            db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS trial_end_date TEXT")
+            db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS subscription_plan TEXT DEFAULT ''")
+            db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS subscription_start_date TEXT")
+            db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS subscription_end_date TEXT")
+            db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS payment_due_date TEXT")
+            db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS payment_grace_days INTEGER DEFAULT 14")
+            db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS payment_reference TEXT DEFAULT ''")
+            db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS access_note TEXT DEFAULT ''")
+            db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS plan_max_students INTEGER DEFAULT 0")
+            db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS plan_max_teachers INTEGER DEFAULT 0")
+            db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS plan_storage_quota_mb INTEGER DEFAULT 0")
+            db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS plan_features_json TEXT DEFAULT '{}'")
+            db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS access_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+            db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS access_updated_by TEXT DEFAULT ''")
+        return True
+    except Exception as exc:
+        logging.warning("Failed to ensure schools access schema: %s", exc)
+        return False
+
+
+def _normalize_non_negative_int(value, default=0, maximum=10000000):
+    try:
+        parsed = int(str(value).strip())
+    except Exception:
+        parsed = int(default or 0)
+    if parsed < 0:
+        parsed = 0
+    if parsed > int(maximum):
+        parsed = int(maximum)
+    return parsed
+
+
+def _normalize_plan_features_json(value):
+    if isinstance(value, dict):
+        try:
+            return json.dumps(value)
+        except Exception:
+            return '{}'
+    raw = (value or '').strip()
+    if not raw:
+        return '{}'
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, dict):
+            return json.dumps(parsed)
+    except Exception:
+        pass
+    return '{}'
+
+
+def get_school_plan_limits(school_or_id):
+    school = school_or_id if isinstance(school_or_id, dict) else (get_school((school_or_id or '').strip()) or {})
+    return {
+        'max_students': _normalize_non_negative_int(school.get('plan_max_students', 0), 0, 1000000),
+        'max_teachers': _normalize_non_negative_int(school.get('plan_max_teachers', 0), 0, 100000),
+        'storage_quota_mb': _normalize_non_negative_int(school.get('plan_storage_quota_mb', 0), 0, 1000000),
+    }
+
+
+def get_total_teacher_count(school_id, include_archived=False):
+    sid = (school_id or '').strip()
+    if not sid:
+        return 0
+    has_archive_cols = teachers_has_archive_columns()
+    with db_connection() as conn:
+        c = conn.cursor()
+        archived_where = ' AND COALESCE(is_archived, 0) = 0' if (has_archive_cols and not include_archived) else ''
+        db_execute(c, f'SELECT COUNT(*) FROM teachers WHERE school_id = ?{archived_where}', (sid,))
+        row = c.fetchone()
+        return int((row or [0])[0] or 0)
+
+
+def ensure_school_plan_capacity(school_id, add_students=0, add_teachers=0):
+    sid = (school_id or '').strip()
+    if not sid:
+        return
+    limits = get_school_plan_limits(sid)
+    add_students = max(0, int(add_students or 0))
+    add_teachers = max(0, int(add_teachers or 0))
+    max_students = int(limits.get('max_students') or 0)
+    max_teachers = int(limits.get('max_teachers') or 0)
+    if max_students > 0:
+        current_students = get_total_student_count(sid)
+        if (current_students + add_students) > max_students:
+            remaining = max(0, max_students - current_students)
+            raise ValueError(f'Student plan limit reached ({current_students}/{max_students}). Remaining slots: {remaining}.')
+    if max_teachers > 0:
+        current_teachers = get_total_teacher_count(sid, include_archived=False)
+        if (current_teachers + add_teachers) > max_teachers:
+            remaining = max(0, max_teachers - current_teachers)
+            raise ValueError(f'Teacher plan limit reached ({current_teachers}/{max_teachers}). Remaining slots: {remaining}.')
+
+
+def build_school_profile_completeness(school_id):
+    sid = (school_id or '').strip()
+    school = get_school(sid) or {}
+    checks = []
+
+    def _append(label, ok):
+        checks.append({'label': label, 'ok': bool(ok)})
+
+    _append('School name set', bool((school.get('school_name') or '').strip()))
+    _append('Location set', bool((school.get('location') or '').strip()))
+    _append('Academic year set', bool((school.get('academic_year') or '').strip()))
+    _append('Current term set', bool((school.get('current_term') or '').strip()))
+    _append('Principal signature uploaded', bool((school.get('principal_signature_image') or '').strip()))
+    _append('At least one teacher', get_total_teacher_count(sid, include_archived=False) > 0)
+    _append('At least one student', get_total_student_count(sid) > 0)
+    _append('Class subject config exists', len(get_school_classnames(sid) or []) > 0)
+    checklist = checks
+    completed = sum(1 for row in checklist if row.get('ok'))
+    total = len(checklist)
+    pct = int(round((completed / total) * 100)) if total else 0
+    missing = [row['label'] for row in checklist if not row.get('ok')]
+    return {
+        'completed': completed,
+        'total': total,
+        'percentage': pct,
+        'missing': missing,
+        'rows': checklist,
+        'is_complete': (completed == total and total > 0),
+    }
+
+
+def build_school_access_state(school):
+    """Return effective access state used for login/runtime access checks."""
+    school_data = school if isinstance(school, dict) else {}
+    status = normalize_school_access_status(school_data.get('access_status', 'trial_free'))
+    trial_end_raw = (school_data.get('trial_end_date') or '').strip()
+    subscription_end_raw = (school_data.get('subscription_end_date') or '').strip()
+    payment_due_raw = (school_data.get('payment_due_date') or '').strip()
+    payment_grace_days = _normalize_non_negative_int(school_data.get('payment_grace_days', 14), 14, 365)
+    access_note = (school_data.get('access_note') or '').strip()
+    today = date.today()
+
+    trial_end_dt = _parse_iso_date(trial_end_raw)
+    subscription_end_dt = _parse_iso_date(subscription_end_raw)
+    payment_due_dt = _parse_iso_date(payment_due_raw)
+    effective_status = status
+    reason = ''
+    grace_until = None
+    if status == 'trial_free' and trial_end_dt and today > trial_end_dt:
+        effective_status = 'suspended'
+        reason = f'Trial ended on {trial_end_dt.isoformat()}.'
+    elif status == 'active_paid' and subscription_end_dt and today > subscription_end_dt:
+        grace_until = subscription_end_dt + timedelta(days=payment_grace_days)
+        if today <= grace_until:
+            effective_status = 'pending_payment'
+            reason = f'Subscription expired on {subscription_end_dt.isoformat()}. Grace window ends {grace_until.isoformat()}.'
+        else:
+            effective_status = 'suspended'
+            reason = f'Subscription expired on {subscription_end_dt.isoformat()} and grace ended on {grace_until.isoformat()}.'
+    elif status == 'pending_payment':
+        if payment_due_dt:
+            grace_until = payment_due_dt + timedelta(days=payment_grace_days)
+            if today > grace_until:
+                effective_status = 'suspended'
+                reason = f'Payment due date {payment_due_dt.isoformat()} passed and grace ended on {grace_until.isoformat()}.'
+            else:
+                reason = f'School account is pending payment activation. Due {payment_due_dt.isoformat()}, grace until {grace_until.isoformat()}.'
+        else:
+            reason = 'School account is pending payment activation.'
+    elif status == 'suspended':
+        reason = access_note or 'School account is suspended by super admin.'
+
+    is_allowed = effective_status in SCHOOL_ACCESS_ACTIVE_STATUSES
+    if not is_allowed and not reason:
+        reason = 'School access is currently restricted.'
+
+    message = ''
+    if not is_allowed:
+        message = f'{reason} Contact Osartech support/super admin for activation.'
+
+    return {
+        'status': status,
+        'effective_status': effective_status,
+        'is_allowed': is_allowed,
+        'reason': reason,
+        'message': message,
+        'trial_end_date': trial_end_raw,
+        'subscription_end_date': subscription_end_raw,
+        'payment_due_date': payment_due_raw,
+        'payment_grace_days': payment_grace_days,
+        'grace_until': grace_until.isoformat() if isinstance(grace_until, date) else '',
+    }
+
+def _app_meta_set_once_daily(meta_key, value='1'):
+    """Set app_meta key once per day. Returns True if inserted now."""
+    key = (meta_key or '').strip()
+    if not key:
+        return False
+    day_stamp = date.today().isoformat()
+    final_key = f'{key}:{day_stamp}'
+    try:
+        with db_connection(commit=True) as conn:
+            c = conn.cursor()
+            db_execute(c, "SELECT value FROM app_meta WHERE key = ? LIMIT 1", (final_key,))
+            if c.fetchone():
+                return False
+            db_execute(
+                c,
+                """INSERT INTO app_meta (key, value, updated_at)
+                   VALUES (?, ?, CURRENT_TIMESTAMP)""",
+                (final_key, str(value or '1')[:400]),
+            )
+        return True
+    except Exception:
+        return False
+
+
+def run_school_access_automation(max_schools=120):
+    """
+    Automation:
+    - Auto-transition schools to effective access status when lifecycle dates require it.
+    - Send daily reminder emails for pending-payment schools.
+    """
+    if not ensure_school_access_schema():
+        return {'processed': 0, 'updated': 0, 'reminders': 0}
+    schools = get_all_schools() or []
+    processed = 0
+    updated = 0
+    reminders = 0
+    for school in schools[:max(1, min(int(max_schools or 120), 500))]:
+        processed += 1
+        sid = (school.get('school_id') or '').strip()
+        if not sid:
+            continue
+        state = build_school_access_state(school)
+        current_status = normalize_school_access_status(school.get('access_status', 'trial_free'))
+        effective_status = normalize_school_access_status(state.get('effective_status', current_status), default=current_status)
+        if effective_status in SCHOOL_ACCESS_STATUSES and effective_status != current_status:
+            try:
+                update_school_access_policy(
+                    school_id=sid,
+                    access_status=effective_status,
+                    trial_start_date=school.get('trial_start_date', ''),
+                    trial_end_date=school.get('trial_end_date', ''),
+                    subscription_plan=school.get('subscription_plan', ''),
+                    subscription_start_date=school.get('subscription_start_date', ''),
+                    subscription_end_date=school.get('subscription_end_date', ''),
+                    payment_due_date=school.get('payment_due_date', ''),
+                    payment_grace_days=school.get('payment_grace_days', 14),
+                    payment_reference=school.get('payment_reference', ''),
+                    access_note=f'Auto lifecycle update to {effective_status}',
+                    plan_max_students=school.get('plan_max_students', 0),
+                    plan_max_teachers=school.get('plan_max_teachers', 0),
+                    plan_storage_quota_mb=school.get('plan_storage_quota_mb', 0),
+                    plan_features_json=school.get('plan_features_json', '{}'),
+                    updated_by='system_automation',
+                )
+                updated += 1
+            except Exception as exc:
+                logging.warning("Access automation update failed for school %s: %s", sid, exc)
+
+        # Reminder for pending payment states once per day.
+        if state.get('effective_status') == 'pending_payment':
+            if _app_meta_set_once_daily(f'access_pending_reminder:{sid}', value=state.get('reason', '')):
+                admin_email = get_school_admin_username(sid)
+                recipients = []
+                if admin_email and is_valid_email(admin_email):
+                    recipients.append(admin_email)
+                school_email = (school.get('email') or '').strip().lower()
+                if school_email and is_valid_email(school_email) and school_email not in recipients:
+                    recipients.append(school_email)
+                if recipients:
+                    subject = f'Payment reminder - {school.get("school_name") or sid}'
+                    body = (
+                        f"School: {school.get('school_name') or sid}\n"
+                        f"Status: Pending Payment\n"
+                        f"Reason: {state.get('reason') or '-'}\n"
+                        f"Payment Due: {state.get('payment_due_date') or '-'}\n"
+                        f"Grace Until: {state.get('grace_until') or '-'}\n\n"
+                        f"Please complete payment to avoid suspension."
+                    )
+                    result = send_plain_email_message(subject, body, recipients)
+                    if int(result.get('sent', 0) or 0) > 0:
+                        reminders += 1
+    return {'processed': processed, 'updated': updated, 'reminders': reminders}
+
+def _school_row_to_dict(row):
+    if not row:
+        return None
+    data = {
         'school_id': row['school_id'],
         'school_name': row['school_name'],
         'location': row['location'] if 'location' in row.keys() else '',
@@ -5102,16 +8418,36 @@ def _school_row_to_dict(row):
         'class_arm_ranking_mode': row['class_arm_ranking_mode'] if 'class_arm_ranking_mode' in row.keys() else 'separate',
         'combine_third_term_results': row['combine_third_term_results'] if 'combine_third_term_results' in row.keys() else 0,
         'ss1_stream_mode': row['ss1_stream_mode'] if 'ss1_stream_mode' in row.keys() else 'separate',
+        'parent_timetable_show_teacher': row['parent_timetable_show_teacher'] if 'parent_timetable_show_teacher' in row.keys() else 1,
         'theme_primary_color': normalize_hex_color(row['theme_primary_color'] if 'theme_primary_color' in row.keys() else '', '#1E3C72'),
         'theme_secondary_color': normalize_hex_color(row['theme_secondary_color'] if 'theme_secondary_color' in row.keys() else '', '#2A5298'),
         'theme_accent_color': normalize_hex_color(row['theme_accent_color'] if 'theme_accent_color' in row.keys() else '', '#1F7A8C'),
+        'access_status': normalize_school_access_status(row['access_status'] if 'access_status' in row.keys() else 'trial_free'),
+        'trial_start_date': (row['trial_start_date'] if 'trial_start_date' in row.keys() else '') or '',
+        'trial_end_date': (row['trial_end_date'] if 'trial_end_date' in row.keys() else '') or '',
+        'subscription_plan': (row['subscription_plan'] if 'subscription_plan' in row.keys() else '') or '',
+        'subscription_start_date': (row['subscription_start_date'] if 'subscription_start_date' in row.keys() else '') or '',
+        'subscription_end_date': (row['subscription_end_date'] if 'subscription_end_date' in row.keys() else '') or '',
+        'payment_due_date': (row['payment_due_date'] if 'payment_due_date' in row.keys() else '') or '',
+        'payment_grace_days': _normalize_non_negative_int((row['payment_grace_days'] if 'payment_grace_days' in row.keys() else 14), 14, 365),
+        'payment_reference': (row['payment_reference'] if 'payment_reference' in row.keys() else '') or '',
+        'access_note': (row['access_note'] if 'access_note' in row.keys() else '') or '',
+        'plan_max_students': _normalize_non_negative_int((row['plan_max_students'] if 'plan_max_students' in row.keys() else 0), 0, 1000000),
+        'plan_max_teachers': _normalize_non_negative_int((row['plan_max_teachers'] if 'plan_max_teachers' in row.keys() else 0), 0, 100000),
+        'plan_storage_quota_mb': _normalize_non_negative_int((row['plan_storage_quota_mb'] if 'plan_storage_quota_mb' in row.keys() else 0), 0, 1000000),
+        'plan_features_json': _normalize_plan_features_json((row['plan_features_json'] if 'plan_features_json' in row.keys() else '{}') or '{}'),
+        'access_updated_at': row['access_updated_at'] if 'access_updated_at' in row.keys() else None,
+        'access_updated_by': (row['access_updated_by'] if 'access_updated_by' in row.keys() else '') or '',
     }
+    data['access_state'] = build_school_access_state(data)
+    return data
 
 def get_school(school_id):
     """Get school details."""
     school_key = (school_id or '').strip()
     if not school_key:
         return None
+    ensure_school_access_schema()
 
     request_cache = None
     if has_request_context():
@@ -5144,12 +8480,13 @@ def get_school(school_id):
 
 def get_all_schools():
     """Get all schools."""
+    ensure_school_access_schema()
     with db_connection() as conn:
         c = conn.cursor()
         db_execute(c, 'SELECT * FROM schools')
         schools = []
         for row in c.fetchall():
-            schools.append({
+            school_payload = {
                 'id': row['id'],
                 'school_id': row['school_id'],
                 'school_name': row['school_name'],
@@ -5169,10 +8506,29 @@ def get_all_schools():
                 'class_arm_ranking_mode': row['class_arm_ranking_mode'] if 'class_arm_ranking_mode' in row.keys() else 'separate',
                 'combine_third_term_results': row['combine_third_term_results'] if 'combine_third_term_results' in row.keys() else 0,
                 'ss1_stream_mode': row['ss1_stream_mode'] if 'ss1_stream_mode' in row.keys() else 'separate',
+                'parent_timetable_show_teacher': row['parent_timetable_show_teacher'] if 'parent_timetable_show_teacher' in row.keys() else 1,
                 'theme_primary_color': normalize_hex_color(row['theme_primary_color'] if 'theme_primary_color' in row.keys() else '', '#1E3C72'),
                 'theme_secondary_color': normalize_hex_color(row['theme_secondary_color'] if 'theme_secondary_color' in row.keys() else '', '#2A5298'),
                 'theme_accent_color': normalize_hex_color(row['theme_accent_color'] if 'theme_accent_color' in row.keys() else '', '#1F7A8C'),
-            })
+                'access_status': normalize_school_access_status(row['access_status'] if 'access_status' in row.keys() else 'trial_free'),
+                'trial_start_date': (row['trial_start_date'] if 'trial_start_date' in row.keys() else '') or '',
+                'trial_end_date': (row['trial_end_date'] if 'trial_end_date' in row.keys() else '') or '',
+                'subscription_plan': (row['subscription_plan'] if 'subscription_plan' in row.keys() else '') or '',
+                'subscription_start_date': (row['subscription_start_date'] if 'subscription_start_date' in row.keys() else '') or '',
+                'subscription_end_date': (row['subscription_end_date'] if 'subscription_end_date' in row.keys() else '') or '',
+                'payment_due_date': (row['payment_due_date'] if 'payment_due_date' in row.keys() else '') or '',
+                'payment_grace_days': _normalize_non_negative_int((row['payment_grace_days'] if 'payment_grace_days' in row.keys() else 14), 14, 365),
+                'payment_reference': (row['payment_reference'] if 'payment_reference' in row.keys() else '') or '',
+                'access_note': (row['access_note'] if 'access_note' in row.keys() else '') or '',
+                'plan_max_students': _normalize_non_negative_int((row['plan_max_students'] if 'plan_max_students' in row.keys() else 0), 0, 1000000),
+                'plan_max_teachers': _normalize_non_negative_int((row['plan_max_teachers'] if 'plan_max_teachers' in row.keys() else 0), 0, 100000),
+                'plan_storage_quota_mb': _normalize_non_negative_int((row['plan_storage_quota_mb'] if 'plan_storage_quota_mb' in row.keys() else 0), 0, 1000000),
+                'plan_features_json': _normalize_plan_features_json((row['plan_features_json'] if 'plan_features_json' in row.keys() else '{}') or '{}'),
+                'access_updated_at': row['access_updated_at'] if 'access_updated_at' in row.keys() else None,
+                'access_updated_by': (row['access_updated_by'] if 'access_updated_by' in row.keys() else '') or '',
+            }
+            school_payload['access_state'] = build_school_access_state(school_payload)
+            schools.append(school_payload)
         return schools
 
 def get_school_admin_username(school_id):
@@ -5245,6 +8601,7 @@ def update_school_settings_with_cursor(c, school_id, settings):
     db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS theme_primary_color TEXT DEFAULT '#1E3C72'")
     db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS theme_secondary_color TEXT DEFAULT '#2A5298'")
     db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS theme_accent_color TEXT DEFAULT '#1F7A8C'")
+    db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS parent_timetable_show_teacher INTEGER DEFAULT 1")
 
     db_execute(
                c,
@@ -5254,7 +8611,7 @@ def update_school_settings_with_cursor(c, school_id, settings):
                 "max_tests = ?, test_score_max = ?, exam_objective_max = ?, exam_theory_max = ?, "
                 "grade_a_min = ?, grade_b_min = ?, grade_c_min = ?, grade_d_min = ?, pass_mark = ?, "
                 "show_positions = ?, ss_ranking_mode = ?, class_arm_ranking_mode = ?, "
-                "combine_third_term_results = ?, ss1_stream_mode = ?, "
+                "combine_third_term_results = ?, ss1_stream_mode = ?, parent_timetable_show_teacher = ?, "
                 "theme_primary_color = ?, theme_secondary_color = ?, theme_accent_color = ? "
                 "WHERE school_id = ?"),
                (settings.get('school_name'), settings.get('location', ''), settings.get('school_logo'),
@@ -5270,6 +8627,7 @@ def update_school_settings_with_cursor(c, school_id, settings):
                 settings.get('class_arm_ranking_mode', 'separate'),
                 settings.get('combine_third_term_results', 0),
                 settings.get('ss1_stream_mode', 'separate'),
+                settings.get('parent_timetable_show_teacher', 1),
                 normalize_hex_color(settings.get('theme_primary_color', ''), '#1E3C72'),
                 normalize_hex_color(settings.get('theme_secondary_color', ''), '#2A5298'),
                 normalize_hex_color(settings.get('theme_accent_color', ''), '#1F7A8C'),
@@ -5303,6 +8661,505 @@ def set_teacher_operations_enabled(school_id, enabled):
             (1 if enabled else 0, school_id)
         )
     invalidate_school_cache(school_id)
+
+
+def create_school_billing_record(
+    school_id,
+    amount_due=0.0,
+    amount_paid=0.0,
+    currency='NGN',
+    status='pending',
+    invoice_ref='',
+    plan_name='',
+    due_date='',
+    paid_at='',
+    note='',
+    created_by='',
+):
+    sid = (school_id or '').strip()
+    if not sid:
+        raise ValueError('School ID is required.')
+    if not ensure_extended_features_schema():
+        raise ValueError('Billing schema unavailable.')
+    status_value = (status or 'pending').strip().lower()
+    if status_value not in SCHOOL_BILLING_STATUSES:
+        status_value = 'pending'
+    due_raw = (due_date or '').strip()
+    paid_raw = (paid_at or '').strip()
+    if due_raw and not _parse_iso_date(due_raw):
+        raise ValueError('Due date must be YYYY-MM-DD.')
+    if paid_raw and not _parse_iso_date(paid_raw):
+        raise ValueError('Paid date must be YYYY-MM-DD.')
+    with db_connection(commit=True) as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """INSERT INTO school_billing_records
+               (school_id, invoice_ref, plan_name, amount_due, amount_paid, currency, due_date, paid_at, status, note, created_by, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
+            (
+                sid,
+                (invoice_ref or '').strip()[:120],
+                (plan_name or '').strip()[:120],
+                round(float(amount_due or 0), 2),
+                round(float(amount_paid or 0), 2),
+                (currency or 'NGN').strip().upper()[:10],
+                due_raw,
+                paid_raw,
+                status_value,
+                (note or '').strip()[:500],
+                (created_by or '').strip()[:120],
+            ),
+        )
+    return True
+
+
+def list_school_billing_records(school_id, limit=10):
+    sid = (school_id or '').strip()
+    if not sid or not ensure_extended_features_schema():
+        return []
+    rows_out = []
+    with db_connection() as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """SELECT invoice_ref, plan_name, amount_due, amount_paid, currency, due_date, paid_at, status, note, created_by, created_at
+               FROM school_billing_records
+               WHERE school_id = ?
+               ORDER BY created_at DESC
+               LIMIT ?""",
+            (sid, max(1, min(int(limit or 10), 100))),
+        )
+        for row in (c.fetchall() or []):
+            rows_out.append({
+                'invoice_ref': row[0] or '',
+                'plan_name': row[1] or '',
+                'amount_due': safe_float(row[2], 0.0),
+                'amount_paid': safe_float(row[3], 0.0),
+                'currency': row[4] or 'NGN',
+                'due_date': row[5] or '',
+                'paid_at': row[6] or '',
+                'status': row[7] or 'pending',
+                'note': row[8] or '',
+                'created_by': row[9] or '',
+                'created_at': format_timestamp(row[10]),
+            })
+    return rows_out
+
+
+def get_school_billing_summary(school_id):
+    sid = (school_id or '').strip()
+    summary = {
+        'total_rows': 0,
+        'pending_rows': 0,
+        'paid_rows': 0,
+        'overdue_rows': 0,
+        'due_soon_rows': 0,
+        'total_due': 0.0,
+        'total_paid': 0.0,
+        'outstanding': 0.0,
+        'latest_status': '',
+        'latest_due_date': '',
+    }
+    if not sid or not ensure_extended_features_schema():
+        return summary
+    with db_connection() as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """SELECT
+                   COUNT(*),
+                   COALESCE(SUM(CASE WHEN LOWER(status) IN ('pending', 'part_paid') THEN 1 ELSE 0 END), 0),
+                   COALESCE(SUM(CASE WHEN LOWER(status) = 'paid' THEN 1 ELSE 0 END), 0),
+                   COALESCE(SUM(CASE WHEN LOWER(status) = 'overdue' THEN 1 ELSE 0 END), 0),
+                   COALESCE(SUM(amount_due), 0),
+                   COALESCE(SUM(amount_paid), 0)
+               FROM school_billing_records
+               WHERE school_id = ?""",
+            (sid,),
+        )
+        row = c.fetchone() or [0, 0, 0, 0, 0, 0]
+        summary['total_rows'] = int(row[0] or 0)
+        summary['pending_rows'] = int(row[1] or 0)
+        summary['paid_rows'] = int(row[2] or 0)
+        summary['overdue_rows'] = int(row[3] or 0)
+        summary['total_due'] = round(safe_float(row[4], 0.0), 2)
+        summary['total_paid'] = round(safe_float(row[5], 0.0), 2)
+        summary['outstanding'] = round(max(0.0, summary['total_due'] - summary['total_paid']), 2)
+        db_execute(
+            c,
+            """SELECT status, due_date
+               FROM school_billing_records
+               WHERE school_id = ?
+               ORDER BY created_at DESC
+               LIMIT 1""",
+            (sid,),
+        )
+        latest = c.fetchone()
+        if latest:
+            summary['latest_status'] = (latest[0] or '').strip().lower()
+            summary['latest_due_date'] = (latest[1] or '').strip()
+        db_execute(
+            c,
+            """SELECT COUNT(*)
+               FROM school_billing_records
+               WHERE school_id = ?
+                 AND LOWER(status) IN ('pending', 'part_paid')
+                 AND COALESCE(TRIM(due_date), '') <> ''
+                 AND due_date >= ?
+                 AND due_date <= ?""",
+            (sid, date.today().isoformat(), (date.today() + timedelta(days=7)).isoformat()),
+        )
+        summary['due_soon_rows'] = int((c.fetchone() or [0])[0] or 0)
+    return summary
+
+
+def get_school_access_audit_logs(school_id, limit=10):
+    sid = (school_id or '').strip()
+    if not sid or not ensure_extended_features_schema():
+        return []
+    out = []
+    with db_connection() as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """SELECT old_status, new_status, note, changed_by, created_at
+               FROM school_access_audit_logs
+               WHERE school_id = ?
+               ORDER BY created_at DESC
+               LIMIT ?""",
+            (sid, max(1, min(int(limit or 10), 60))),
+        )
+        for row in (c.fetchall() or []):
+            out.append({
+                'old_status': row[0] or '',
+                'new_status': row[1] or '',
+                'note': row[2] or '',
+                'changed_by': row[3] or '',
+                'created_at': format_timestamp(row[4]),
+            })
+    return out
+
+
+def run_school_backup_dry_run(school_id, actor_user_id='', actor_role='super_admin'):
+    sid = (school_id or '').strip()
+    if not sid:
+        raise ValueError('School ID is required.')
+    ensure_extended_features_schema()
+    started = datetime.now()
+    payload = build_school_backup_payload(sid)
+    payload_json = json.dumps(payload)
+    verify = verify_backup_payload_summary(payload)
+    missing_sections = verify.get('missing_sections', []) if isinstance(verify, dict) else []
+    ok = bool(verify.get('ok')) if isinstance(verify, dict) else False
+    duration_ms = int((datetime.now() - started).total_seconds() * 1000)
+    result = {
+        'ok': ok,
+        'duration_ms': duration_ms,
+        'missing_sections': list(missing_sections),
+        'backup_size_bytes': len(payload_json.encode('utf-8')),
+        'error_text': '',
+    }
+    with db_connection(commit=True) as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """INSERT INTO school_backup_drill_logs
+               (school_id, actor_user_id, actor_role, ok, duration_ms, missing_sections_json, backup_size_bytes, error_text, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
+            (
+                sid,
+                (actor_user_id or '').strip()[:120],
+                (actor_role or '').strip()[:40],
+                1 if ok else 0,
+                duration_ms,
+                json.dumps(list(missing_sections or [])),
+                int(result['backup_size_bytes'] or 0),
+                '',
+            ),
+        )
+    return result
+
+
+def get_latest_school_backup_drill(school_id):
+    sid = (school_id or '').strip()
+    if not sid or not ensure_extended_features_schema():
+        return {}
+    with db_connection() as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """SELECT ok, duration_ms, missing_sections_json, backup_size_bytes, error_text, created_at
+               FROM school_backup_drill_logs
+               WHERE school_id = ?
+               ORDER BY created_at DESC
+               LIMIT 1""",
+            (sid,),
+        )
+        row = c.fetchone()
+    if not row:
+        return {}
+    missing_sections = []
+    try:
+        parsed = json.loads(row[2] or '[]')
+        if isinstance(parsed, list):
+            missing_sections = [str(x) for x in parsed]
+    except Exception:
+        missing_sections = []
+    return {
+        'ok': bool(int(row[0] or 0)),
+        'duration_ms': int(row[1] or 0),
+        'missing_sections': missing_sections,
+        'backup_size_bytes': int(row[3] or 0),
+        'error_text': (row[4] or '').strip(),
+        'created_at': format_timestamp(row[5]),
+    }
+
+
+def update_school_access_policy_with_cursor(
+    c,
+    school_id,
+    access_status='trial_free',
+    trial_start_date='',
+    trial_end_date='',
+    subscription_plan='',
+    subscription_start_date='',
+    subscription_end_date='',
+    payment_due_date='',
+    payment_grace_days=14,
+    payment_reference='',
+    access_note='',
+    plan_max_students=0,
+    plan_max_teachers=0,
+    plan_storage_quota_mb=0,
+    plan_features_json='{}',
+    updated_by='',
+):
+    """Update super-admin controlled access lifecycle for one school using an existing cursor."""
+    sid = (school_id or '').strip()
+    if not sid:
+        raise ValueError('School ID is required.')
+
+    db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS access_status TEXT DEFAULT 'trial_free'")
+    db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS trial_start_date TEXT")
+    db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS trial_end_date TEXT")
+    db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS subscription_plan TEXT DEFAULT ''")
+    db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS subscription_start_date TEXT")
+    db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS subscription_end_date TEXT")
+    db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS payment_due_date TEXT")
+    db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS payment_grace_days INTEGER DEFAULT 14")
+    db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS payment_reference TEXT DEFAULT ''")
+    db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS access_note TEXT DEFAULT ''")
+    db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS plan_max_students INTEGER DEFAULT 0")
+    db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS plan_max_teachers INTEGER DEFAULT 0")
+    db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS plan_storage_quota_mb INTEGER DEFAULT 0")
+    db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS plan_features_json TEXT DEFAULT '{}'")
+    db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS access_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+    db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS access_updated_by TEXT DEFAULT ''")
+
+    db_execute(
+        c,
+        """SELECT access_status, trial_start_date, trial_end_date, subscription_plan, subscription_start_date,
+                  subscription_end_date, payment_due_date, payment_grace_days, payment_reference, access_note,
+                  plan_max_students, plan_max_teachers, plan_storage_quota_mb, plan_features_json
+           FROM schools
+           WHERE school_id = ?
+           LIMIT 1""",
+        (sid,),
+    )
+    old_row = c.fetchone()
+    if not old_row:
+        raise ValueError('School not found.')
+
+    status_value = normalize_school_access_status(access_status, default='trial_free')
+    trial_start = (trial_start_date or '').strip()
+    trial_end = (trial_end_date or '').strip()
+    sub_start = (subscription_start_date or '').strip()
+    sub_end = (subscription_end_date or '').strip()
+    due_date = (payment_due_date or '').strip()
+    grace_days = _normalize_non_negative_int(payment_grace_days, 14, 365)
+    plan = (subscription_plan or '').strip()[:120]
+    payment_ref = (payment_reference or '').strip()[:200]
+    note = (access_note or '').strip()[:500]
+    plan_students = _normalize_non_negative_int(plan_max_students, 0, 1000000)
+    plan_teachers = _normalize_non_negative_int(plan_max_teachers, 0, 100000)
+    plan_storage_mb = _normalize_non_negative_int(plan_storage_quota_mb, 0, 1000000)
+    plan_features = _normalize_plan_features_json(plan_features_json)
+
+    trial_start_dt = _parse_iso_date(trial_start) if trial_start else None
+    trial_end_dt = _parse_iso_date(trial_end) if trial_end else None
+    if trial_start and not trial_start_dt:
+        raise ValueError('Trial start date must be YYYY-MM-DD.')
+    if trial_end and not trial_end_dt:
+        raise ValueError('Trial end date must be YYYY-MM-DD.')
+    if trial_start_dt and trial_end_dt and trial_end_dt < trial_start_dt:
+        raise ValueError('Trial end date cannot be earlier than trial start date.')
+
+    sub_start_dt = _parse_iso_date(sub_start) if sub_start else None
+    sub_end_dt = _parse_iso_date(sub_end) if sub_end else None
+    if sub_start and not sub_start_dt:
+        raise ValueError('Subscription start date must be YYYY-MM-DD.')
+    if sub_end and not sub_end_dt:
+        raise ValueError('Subscription end date must be YYYY-MM-DD.')
+    if sub_start_dt and sub_end_dt and sub_end_dt < sub_start_dt:
+        raise ValueError('Subscription end date cannot be earlier than subscription start date.')
+    due_dt = _parse_iso_date(due_date) if due_date else None
+    if due_date and not due_dt:
+        raise ValueError('Payment due date must be YYYY-MM-DD.')
+
+    if status_value == 'trial_free' and not trial_start:
+        trial_start = date.today().isoformat()
+    if status_value == 'active_paid' and not sub_start:
+        sub_start = date.today().isoformat()
+    if status_value in {'active_paid', 'pending_payment'} and not due_date and sub_end:
+        due_date = sub_end
+
+    if status_value == 'active_paid':
+        profile = build_school_profile_completeness(sid)
+        if not profile.get('is_complete'):
+            missing = ', '.join((profile.get('missing') or [])[:4])
+            raise ValueError(f'School profile is incomplete for activation. Missing: {missing}.')
+
+    db_execute(
+        c,
+        """UPDATE schools
+           SET access_status = ?, trial_start_date = ?, trial_end_date = ?,
+               subscription_plan = ?, subscription_start_date = ?, subscription_end_date = ?,
+               payment_due_date = ?, payment_grace_days = ?,
+               payment_reference = ?, access_note = ?,
+               plan_max_students = ?, plan_max_teachers = ?, plan_storage_quota_mb = ?, plan_features_json = ?,
+               access_updated_at = ?, access_updated_by = ?
+           WHERE school_id = ?""",
+        (
+            status_value,
+            trial_start,
+            trial_end,
+            plan,
+            sub_start,
+            sub_end,
+            due_date,
+            grace_days,
+            payment_ref,
+            note,
+            plan_students,
+            plan_teachers,
+            plan_storage_mb,
+            plan_features,
+            datetime.now(),
+            (updated_by or '').strip(),
+            sid,
+        ),
+    )
+
+    old_payload = {
+        'access_status': old_row[0] or '',
+        'trial_start_date': old_row[1] or '',
+        'trial_end_date': old_row[2] or '',
+        'subscription_plan': old_row[3] or '',
+        'subscription_start_date': old_row[4] or '',
+        'subscription_end_date': old_row[5] or '',
+        'payment_due_date': old_row[6] or '',
+        'payment_grace_days': _normalize_non_negative_int(old_row[7], 14, 365),
+        'payment_reference': old_row[8] or '',
+        'access_note': old_row[9] or '',
+        'plan_max_students': _normalize_non_negative_int(old_row[10], 0, 1000000),
+        'plan_max_teachers': _normalize_non_negative_int(old_row[11], 0, 100000),
+        'plan_storage_quota_mb': _normalize_non_negative_int(old_row[12], 0, 1000000),
+        'plan_features_json': _normalize_plan_features_json(old_row[13] or '{}'),
+    }
+    new_payload = {
+        'access_status': status_value,
+        'trial_start_date': trial_start,
+        'trial_end_date': trial_end,
+        'subscription_plan': plan,
+        'subscription_start_date': sub_start,
+        'subscription_end_date': sub_end,
+        'payment_due_date': due_date,
+        'payment_grace_days': grace_days,
+        'payment_reference': payment_ref,
+        'access_note': note,
+        'plan_max_students': plan_students,
+        'plan_max_teachers': plan_teachers,
+        'plan_storage_quota_mb': plan_storage_mb,
+        'plan_features_json': plan_features,
+    }
+    db_execute(
+        c,
+        """CREATE TABLE IF NOT EXISTS school_access_audit_logs (
+               id SERIAL PRIMARY KEY,
+               school_id TEXT NOT NULL,
+               old_status TEXT DEFAULT '',
+               new_status TEXT DEFAULT '',
+               old_payload_json TEXT DEFAULT '{}',
+               new_payload_json TEXT DEFAULT '{}',
+               note TEXT DEFAULT '',
+               changed_by TEXT DEFAULT '',
+               created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+           )""",
+    )
+    db_execute(
+        c,
+        """INSERT INTO school_access_audit_logs
+           (school_id, old_status, new_status, old_payload_json, new_payload_json, note, changed_by, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
+        (
+            sid,
+            str(old_payload.get('access_status') or ''),
+            status_value,
+            json.dumps(old_payload),
+            json.dumps(new_payload),
+            note[:300],
+            (updated_by or '').strip()[:120],
+        ),
+    )
+
+
+def update_school_access_policy(
+    school_id,
+    access_status='trial_free',
+    trial_start_date='',
+    trial_end_date='',
+    subscription_plan='',
+    subscription_start_date='',
+    subscription_end_date='',
+    payment_due_date='',
+    payment_grace_days=14,
+    payment_reference='',
+    access_note='',
+    plan_max_students=0,
+    plan_max_teachers=0,
+    plan_storage_quota_mb=0,
+    plan_features_json='{}',
+    updated_by='',
+):
+    """Update super-admin controlled access lifecycle for one school."""
+    sid = (school_id or '').strip()
+    if not sid:
+        raise ValueError('School ID is required.')
+    if not ensure_school_access_schema():
+        raise ValueError('School access schema is unavailable.')
+    with db_connection(commit=True) as conn:
+        c = conn.cursor()
+        update_school_access_policy_with_cursor(
+            c=c,
+            school_id=sid,
+            access_status=access_status,
+            trial_start_date=trial_start_date,
+            trial_end_date=trial_end_date,
+            subscription_plan=subscription_plan,
+            subscription_start_date=subscription_start_date,
+            subscription_end_date=subscription_end_date,
+            payment_due_date=payment_due_date,
+            payment_grace_days=payment_grace_days,
+            payment_reference=payment_reference,
+            access_note=access_note,
+            plan_max_students=plan_max_students,
+            plan_max_teachers=plan_max_teachers,
+            plan_storage_quota_mb=plan_storage_quota_mb,
+            plan_features_json=plan_features_json,
+            updated_by=updated_by,
+        )
+    invalidate_school_cache(sid)
 
 def get_grade_config(school_id):
     """Get grade thresholds for a school."""
@@ -5453,9 +9310,15 @@ def ensure_extended_features_schema():
                        question TEXT NOT NULL,
                        source_page TEXT DEFAULT '',
                        used_llm INTEGER NOT NULL DEFAULT 0,
+                       confidence REAL DEFAULT 0.0,
+                       unresolved INTEGER NOT NULL DEFAULT 0,
+                       response_mode TEXT DEFAULT 'standard',
                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                    )""",
             )
+            db_execute(c, "ALTER TABLE assistant_query_logs ADD COLUMN IF NOT EXISTS confidence REAL DEFAULT 0.0")
+            db_execute(c, "ALTER TABLE assistant_query_logs ADD COLUMN IF NOT EXISTS unresolved INTEGER NOT NULL DEFAULT 0")
+            db_execute(c, "ALTER TABLE assistant_query_logs ADD COLUMN IF NOT EXISTS response_mode TEXT DEFAULT 'standard'")
             db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_assistant_query_logs_school_created ON assistant_query_logs(school_id, created_at DESC)')
             db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_assistant_query_logs_role_created ON assistant_query_logs(role, created_at DESC)')
             db_execute(
@@ -5473,6 +9336,35 @@ def ensure_extended_features_schema():
                    )""",
             )
             db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_assistant_feedback_school_created ON assistant_feedback_logs(school_id, created_at DESC)')
+            db_execute(
+                c,
+                """CREATE TABLE IF NOT EXISTS assistant_conversation_memory (
+                       id SERIAL PRIMARY KEY,
+                       school_id TEXT,
+                       role TEXT DEFAULT '',
+                       user_id TEXT NOT NULL,
+                       question TEXT NOT NULL,
+                       answer TEXT DEFAULT '',
+                       source_page TEXT DEFAULT '',
+                       response_mode TEXT DEFAULT 'standard',
+                       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                   )""",
+            )
+            db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_assistant_memory_lookup ON assistant_conversation_memory(school_id, role, user_id, created_at DESC)')
+            db_execute(
+                c,
+                """CREATE TABLE IF NOT EXISTS assistant_user_preferences (
+                       id SERIAL PRIMARY KEY,
+                       school_id TEXT,
+                       role TEXT DEFAULT '',
+                       user_id TEXT NOT NULL,
+                       pref_key TEXT NOT NULL,
+                       pref_value TEXT DEFAULT '',
+                       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                       UNIQUE(school_id, role, user_id, pref_key)
+                   )""",
+            )
+            db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_assistant_user_prefs_lookup ON assistant_user_preferences(school_id, role, user_id, pref_key)')
             db_execute(
                 c,
                 """CREATE TABLE IF NOT EXISTS admin_action_audit_logs (
@@ -5539,6 +9431,22 @@ def ensure_extended_features_schema():
                    )""",
             )
             db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_timetable_school_class_day ON class_timetables(school_id, classname, day_of_week)')
+            db_execute(
+                c,
+                """CREATE TABLE IF NOT EXISTS timetable_change_logs (
+                       id SERIAL PRIMARY KEY,
+                       school_id TEXT NOT NULL,
+                       action TEXT NOT NULL,
+                       classname TEXT NOT NULL,
+                       day_of_week INTEGER NOT NULL,
+                       period_label TEXT NOT NULL,
+                       before_json TEXT DEFAULT '{}',
+                       after_json TEXT DEFAULT '{}',
+                       changed_by TEXT DEFAULT '',
+                       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                   )""",
+            )
+            db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_timetable_change_logs_school_created ON timetable_change_logs(school_id, created_at DESC)')
             db_execute(
                 c,
                 """CREATE TABLE IF NOT EXISTS period_attendance (
@@ -5613,9 +9521,11 @@ def ensure_extended_features_schema():
                        target_subject TEXT DEFAULT '',
                        deadline_date TEXT DEFAULT '',
                        attachment_path TEXT DEFAULT '',
+                       attachment_thumb_path TEXT DEFAULT '',
                        attachment_name TEXT DEFAULT '',
                        attachment_mime TEXT DEFAULT '',
                        attachment_size INTEGER DEFAULT 0,
+                       attachment_scan_status TEXT DEFAULT 'clean',
                        is_active INTEGER NOT NULL DEFAULT 1,
                        created_by TEXT DEFAULT '',
                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -5623,9 +9533,11 @@ def ensure_extended_features_schema():
             )
             db_execute(c, "ALTER TABLE student_messages ADD COLUMN IF NOT EXISTS target_subject TEXT DEFAULT ''")
             db_execute(c, "ALTER TABLE student_messages ADD COLUMN IF NOT EXISTS attachment_path TEXT DEFAULT ''")
+            db_execute(c, "ALTER TABLE student_messages ADD COLUMN IF NOT EXISTS attachment_thumb_path TEXT DEFAULT ''")
             db_execute(c, "ALTER TABLE student_messages ADD COLUMN IF NOT EXISTS attachment_name TEXT DEFAULT ''")
             db_execute(c, "ALTER TABLE student_messages ADD COLUMN IF NOT EXISTS attachment_mime TEXT DEFAULT ''")
             db_execute(c, "ALTER TABLE student_messages ADD COLUMN IF NOT EXISTS attachment_size INTEGER DEFAULT 0")
+            db_execute(c, "ALTER TABLE student_messages ADD COLUMN IF NOT EXISTS attachment_scan_status TEXT DEFAULT 'clean'")
             db_execute(
                 c,
                 """CREATE TABLE IF NOT EXISTS teacher_messages (
@@ -5690,6 +9602,97 @@ def ensure_extended_features_schema():
                    )""",
             )
             db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_parent_message_reads_lookup ON parent_message_reads(school_id, parent_phone, message_id)')
+            db_execute(
+                c,
+                """CREATE TABLE IF NOT EXISTS app_error_logs (
+                       id SERIAL PRIMARY KEY,
+                       error_uid TEXT UNIQUE NOT NULL,
+                       school_id TEXT,
+                       role TEXT DEFAULT '',
+                       user_id TEXT DEFAULT '',
+                       endpoint TEXT DEFAULT '',
+                       path TEXT DEFAULT '',
+                       method TEXT DEFAULT '',
+                       error_type TEXT DEFAULT '',
+                       error_message TEXT DEFAULT '',
+                       traceback_text TEXT DEFAULT '',
+                       source_page TEXT DEFAULT '',
+                       request_meta_json TEXT DEFAULT '',
+                       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                   )""",
+            )
+            db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_app_error_logs_created ON app_error_logs(created_at DESC)')
+            db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_app_error_logs_school_created ON app_error_logs(school_id, created_at DESC)')
+            db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_app_error_logs_role_created ON app_error_logs(role, created_at DESC)')
+            db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_app_error_logs_error_type ON app_error_logs(error_type)')
+            db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS payment_due_date TEXT")
+            db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS payment_grace_days INTEGER DEFAULT 14")
+            db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS plan_max_students INTEGER DEFAULT 0")
+            db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS plan_max_teachers INTEGER DEFAULT 0")
+            db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS plan_storage_quota_mb INTEGER DEFAULT 0")
+            db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS plan_features_json TEXT DEFAULT '{}'")
+            db_execute(
+                c,
+                """CREATE TABLE IF NOT EXISTS school_billing_records (
+                       id SERIAL PRIMARY KEY,
+                       school_id TEXT NOT NULL,
+                       invoice_ref TEXT DEFAULT '',
+                       plan_name TEXT DEFAULT '',
+                       amount_due REAL NOT NULL DEFAULT 0,
+                       amount_paid REAL NOT NULL DEFAULT 0,
+                       currency TEXT DEFAULT 'NGN',
+                       due_date TEXT DEFAULT '',
+                       paid_at TEXT DEFAULT '',
+                       status TEXT NOT NULL DEFAULT 'pending',
+                       note TEXT DEFAULT '',
+                       created_by TEXT DEFAULT '',
+                       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                   )""",
+            )
+            db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_school_billing_school_created ON school_billing_records(school_id, created_at DESC)')
+            db_execute(
+                c,
+                """CREATE TABLE IF NOT EXISTS school_access_audit_logs (
+                       id SERIAL PRIMARY KEY,
+                       school_id TEXT NOT NULL,
+                       old_status TEXT DEFAULT '',
+                       new_status TEXT DEFAULT '',
+                       old_payload_json TEXT DEFAULT '{}',
+                       new_payload_json TEXT DEFAULT '{}',
+                       note TEXT DEFAULT '',
+                       changed_by TEXT DEFAULT '',
+                       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                   )""",
+            )
+            db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_school_access_audit_school_created ON school_access_audit_logs(school_id, created_at DESC)')
+            db_execute(
+                c,
+                """CREATE TABLE IF NOT EXISTS school_backup_drill_logs (
+                       id SERIAL PRIMARY KEY,
+                       school_id TEXT NOT NULL,
+                       actor_user_id TEXT DEFAULT '',
+                       actor_role TEXT DEFAULT '',
+                       ok INTEGER NOT NULL DEFAULT 0,
+                       duration_ms INTEGER NOT NULL DEFAULT 0,
+                       missing_sections_json TEXT DEFAULT '[]',
+                       backup_size_bytes INTEGER NOT NULL DEFAULT 0,
+                       error_text TEXT DEFAULT '',
+                       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                   )""",
+            )
+            db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_school_backup_drill_school_created ON school_backup_drill_logs(school_id, created_at DESC)')
+            db_execute(
+                c,
+                """CREATE TABLE IF NOT EXISTS school_auto_backups (
+                       id SERIAL PRIMARY KEY,
+                       school_id TEXT NOT NULL,
+                       trigger_reason TEXT DEFAULT 'schedule',
+                       backup_size_bytes INTEGER NOT NULL DEFAULT 0,
+                       backup_json TEXT DEFAULT '',
+                       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                   )""",
+            )
+            db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_school_auto_backups_school_created ON school_auto_backups(school_id, created_at DESC)')
         return True
     except Exception as exc:
         logging.warning("Failed to ensure extended features schema: %s", exc)
@@ -5716,7 +9719,7 @@ def record_login_audit(username, role, school_id, endpoint, success, reason=''):
     except Exception:
         pass
 
-def log_assistant_query(role, question, source_page='', used_llm=False):
+def log_assistant_query(role, question, source_page='', used_llm=False, confidence=0.0, unresolved=False, response_mode='standard'):
     if not ensure_extended_features_schema():
         return
     role_name = (role or '').strip().lower()
@@ -5730,14 +9733,22 @@ def log_assistant_query(role, question, source_page='', used_llm=False):
         school_id = ''
     user_id = (session.get('user_id') or session.get('parent_phone') or '').strip().lower()
     page = (source_page or '').strip()[:220]
+    mode = (response_mode or 'standard').strip().lower()
+    if mode not in APP_ASSISTANT_RESPONSE_MODES:
+        mode = 'standard'
+    try:
+        conf_val = float(confidence or 0.0)
+    except Exception:
+        conf_val = 0.0
+    conf_val = max(0.0, min(1.0, conf_val))
     try:
         with db_connection(commit=True) as conn:
             c = conn.cursor()
             db_execute(
                 c,
                 """INSERT INTO assistant_query_logs
-                   (school_id, role, user_id, question, source_page, used_llm, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
+                   (school_id, role, user_id, question, source_page, used_llm, confidence, unresolved, response_mode, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
                 (
                     school_id or None,
                     role_name,
@@ -5745,6 +9756,9 @@ def log_assistant_query(role, question, source_page='', used_llm=False):
                     text[:500],
                     page,
                     1 if used_llm else 0,
+                    conf_val,
+                    1 if unresolved else 0,
+                    mode,
                 ),
             )
     except Exception:
@@ -5780,6 +9794,201 @@ def log_assistant_feedback(role, question, answer, helpful, source_page=''):
             )
     except Exception:
         pass
+
+def _assistant_memory_user_context(role=''):
+    role_name = (role or _current_role() or '').strip().lower()
+    if role_name not in {'super_admin', 'school_admin', 'teacher', 'student', 'parent'}:
+        return '', '', ''
+    user_id = (session.get('user_id') or session.get('parent_phone') or '').strip().lower()
+    school_id = (session.get('school_id') or '').strip()
+    if role_name == 'super_admin':
+        school_id = ''
+    return role_name, user_id, school_id
+
+def get_assistant_memory_history(role='', days=2, max_exchanges=12):
+    """
+    Return recent assistant memory as alternating user/assistant rows:
+    [{'role':'user','text':'...'}, {'role':'assistant','text':'...'}]
+    """
+    role_name, user_id, school_id = _assistant_memory_user_context(role=role)
+    if not role_name or not user_id:
+        return []
+    if not ensure_extended_features_schema():
+        return []
+    days_val = max(1, min(int(days or APP_ASSISTANT_MEMORY_DAYS), 7))
+    max_rows = max(2, min(int(max_exchanges or APP_ASSISTANT_MEMORY_MAX_EXCHANGES), 80))
+    try:
+        with db_connection() as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """SELECT question, answer
+                   FROM assistant_conversation_memory
+                   WHERE COALESCE(school_id, '') = COALESCE(?, '')
+                     AND LOWER(role) = ?
+                     AND LOWER(user_id) = ?
+                     AND created_at >= (CURRENT_TIMESTAMP - (? || ' days')::interval)
+                   ORDER BY created_at ASC
+                   LIMIT ?""",
+                (school_id or '', role_name, user_id, str(days_val), int(max_rows)),
+            )
+            rows = c.fetchall() or []
+        out = []
+        for row in rows:
+            q = str((row[0] or '')).strip()
+            a = str((row[1] or '')).strip()
+            if q:
+                out.append({'role': 'user', 'text': q[:400]})
+            if a:
+                out.append({'role': 'assistant', 'text': a[:400]})
+        return out[-16:]
+    except Exception:
+        return []
+
+def save_assistant_memory_exchange(role='', question='', answer='', source_page='', response_mode='standard'):
+    role_name, user_id, school_id = _assistant_memory_user_context(role=role)
+    q = (question or '').strip()
+    a = (answer or '').strip()
+    if not role_name or not user_id or not q:
+        return False
+    if not ensure_extended_features_schema():
+        return False
+    mode = (response_mode or 'standard').strip().lower()
+    if mode not in APP_ASSISTANT_RESPONSE_MODES:
+        mode = 'standard'
+    try:
+        with db_connection(commit=True) as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """INSERT INTO assistant_conversation_memory
+                   (school_id, role, user_id, question, answer, source_page, response_mode, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
+                (
+                    school_id or None,
+                    role_name,
+                    user_id,
+                    q[:500],
+                    a[:1200],
+                    (source_page or '').strip()[:220],
+                    mode,
+                ),
+            )
+            db_execute(
+                c,
+                """DELETE FROM assistant_conversation_memory
+                   WHERE COALESCE(school_id, '') = COALESCE(?, '')
+                     AND LOWER(role) = ?
+                     AND LOWER(user_id) = ?
+                     AND created_at < (CURRENT_TIMESTAMP - (? || ' days')::interval)""",
+                (school_id or '', role_name, user_id, str(APP_ASSISTANT_MEMORY_DAYS)),
+            )
+            db_execute(
+                c,
+                """DELETE FROM assistant_conversation_memory
+                   WHERE id IN (
+                       SELECT id
+                       FROM assistant_conversation_memory
+                       WHERE COALESCE(school_id, '') = COALESCE(?, '')
+                         AND LOWER(role) = ?
+                         AND LOWER(user_id) = ?
+                       ORDER BY created_at DESC
+                       OFFSET ?
+                   )""",
+                (school_id or '', role_name, user_id, int(APP_ASSISTANT_MEMORY_MAX_EXCHANGES)),
+            )
+        return True
+    except Exception:
+        return False
+
+def clear_assistant_memory(role=''):
+    role_name, user_id, school_id = _assistant_memory_user_context(role=role)
+    if not role_name or not user_id:
+        return 0
+    if not ensure_extended_features_schema():
+        return 0
+    try:
+        with db_connection(commit=True) as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """DELETE FROM assistant_conversation_memory
+                   WHERE COALESCE(school_id, '') = COALESCE(?, '')
+                     AND LOWER(role) = ?
+                     AND LOWER(user_id) = ?""",
+                (school_id or '', role_name, user_id),
+            )
+            return max(0, int(getattr(c, 'rowcount', 0) or 0))
+    except Exception:
+        return 0
+
+def get_assistant_user_preference(role='', key='response_mode', default='standard'):
+    role_name = (role or _current_role() or '').strip().lower()
+    if role_name not in {'super_admin', 'school_admin', 'teacher', 'student', 'parent'}:
+        return default
+    pref_key = (key or '').strip().lower()
+    if not pref_key:
+        return default
+    user_id = (session.get('user_id') or session.get('parent_phone') or '').strip().lower()
+    if not user_id:
+        return default
+    school_id = (session.get('school_id') or '').strip()
+    if role_name == 'super_admin':
+        school_id = ''
+    if not ensure_extended_features_schema():
+        return default
+    try:
+        with db_connection() as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """SELECT pref_value
+                   FROM assistant_user_preferences
+                   WHERE COALESCE(school_id, '') = COALESCE(?, '')
+                     AND LOWER(role) = ?
+                     AND LOWER(user_id) = ?
+                     AND LOWER(pref_key) = ?
+                   LIMIT 1""",
+                (school_id or '', role_name, user_id, pref_key),
+            )
+            row = c.fetchone()
+            if row and str(row[0] or '').strip():
+                return str(row[0] or '').strip()
+    except Exception:
+        return default
+    return default
+
+def set_assistant_user_preference(role='', key='response_mode', value=''):
+    role_name = (role or _current_role() or '').strip().lower()
+    if role_name not in {'super_admin', 'school_admin', 'teacher', 'student', 'parent'}:
+        return False
+    pref_key = (key or '').strip().lower()
+    pref_value = str(value or '').strip()
+    if not pref_key:
+        return False
+    user_id = (session.get('user_id') or session.get('parent_phone') or '').strip().lower()
+    if not user_id:
+        return False
+    school_id = (session.get('school_id') or '').strip()
+    if role_name == 'super_admin':
+        school_id = ''
+    if not ensure_extended_features_schema():
+        return False
+    try:
+        with db_connection(commit=True) as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """INSERT INTO assistant_user_preferences
+                   (school_id, role, user_id, pref_key, pref_value, updated_at)
+                   VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                   ON CONFLICT(school_id, role, user_id, pref_key)
+                   DO UPDATE SET pref_value = EXCLUDED.pref_value, updated_at = CURRENT_TIMESTAMP""",
+                (school_id or '', role_name, user_id, pref_key, pref_value),
+            )
+            return True
+    except Exception:
+        return False
 
 def record_admin_action_audit(school_id, action_type, target_scope='', payload=None):
     if not ensure_extended_features_schema():
@@ -5919,6 +10128,181 @@ def get_notification_delivery_stats(school_id, days=30):
     except Exception:
         return {'queued': 0, 'sent': 0, 'failed': 0}
 
+def _file_magic_looks_like_image(path):
+    try:
+        with open(path, 'rb') as fh:
+            sig = fh.read(16)
+        return bool(_detect_image_extension_from_bytes(sig))
+    except Exception:
+        return False
+
+def _scan_pending_student_message_attachments(max_rows=80):
+    if not ensure_extended_features_schema():
+        return 0
+    processed = 0
+    try:
+        with db_connection(commit=True) as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """SELECT id, attachment_path, attachment_thumb_path
+                   FROM student_messages
+                   WHERE attachment_path <> ''
+                     AND LOWER(COALESCE(attachment_scan_status, 'pending')) = 'pending'
+                   ORDER BY created_at ASC
+                   LIMIT ?""",
+                (int(max(1, min(max_rows, 500))),),
+            )
+            rows = c.fetchall() or []
+            for row in rows:
+                msg_id = int(row[0] or 0)
+                rel_path = (row[1] or '').strip().replace('\\', '/')
+                rel_thumb = (row[2] or '').strip().replace('\\', '/')
+                abs_path = os.path.join(app.static_folder, rel_path) if rel_path else ''
+                is_clean = bool(abs_path and os.path.isfile(abs_path) and _file_magic_looks_like_image(abs_path))
+                new_status = 'clean' if is_clean else 'blocked'
+                if not is_clean and abs_path and os.path.isfile(abs_path):
+                    try:
+                        quarantine_dir = os.path.join(app.static_folder, 'uploads', 'student_message_images', 'quarantine')
+                        os.makedirs(quarantine_dir, exist_ok=True)
+                        quarantine_name = f'blocked_{msg_id}_{os.path.basename(abs_path)}'
+                        os.replace(abs_path, os.path.join(quarantine_dir, quarantine_name))
+                    except Exception:
+                        pass
+                    if rel_thumb:
+                        try:
+                            abs_thumb = os.path.join(app.static_folder, rel_thumb)
+                            if os.path.isfile(abs_thumb):
+                                os.remove(abs_thumb)
+                        except Exception:
+                            pass
+                db_execute(
+                    c,
+                    """UPDATE student_messages
+                       SET attachment_scan_status = ?,
+                           attachment_thumb_path = CASE WHEN ? = 'clean' THEN attachment_thumb_path ELSE '' END
+                       WHERE id = ?""",
+                    (new_status, new_status, msg_id),
+                )
+                processed += 1
+    except Exception:
+        return processed
+    return processed
+
+def _cleanup_student_message_attachments(max_delete=400):
+    if not ensure_extended_features_schema():
+        return 0
+    deleted = 0
+    try:
+        with db_connection() as conn:
+            c = conn.cursor()
+            db_execute(c, "SELECT attachment_path, attachment_thumb_path FROM student_messages WHERE attachment_path <> ''")
+            refs = c.fetchall() or []
+        ref_set = set()
+        for r in refs:
+            p = (r[0] or '').strip().replace('\\', '/')
+            t = (r[1] or '').strip().replace('\\', '/')
+            if p:
+                ref_set.add(p)
+            if t:
+                ref_set.add(t)
+        root = os.path.join(app.static_folder, 'uploads', 'student_message_images')
+        if not os.path.isdir(root):
+            return 0
+        for dirpath, _dirnames, filenames in os.walk(root):
+            for fn in filenames:
+                rel = os.path.relpath(os.path.join(dirpath, fn), app.static_folder).replace('\\', '/')
+                if rel in ref_set or '/quarantine/' in ('/' + rel):
+                    continue
+                try:
+                    os.remove(os.path.join(app.static_folder, rel))
+                    deleted += 1
+                    if deleted >= max_delete:
+                        return deleted
+                except Exception:
+                    continue
+    except Exception:
+        return deleted
+    return deleted
+
+def get_effective_school_storage_quota_bytes(school_or_id):
+    limits = get_school_plan_limits(school_or_id)
+    plan_mb = int(limits.get('storage_quota_mb') or 0)
+    if plan_mb > 0:
+        return max(1, plan_mb * 1024 * 1024)
+    return max(1, int(SCHOOL_STORAGE_QUOTA_BYTES))
+
+
+def compute_school_storage_usage(school_id):
+    sid = (school_id or '').strip()
+    quota = get_effective_school_storage_quota_bytes(sid)
+    if not sid:
+        return {'used_bytes': 0, 'quota_bytes': quota, 'used_mb': 0.0, 'quota_mb': round(quota / (1024 * 1024), 1), 'pct': 0.0}
+    root = os.path.join(app.static_folder, 'uploads', 'student_message_images', sid)
+    total = 0
+    if os.path.isdir(root):
+        for dirpath, _dirnames, filenames in os.walk(root):
+            for fn in filenames:
+                try:
+                    total += os.path.getsize(os.path.join(dirpath, fn))
+                except Exception:
+                    continue
+    quota = max(1, int(quota))
+    pct = round(min(100.0, (total / quota) * 100.0), 2)
+    return {
+        'used_bytes': int(total),
+        'quota_bytes': int(quota),
+        'used_mb': round(total / (1024 * 1024), 2),
+        'quota_mb': round(quota / (1024 * 1024), 1),
+        'pct': pct,
+    }
+
+def _background_worker_loop():
+    global _LAST_AUTO_BACKUP_SWEEP_AT, _LAST_ACCESS_AUTOMATION_SWEEP_AT
+    failure_streak = 0
+    while not _BACKGROUND_WORKER_STOP.is_set():
+        try:
+            ensure_extended_features_schema()
+            with db_connection() as conn:
+                c = conn.cursor()
+                db_execute(c, "SELECT DISTINCT school_id FROM notification_queue WHERE school_id IS NOT NULL AND school_id <> '' LIMIT 120")
+                rows = c.fetchall() or []
+            for row in rows:
+                sid = (row[0] or '').strip()
+                if sid:
+                    process_notification_queue_inline(sid, max_jobs=30)
+            now = datetime.now()
+            if (_LAST_AUTO_BACKUP_SWEEP_AT is None) or ((now - _LAST_AUTO_BACKUP_SWEEP_AT) >= timedelta(minutes=30)):
+                run_scheduled_auto_backups(max_schools=12)
+                _LAST_AUTO_BACKUP_SWEEP_AT = now
+            if (_LAST_ACCESS_AUTOMATION_SWEEP_AT is None) or ((now - _LAST_ACCESS_AUTOMATION_SWEEP_AT) >= timedelta(hours=6)):
+                run_school_access_automation(max_schools=120)
+                _LAST_ACCESS_AUTOMATION_SWEEP_AT = now
+            _scan_pending_student_message_attachments(max_rows=120)
+            _cleanup_student_message_attachments(max_delete=200)
+            failure_streak = 0
+        except Exception as exc:
+            failure_streak += 1
+            logging.warning("Background worker tick failed: %s", exc)
+        backoff_multiplier = min(8, 2 ** max(0, failure_streak - 1))
+        wait_seconds = int(BACKGROUND_WORKER_INTERVAL_SECONDS * backoff_multiplier)
+        _BACKGROUND_WORKER_STOP.wait(max(BACKGROUND_WORKER_INTERVAL_SECONDS, wait_seconds))
+
+def start_background_worker():
+    global _BACKGROUND_WORKER_THREAD, _BACKGROUND_WORKER_STARTED
+    if _BACKGROUND_WORKER_STARTED:
+        return
+    _BACKGROUND_WORKER_STARTED = True
+    _BACKGROUND_WORKER_STOP.clear()
+    _BACKGROUND_WORKER_THREAD = threading.Thread(target=_background_worker_loop, name='app-background-worker', daemon=True)
+    _BACKGROUND_WORKER_THREAD.start()
+
+def stop_background_worker():
+    try:
+        _BACKGROUND_WORKER_STOP.set()
+    except Exception:
+        pass
+
 def get_backup_schedule_settings(school_id):
     sid = (school_id or '').strip()
     default = {'frequency_days': 7, 'encrypted_by_default': 1, 'last_backup_at': '', 'next_due_at': ''}
@@ -5991,31 +10375,233 @@ def mark_backup_generated(school_id):
                ON CONFLICT(school_id)
                DO UPDATE SET
                  last_backup_at = CURRENT_TIMESTAMP,
-                 updated_at = CURRENT_TIMESTAMP""",
+               updated_at = CURRENT_TIMESTAMP""",
             (sid,),
         )
+
+def verify_backup_payload_summary(payload):
+    required_sections = {'school', 'students', 'teachers', 'parents', 'messages'}
+    present = set(payload.keys()) if isinstance(payload, dict) else set()
+    missing = sorted([s for s in required_sections if s not in present])
+    students_count = len(payload.get('students') or []) if isinstance(payload, dict) and isinstance(payload.get('students'), list) else 0
+    teachers_count = len(payload.get('teachers') or []) if isinstance(payload, dict) and isinstance(payload.get('teachers'), list) else 0
+    parents_count = len(payload.get('parents') or []) if isinstance(payload, dict) and isinstance(payload.get('parents'), list) else 0
+    messages_count = len(payload.get('messages') or []) if isinstance(payload, dict) and isinstance(payload.get('messages'), list) else 0
+    warnings = []
+    if students_count == 0:
+        warnings.append('Backup contains zero students.')
+    if teachers_count == 0:
+        warnings.append('Backup contains zero teachers.')
+    return {
+        'ok': len(missing) == 0,
+        'missing_sections': missing,
+        'students_count': students_count,
+        'teachers_count': teachers_count,
+        'parents_count': parents_count,
+        'messages_count': messages_count,
+        'warnings': warnings,
+    }
+
+def get_backup_health_summary(school_id, days=30):
+    sid = (school_id or '').strip()
+    summary = {
+        'scheduled_frequency_days': 7,
+        'last_backup_at': '',
+        'next_due_at': '',
+        'is_overdue': False,
+        'exports': 0,
+        'restores': 0,
+        'restore_dry_runs': 0,
+        'auto_snapshots': 0,
+    }
+    if not sid or not ensure_extended_features_schema():
+        return summary
+    days = max(1, min(int(days or 30), 365))
+    schedule = get_backup_schedule_settings(sid)
+    summary['scheduled_frequency_days'] = int(schedule.get('frequency_days') or 7)
+    summary['last_backup_at'] = schedule.get('last_backup_at') or ''
+    summary['next_due_at'] = schedule.get('next_due_at') or ''
+    if summary['next_due_at']:
+        try:
+            next_due_raw = datetime.fromisoformat(str(summary['next_due_at']).replace('Z', '+00:00'))
+            summary['is_overdue'] = datetime.now() > next_due_raw
+        except Exception:
+            summary['is_overdue'] = False
+    try:
+        with db_connection() as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """SELECT action_type, COUNT(*)
+                   FROM admin_action_audit_logs
+                   WHERE school_id = ?
+                     AND created_at >= (CURRENT_TIMESTAMP - (? || ' days')::interval)
+                     AND LOWER(action_type) IN ('backup_export', 'backup_restore', 'backup_restore_dry_run', 'backup_auto_snapshot')
+                   GROUP BY action_type""",
+                (sid, str(days)),
+            )
+            rows = c.fetchall() or []
+        for row in rows:
+            action_type = (row[0] or '').strip().lower()
+            count = int(row[1] or 0)
+            if action_type == 'backup_export':
+                summary['exports'] = count
+            elif action_type == 'backup_restore':
+                summary['restores'] = count
+            elif action_type == 'backup_restore_dry_run':
+                summary['restore_dry_runs'] = count
+            elif action_type == 'backup_auto_snapshot':
+                summary['auto_snapshots'] = count
+    except Exception:
+        pass
+    return summary
+
+
+def create_auto_backup_snapshot(school_id, trigger_reason='schedule'):
+    sid = (school_id or '').strip()
+    if not sid:
+        raise ValueError('School ID is required.')
+    if not ensure_extended_features_schema():
+        raise ValueError('Backup schema unavailable.')
+    payload = build_school_backup_payload(sid)
+    body = json.dumps(payload)
+    body_size = len(body.encode('utf-8'))
+    max_store_bytes = 3 * 1024 * 1024
+    if body_size > max_store_bytes:
+        raise ValueError('Backup payload too large for auto snapshot store.')
+    with db_connection(commit=True) as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """INSERT INTO school_auto_backups (school_id, trigger_reason, backup_size_bytes, backup_json, created_at)
+               VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)""",
+            (sid, (trigger_reason or 'schedule').strip()[:60], int(body_size), body),
+        )
+        db_execute(
+            c,
+            """DELETE FROM school_auto_backups
+               WHERE school_id = ?
+                 AND id NOT IN (
+                   SELECT id FROM school_auto_backups
+                   WHERE school_id = ?
+                   ORDER BY created_at DESC
+                   LIMIT 4
+                 )""",
+            (sid, sid),
+        )
+    mark_backup_generated(sid)
+    record_admin_action_audit(
+        sid,
+        'backup_auto_snapshot',
+        target_scope='school_backup',
+        payload={'trigger': (trigger_reason or 'schedule').strip(), 'backup_size_bytes': int(body_size)},
+    )
+    return {'ok': True, 'backup_size_bytes': int(body_size)}
+
+
+def run_scheduled_auto_backups(max_schools=10):
+    if not ensure_extended_features_schema():
+        return {'processed': 0, 'created': 0, 'failed': 0}
+    processed = 0
+    created = 0
+    failed = 0
+    with db_connection() as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """SELECT school_id
+               FROM backup_schedule_settings
+               WHERE school_id IS NOT NULL AND school_id <> ''
+               ORDER BY updated_at DESC
+               LIMIT ?""",
+            (max(1, min(int(max_schools or 10), 80)),),
+        )
+        school_ids = [(row[0] or '').strip() for row in (c.fetchall() or []) if (row and row[0])]
+    for sid in school_ids:
+        processed += 1
+        try:
+            schedule = get_backup_schedule_settings(sid) or {}
+            last_backup_raw = (schedule.get('last_backup_at') or '').strip()
+            freq_days = max(1, _normalize_non_negative_int(schedule.get('frequency_days', 7), 7, 90))
+            due = True
+            if last_backup_raw:
+                try:
+                    last_dt = datetime.fromisoformat(str(last_backup_raw).replace('Z', '+00:00'))
+                    due = (datetime.now() - last_dt) >= timedelta(days=freq_days)
+                except Exception:
+                    due = True
+            if not due:
+                continue
+            create_auto_backup_snapshot(sid, trigger_reason='schedule')
+            created += 1
+        except Exception:
+            failed += 1
+            continue
+    return {'processed': processed, 'created': created, 'failed': failed}
+
+def get_assistant_prompt_boosts(school_id, role='', days=45, limit=3, source_page=''):
+    sid = (school_id or '').strip()
+    role_name = (role or '').strip().lower()
+    if not sid or not role_name or not ensure_extended_features_schema():
+        return []
+    days = max(7, min(int(days or 45), 180))
+    page_hint = (source_page or '').strip()[:220]
+    try:
+        with db_connection() as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """SELECT question,
+                          COALESCE(SUM(CASE WHEN helpful = 1 THEN 1 ELSE 0 END), 0) AS helpful_cnt,
+                          COALESCE(SUM(CASE WHEN helpful = 0 THEN 1 ELSE 0 END), 0) AS not_helpful_cnt,
+                          COALESCE(SUM(CASE WHEN COALESCE(source_page, '') = ? THEN 1 ELSE 0 END), 0) AS page_hits
+                   FROM assistant_feedback_logs
+                   WHERE school_id = ?
+                     AND LOWER(role) = ?
+                     AND created_at >= (CURRENT_TIMESTAMP - (? || ' days')::interval)
+                     AND COALESCE(TRIM(question), '') <> ''
+                   GROUP BY question
+                   HAVING COALESCE(SUM(CASE WHEN helpful = 1 THEN 1 ELSE 0 END), 0) > 0
+                   ORDER BY (COALESCE(SUM(CASE WHEN helpful = 1 THEN 1 ELSE 0 END), 0)
+                             - COALESCE(SUM(CASE WHEN helpful = 0 THEN 1 ELSE 0 END), 0)
+                             + COALESCE(SUM(CASE WHEN COALESCE(source_page, '') = ? THEN 1 ELSE 0 END), 0)) DESC,
+                            helpful_cnt DESC,
+                            question ASC
+                   LIMIT ?""",
+                (page_hint, sid, role_name, str(days), page_hint, int(limit)),
+            )
+            return [str(row[0] or '').strip() for row in (c.fetchall() or []) if str(row[0] or '').strip()]
+    except Exception:
+        return []
 
 def get_assistant_usage_summary(school_id, days=30):
     sid = (school_id or '').strip()
     if not sid:
-        return {'total': 0, 'llm_total': 0, 'role_rows': [], 'top_questions': []}
+        return {'total': 0, 'llm_total': 0, 'role_rows': [], 'top_questions': [], 'avg_confidence': 0.0, 'low_confidence': 0, 'unresolved_total': 0, 'response_mode_rows': [], 'top_unresolved_questions': [], 'top_unresolved_pages': []}
     if not ensure_extended_features_schema():
-        return {'total': 0, 'llm_total': 0, 'role_rows': [], 'top_questions': []}
+        return {'total': 0, 'llm_total': 0, 'role_rows': [], 'top_questions': [], 'avg_confidence': 0.0, 'low_confidence': 0, 'unresolved_total': 0, 'response_mode_rows': [], 'top_unresolved_questions': [], 'top_unresolved_pages': []}
     days = max(1, min(int(days or 30), 365))
     try:
         with db_connection() as conn:
             c = conn.cursor()
             db_execute(
                 c,
-                """SELECT COUNT(*), COALESCE(SUM(CASE WHEN used_llm = 1 THEN 1 ELSE 0 END), 0)
+                """SELECT COUNT(*),
+                          COALESCE(SUM(CASE WHEN used_llm = 1 THEN 1 ELSE 0 END), 0),
+                          COALESCE(AVG(COALESCE(confidence, 0.0)), 0.0),
+                          COALESCE(SUM(CASE WHEN COALESCE(confidence, 0.0) < 0.50 THEN 1 ELSE 0 END), 0),
+                          COALESCE(SUM(CASE WHEN unresolved = 1 THEN 1 ELSE 0 END), 0)
                    FROM assistant_query_logs
                    WHERE school_id = ?
                      AND created_at >= (CURRENT_TIMESTAMP - (? || ' days')::interval)""",
                 (sid, str(days)),
             )
-            row = c.fetchone() or (0, 0)
+            row = c.fetchone() or (0, 0, 0.0, 0, 0)
             total = int(row[0] or 0)
             llm_total = int(row[1] or 0)
+            avg_confidence = round(float(row[2] or 0.0), 3)
+            low_confidence = int(row[3] or 0)
+            unresolved_total = int(row[4] or 0)
 
             db_execute(
                 c,
@@ -6042,13 +10628,97 @@ def get_assistant_usage_summary(school_id, days=30):
                 (sid, str(days)),
             )
             top_questions = [{'question': (r[0] or ''), 'count': int(r[1] or 0)} for r in (c.fetchall() or [])]
+            db_execute(
+                c,
+                """SELECT response_mode, COUNT(*) AS cnt
+                   FROM assistant_query_logs
+                   WHERE school_id = ?
+                     AND created_at >= (CURRENT_TIMESTAMP - (? || ' days')::interval)
+                   GROUP BY response_mode
+                   ORDER BY cnt DESC, response_mode ASC
+                   LIMIT 6""",
+                (sid, str(days)),
+            )
+            response_mode_rows = [{'mode': (r[0] or 'standard'), 'count': int(r[1] or 0)} for r in (c.fetchall() or [])]
+            db_execute(
+                c,
+                """SELECT question, COUNT(*) AS cnt
+                   FROM assistant_query_logs
+                   WHERE school_id = ?
+                     AND unresolved = 1
+                     AND created_at >= (CURRENT_TIMESTAMP - (? || ' days')::interval)
+                   GROUP BY question
+                   ORDER BY cnt DESC, question ASC
+                   LIMIT 6""",
+                (sid, str(days)),
+            )
+            top_unresolved_questions = [{'question': (r[0] or ''), 'count': int(r[1] or 0)} for r in (c.fetchall() or [])]
+            db_execute(
+                c,
+                """SELECT source_page, COUNT(*) AS cnt
+                   FROM assistant_query_logs
+                   WHERE school_id = ?
+                     AND unresolved = 1
+                     AND COALESCE(TRIM(source_page), '') <> ''
+                     AND created_at >= (CURRENT_TIMESTAMP - (? || ' days')::interval)
+                   GROUP BY source_page
+                   ORDER BY cnt DESC, source_page ASC
+                   LIMIT 6""",
+                (sid, str(days)),
+            )
+            top_unresolved_pages = [{'page': (r[0] or ''), 'count': int(r[1] or 0)} for r in (c.fetchall() or [])]
     except Exception:
-        return {'total': 0, 'llm_total': 0, 'role_rows': [], 'top_questions': []}
+        return {'total': 0, 'llm_total': 0, 'role_rows': [], 'top_questions': [], 'avg_confidence': 0.0, 'low_confidence': 0, 'unresolved_total': 0, 'response_mode_rows': [], 'top_unresolved_questions': [], 'top_unresolved_pages': []}
     return {
         'total': total,
         'llm_total': llm_total,
         'role_rows': role_rows,
         'top_questions': top_questions,
+        'avg_confidence': avg_confidence,
+        'low_confidence': low_confidence,
+        'unresolved_total': unresolved_total,
+        'response_mode_rows': response_mode_rows,
+        'top_unresolved_questions': top_unresolved_questions,
+        'top_unresolved_pages': top_unresolved_pages,
+    }
+
+def get_assistant_quality_summary(school_id, days=30):
+    sid = (school_id or '').strip()
+    default = {
+        'not_helpful_top': [],
+        'low_confidence_rate': 0.0,
+        'unresolved_rate': 0.0,
+    }
+    if not sid or not ensure_extended_features_schema():
+        return default
+    usage = get_assistant_usage_summary(sid, days=days)
+    total = max(1, int((usage or {}).get('total') or 0))
+    low_confidence_rate = round((int((usage or {}).get('low_confidence') or 0) / total) * 100.0, 2)
+    unresolved_rate = round((int((usage or {}).get('unresolved_total') or 0) / total) * 100.0, 2)
+    not_helpful_top = []
+    try:
+        with db_connection() as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """SELECT question, COUNT(*) AS cnt
+                   FROM assistant_feedback_logs
+                   WHERE school_id = ?
+                     AND helpful = 0
+                     AND COALESCE(TRIM(question), '') <> ''
+                     AND created_at >= (CURRENT_TIMESTAMP - (? || ' days')::interval)
+                   GROUP BY question
+                   ORDER BY cnt DESC, question ASC
+                   LIMIT 6""",
+                (sid, str(max(1, min(int(days or 30), 365)))),
+            )
+            not_helpful_top = [{'question': str(r[0] or '').strip(), 'count': int(r[1] or 0)} for r in (c.fetchall() or []) if str(r[0] or '').strip()]
+    except Exception:
+        not_helpful_top = []
+    return {
+        'not_helpful_top': not_helpful_top,
+        'low_confidence_rate': low_confidence_rate,
+        'unresolved_rate': unresolved_rate,
     }
 
 def build_school_data_integrity_report(school_id, term='', academic_year=''):
@@ -6081,7 +10751,15 @@ def build_school_data_integrity_report(school_id, term='', academic_year=''):
 
     summary['total_checks'] += 1
     orphan_class = 0
-    class_rows = get_class_assignments_with_names(sid, term=current_term, academic_year=current_year)
+    class_rows = []
+    for row in (get_class_assignments(sid) or []):
+        row_term = (row.get('term') or '').strip()
+        row_year = (row.get('academic_year') or '').strip()
+        if current_term and row_term != current_term:
+            continue
+        if current_year and row_year != current_year:
+            continue
+        class_rows.append(row)
     for row in class_rows:
         tid = (row.get('teacher_id') or '').strip().lower()
         if tid and tid not in teacher_ids:
@@ -6191,6 +10869,35 @@ def get_admin_action_audit_summary(school_id, days=30):
     except Exception:
         return {'total': 0, 'action_rows': []}
 
+def build_school_settings_version_token(school, calendar=None):
+    payload = {
+        'school_name': (school or {}).get('school_name', ''),
+        'academic_year': (school or {}).get('academic_year', ''),
+        'current_term': (school or {}).get('current_term', ''),
+        'pass_mark': (school or {}).get('pass_mark', 0),
+        'max_tests': (school or {}).get('max_tests', 0),
+        'show_positions': (school or {}).get('show_positions', 1),
+        'parent_timetable_show_teacher': (school or {}).get('parent_timetable_show_teacher', 1),
+        'theme_primary_color': (school or {}).get('theme_primary_color', ''),
+        'theme_secondary_color': (school or {}).get('theme_secondary_color', ''),
+        'theme_accent_color': (school or {}).get('theme_accent_color', ''),
+        'calendar_open': (calendar or {}).get('open_date', ''),
+        'calendar_close': (calendar or {}).get('close_date', ''),
+        'calendar_next': (calendar or {}).get('next_term_begin_date', ''),
+    }
+    packed = json.dumps(payload, sort_keys=True, default=str)
+    return hashlib.sha256(packed.encode('utf-8')).hexdigest()[:32]
+
+def build_result_correction_version_token(snapshot):
+    payload = {
+        'scores': (snapshot or {}).get('scores', {}),
+        'teacher_comment': (snapshot or {}).get('teacher_comment', ''),
+        'principal_comment': (snapshot or {}).get('principal_comment', ''),
+        'published_at': (snapshot or {}).get('published_at', ''),
+    }
+    packed = json.dumps(payload, sort_keys=True, default=str)
+    return hashlib.sha256(packed.encode('utf-8')).hexdigest()[:32]
+
 def is_password_expired(user):
     role = (user or {}).get('role', '')
     if role not in {'super_admin', 'school_admin'}:
@@ -6222,6 +10929,59 @@ def _resolve_login_display_name(role, username, school_id=''):
             return name
     return uname
 
+def _begin_super_admin_email_2fa(user, client_ip=''):
+    """Start super-admin email 2FA challenge and return success flag."""
+    if not SUPER_ADMIN_EMAIL_2FA_ENABLED:
+        return False
+    username = (user or {}).get('username', '') or ''
+    code = f"{secrets.randbelow(900000) + 100000}"
+    expiry = datetime.now() + timedelta(minutes=SUPER_ADMIN_EMAIL_2FA_TTL_MINUTES)
+    session['super_admin_2fa_pending_user'] = username
+    session['super_admin_2fa_code'] = code
+    session['super_admin_2fa_expires_at'] = expiry.isoformat()
+    session['super_admin_2fa_ip'] = (client_ip or '').strip()
+    subject = 'Super Admin Login Verification Code'
+    body = (
+        f"Your verification code is: {code}\n\n"
+        f"This code expires in {SUPER_ADMIN_EMAIL_2FA_TTL_MINUTES} minutes.\n"
+        f"If you did not attempt to login, reset your password immediately."
+    )
+    result = send_plain_email_message(subject, body, [username])
+    if result.get('sent', 0) <= 0:
+        session.pop('super_admin_2fa_pending_user', None)
+        session.pop('super_admin_2fa_code', None)
+        session.pop('super_admin_2fa_expires_at', None)
+        session.pop('super_admin_2fa_ip', None)
+        return False
+    return True
+
+
+def _super_admin_2fa_is_valid(code, client_ip=''):
+    expected = (session.get('super_admin_2fa_code') or '').strip()
+    raw_exp = (session.get('super_admin_2fa_expires_at') or '').strip()
+    saved_ip = (session.get('super_admin_2fa_ip') or '').strip()
+    if not expected or not raw_exp:
+        return False, '2FA challenge not found.'
+    if saved_ip and client_ip and saved_ip != client_ip:
+        return False, 'IP mismatch for this 2FA challenge.'
+    try:
+        expiry = datetime.fromisoformat(raw_exp)
+    except Exception:
+        return False, 'Invalid 2FA expiry.'
+    if datetime.now() > expiry:
+        return False, '2FA code expired.'
+    if (str(code or '').strip() != expected):
+        return False, 'Invalid 2FA code.'
+    return True, ''
+
+
+def _clear_super_admin_2fa_state():
+    session.pop('super_admin_2fa_pending_user', None)
+    session.pop('super_admin_2fa_code', None)
+    session.pop('super_admin_2fa_expires_at', None)
+    session.pop('super_admin_2fa_ip', None)
+
+
 def _complete_authenticated_login(user, user_school_id):
     role = (user.get('role') or '').strip().lower()
     username = (user.get('username') or '').strip().lower()
@@ -6234,6 +10994,7 @@ def _complete_authenticated_login(user, user_school_id):
     session.pop('force_password_change', None)
     session.pop('show_first_login_tutorial', None)
     session.pop('first_login_tutorial_role', None)
+    session['last_activity_at'] = datetime.now().isoformat()
     session['post_login_welcome_name'] = _resolve_login_display_name(role, username, user_school_id)
     record_login_audit(username, role, user_school_id, 'login', True, '')
     update_login_timestamps(username)
@@ -7201,6 +11962,55 @@ def is_score_complete_for_subject(subject_scores, school):
         return False
     return True
 
+
+def is_score_entry_confirmed(subject_scores, school=None):
+    """
+    Best-effort signal that a subject score block was truly entered (not just default zero scaffold).
+    Priority:
+    1) explicit entry_confirmed marker
+    2) non-zero numeric components
+    3) non-empty subject teacher comment
+    """
+    if not isinstance(subject_scores, dict):
+        return False
+    marker_v2 = subject_scores.get('entry_confirmed_v2', None)
+    if marker_v2 in (1, True):
+        return True
+    if isinstance(marker_v2, str) and marker_v2.strip().lower() in {'1', 'true', 'yes', 'y'}:
+        return True
+
+    legacy_marker = subject_scores.get('entry_confirmed', None)
+
+    include_tests = bool((school or {}).get('test_enabled', 1))
+    include_exam = bool((school or {}).get('exam_enabled', 1))
+    numeric_values = []
+    if include_tests:
+        numeric_values.append(subject_scores.get('total_test'))
+        for key, value in subject_scores.items():
+            if str(key).startswith('test_'):
+                numeric_values.append(value)
+    if include_exam:
+        numeric_values.extend([
+            subject_scores.get('total_exam'),
+            subject_scores.get('exam_score'),
+            subject_scores.get('objective'),
+            subject_scores.get('theory'),
+        ])
+    # Fallback for legacy rows that only carry overall_mark.
+    numeric_values.append(subject_scores.get('overall_mark'))
+
+    for value in numeric_values:
+        if _is_finite_number_like(value) and abs(_coerce_number(value, 0.0)) > 1e-9:
+            return True
+
+    if (subject_scores.get('subject_teacher_comment', '') or '').strip():
+        return True
+    # Do not trust legacy marker alone for all-zero blocks.
+    # Old builds could set entry_confirmed=1 on untouched default rows.
+    if legacy_marker in (1, True) or (isinstance(legacy_marker, str) and legacy_marker.strip().lower() in {'1', 'true', 'yes', 'y'}):
+        return False
+    return False
+
 def is_student_score_complete(student, school, term):
     """A student is complete when all configured subjects have complete score blocks for the active term."""
     if not student or student.get('term') != term:
@@ -7210,7 +12020,8 @@ def is_student_score_complete(student, school, term):
         return False
     scores = student.get('scores', {}) if isinstance(student.get('scores', {}), dict) else {}
     for subject in subjects:
-        if not is_score_complete_for_subject(get_subject_score_block(scores, subject), school):
+        block = get_subject_score_block(scores, subject)
+        if not (is_score_complete_for_subject(block, school) and is_score_entry_confirmed(block, school)):
             return False
     return True
 
@@ -7268,7 +12079,13 @@ def compute_class_subject_completion(school_id, classname, term, academic_year='
 
     if class_students_data is None:
         class_students_data = load_students(school_id, class_filter=classname, term_filter=term)
-    students = [s for s in class_students_data.values() if (s.get('classname') or '').strip() == classname and (s.get('term') or '').strip() == term]
+    target_class = classname.strip().lower()
+    target_term = term.strip().lower()
+    students = [
+        s for s in class_students_data.values()
+        if (s.get('classname') or '').strip().lower() == target_class
+        and (s.get('term') or '').strip().lower() == target_term
+    ]
     total_students = len(students)
     if total_students <= 0:
         return {
@@ -7325,7 +12142,7 @@ def compute_class_subject_completion(school_id, classname, term, academic_year='
                 continue
             eligible_students += 1
             score_block = get_subject_score_block((s.get('scores') or {}), subject_key)
-            if is_score_complete_for_subject(score_block, school):
+            if is_score_complete_for_subject(score_block, school) and is_score_entry_confirmed(score_block, school):
                 completed_students += 1
 
         pending_students = max(0, eligible_students - completed_students)
@@ -8316,9 +13133,6 @@ def load_published_class_results(school_id, classname, term, academic_year='', s
                 combined_scores[subj] = {'overall_mark': avg_mark}
             # Combined-third-term ranking policy: mean of First/Second/Third term averages.
             avg_marks = (sum(mark_values) / len(mark_values)) if mark_values else 0.0
-            grade_cfg = get_grade_config(school_id)
-            combined_grade = grade_from_score(avg_marks, grade_cfg)
-            combined_status = status_from_score(avg_marks, grade_cfg)
             combined.append({
                 'student_id': sid,
                 'classname': base_row[1],
@@ -9849,6 +14663,39 @@ def build_term_open_progress(calendar_row, program_row=None, today_value=None):
         'close_date': close_date_raw,
     }
 
+
+def get_school_closed_reason_for_date(calendar_row, program_row=None, target_date=None):
+    """
+    Return closure reason string when school is not in an instructional day.
+    Returns empty string when school is open for normal instruction on target_date.
+    """
+    current = target_date or date.today()
+    open_date_raw = (calendar_row or {}).get('open_date', '')
+    close_date_raw = (calendar_row or {}).get('close_date', '')
+    start = _parse_iso_date(open_date_raw)
+    end = _parse_iso_date(close_date_raw)
+    if not start or not end or end < start:
+        return 'Term calendar not set'
+    if current < start:
+        return 'Term has not started yet'
+    if current > end:
+        return 'Term has ended'
+    if current.weekday() >= 5:
+        return 'Weekend (school closed)'
+    break_start = _parse_iso_date((calendar_row or {}).get('midterm_break_start', ''))
+    break_end = _parse_iso_date((calendar_row or {}).get('midterm_break_end', ''))
+    if break_start and break_end:
+        if break_end < break_start:
+            break_start, break_end = break_end, break_start
+        if break_start <= current <= break_end:
+            return 'Mid-term break'
+    for holiday in extract_program_holiday_ranges(program_row or {}):
+        h_start = holiday.get('start')
+        h_end = holiday.get('end')
+        if isinstance(h_start, date) and isinstance(h_end, date) and h_start <= current <= h_end:
+            return (holiday.get('name') or 'Holiday').strip() or 'Holiday'
+    return ''
+
 def build_term_program_ics_content(school, events, term_label='', year_label=''):
     school_name = (school or {}).get('school_name', 'School')
     lines = [
@@ -9944,7 +14791,7 @@ def send_term_program_notifications(school, reminders, channels, email_recipient
                         headers={'Content-Type': 'application/json'},
                         method='POST',
                     )
-                    with urllib.request.urlopen(req, timeout=12) as _resp:
+                    with urllib.request.urlopen(req, timeout=12):
                         sent_sms += 1
                 except Exception as exc:
                     errors.append(f'SMS send failed for {phone}: {exc}')
@@ -10505,6 +15352,194 @@ def log_promotion_audit_row(school_id, student_id, student_name, from_class, to_
             )
     except Exception:
         pass
+
+def _time_to_minutes(value):
+    raw = (value or '').strip()
+    if not raw:
+        return None
+    try:
+        hour_s, minute_s = raw.split(':', 1)
+        hour = int(hour_s)
+        minute = int(minute_s)
+    except Exception:
+        return None
+    if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+        return None
+    return hour * 60 + minute
+
+
+def timetable_time_ranges_overlap(start_a, end_a, start_b, end_b):
+    a1 = _time_to_minutes(start_a)
+    a2 = _time_to_minutes(end_a)
+    b1 = _time_to_minutes(start_b)
+    b2 = _time_to_minutes(end_b)
+    if None in {a1, a2, b1, b2}:
+        return False
+    if a2 <= a1 or b2 <= b1:
+        return False
+    return not (a2 <= b1 or b2 <= a1)
+
+
+def find_timetable_time_conflicts(school_id, classname, day_of_week, start_time, end_time, ignore_row_id=0):
+    cls = canonicalize_classname(classname)
+    if not cls:
+        return []
+    if _time_to_minutes(start_time) is None or _time_to_minutes(end_time) is None:
+        return []
+    if _time_to_minutes(end_time) <= _time_to_minutes(start_time):
+        return [{'message': 'End time must be later than start time.'}]
+    existing = get_school_timetable_rows(school_id, classname=cls)
+    conflicts = []
+    for row in existing:
+        row_id = int(row.get('id') or 0)
+        if ignore_row_id and row_id == int(ignore_row_id):
+            continue
+        if int(row.get('day_of_week') or 0) != int(day_of_week or 0):
+            continue
+        if timetable_time_ranges_overlap(start_time, end_time, row.get('start_time', ''), row.get('end_time', '')):
+            conflicts.append({
+                'id': row_id,
+                'period_label': row.get('period_label', ''),
+                'subject': row.get('subject', ''),
+                'start_time': row.get('start_time', ''),
+                'end_time': row.get('end_time', ''),
+                'message': (
+                    f"Overlaps with {row.get('period_label', '')} "
+                    f"({row.get('start_time', '-')}-{row.get('end_time', '-')})"
+                ),
+            })
+    return conflicts
+
+
+def _timetable_history_payload(row):
+    if not isinstance(row, dict):
+        return {}
+    return {
+        'classname': canonicalize_classname(row.get('classname', '')),
+        'day_of_week': int(row.get('day_of_week') or 0),
+        'period_label': (row.get('period_label') or '').strip(),
+        'subject': normalize_subject_name(row.get('subject', '')),
+        'teacher_id': (row.get('teacher_id') or '').strip(),
+        'start_time': (row.get('start_time') or '').strip(),
+        'end_time': (row.get('end_time') or '').strip(),
+        'room': (row.get('room') or '').strip(),
+    }
+
+
+def log_timetable_change_with_cursor(c, school_id, action, row_before=None, row_after=None, changed_by=''):
+    before_payload = _timetable_history_payload(row_before or {})
+    after_payload = _timetable_history_payload(row_after or {})
+    action_name = (action or '').strip().lower() or 'update'
+    classname = after_payload.get('classname') or before_payload.get('classname') or ''
+    day_of_week = int(after_payload.get('day_of_week') or before_payload.get('day_of_week') or 0)
+    period_label = after_payload.get('period_label') or before_payload.get('period_label') or ''
+    if not classname or day_of_week <= 0 or not period_label:
+        return
+    db_execute(
+        c,
+        """INSERT INTO timetable_change_logs
+           (school_id, action, classname, day_of_week, period_label, before_json, after_json, changed_by, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
+        (
+            school_id,
+            action_name,
+            classname,
+            day_of_week,
+            period_label,
+            json.dumps(before_payload, ensure_ascii=True),
+            json.dumps(after_payload, ensure_ascii=True),
+            (changed_by or '').strip(),
+        ),
+    )
+
+
+def list_timetable_change_logs(school_id, classname='', limit=120):
+    if not ensure_extended_features_schema():
+        return []
+    with db_connection() as conn:
+        c = conn.cursor()
+        params = [school_id]
+        where_sql = "WHERE school_id = ?"
+        if classname:
+            where_sql += " AND LOWER(classname) = LOWER(?)"
+            params.append(canonicalize_classname(classname))
+        db_execute(
+            c,
+            f"""SELECT id, action, classname, day_of_week, period_label, before_json, after_json, changed_by, created_at
+                FROM timetable_change_logs
+                {where_sql}
+                ORDER BY created_at DESC
+                LIMIT ?""",
+            tuple(params + [int(max(1, min(limit, 500)))]),
+        )
+        rows = c.fetchall() or []
+    out = []
+    for row in rows:
+        try:
+            before_json = json.loads(row[5] or '{}') if row[5] else {}
+        except Exception:
+            before_json = {}
+        try:
+            after_json = json.loads(row[6] or '{}') if row[6] else {}
+        except Exception:
+            after_json = {}
+        out.append({
+            'id': int(row[0] or 0),
+            'action': (row[1] or '').strip(),
+            'classname': row[2] or '',
+            'day_of_week': int(row[3] or 0),
+            'day_name': dict(DAY_OF_WEEK_OPTIONS).get(int(row[3] or 0), str(row[3] or '')),
+            'period_label': row[4] or '',
+            'before': before_json if isinstance(before_json, dict) else {},
+            'after': after_json if isinstance(after_json, dict) else {},
+            'changed_by': row[7] or '',
+            'created_at': format_timestamp(row[8]),
+        })
+    return out
+
+
+def get_timetable_change_log(school_id, change_id):
+    if not ensure_extended_features_schema():
+        return None
+    try:
+        cid = int(change_id or 0)
+    except Exception:
+        return None
+    if cid <= 0:
+        return None
+    with db_connection() as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """SELECT id, action, classname, day_of_week, period_label, before_json, after_json, changed_by, created_at
+               FROM timetable_change_logs
+               WHERE school_id = ? AND id = ?
+               LIMIT 1""",
+            (school_id, cid),
+        )
+        row = c.fetchone()
+    if not row:
+        return None
+    try:
+        before_json = json.loads(row[5] or '{}') if row[5] else {}
+    except Exception:
+        before_json = {}
+    try:
+        after_json = json.loads(row[6] or '{}') if row[6] else {}
+    except Exception:
+        after_json = {}
+    return {
+        'id': int(row[0] or 0),
+        'action': (row[1] or '').strip(),
+        'classname': row[2] or '',
+        'day_of_week': int(row[3] or 0),
+        'period_label': row[4] or '',
+        'before': before_json if isinstance(before_json, dict) else {},
+        'after': after_json if isinstance(after_json, dict) else {},
+        'changed_by': row[7] or '',
+        'created_at': format_timestamp(row[8]),
+    }
+
 
 def get_school_timetable_rows(school_id, classname=''):
     if not ensure_extended_features_schema():
@@ -11263,9 +16298,9 @@ def restore_school_backup_payload(school_id, payload, mode='merge'):
                 c,
                 """INSERT INTO student_messages
                    (school_id, title, message, target_classname, target_stream, target_subject, deadline_date,
-                    attachment_path, attachment_name, attachment_mime, attachment_size,
+                    attachment_path, attachment_thumb_path, attachment_name, attachment_mime, attachment_size, attachment_scan_status,
                     is_active, created_by, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))""",
                 (
                     school_id,
                     row.get('title', ''),
@@ -11275,9 +16310,11 @@ def restore_school_backup_payload(school_id, payload, mode='merge'):
                     row.get('target_subject', ''),
                     row.get('deadline_date', ''),
                     row.get('attachment_path', ''),
+                    row.get('attachment_thumb_path', ''),
                     row.get('attachment_name', ''),
                     row.get('attachment_mime', ''),
                     int(row.get('attachment_size', 0) or 0),
+                    row.get('attachment_scan_status', 'clean'),
                     int(row.get('is_active', 1) or 1),
                     row.get('created_by', ''),
                     row.get('created_at', None),
@@ -11674,6 +16711,7 @@ def save_teacher(school_id, user_id, firstname, lastname, assigned_classes, subj
                        (firstname, lastname, phone, gender, classes_str, subjects_str, school_id, user_id))
         else:
             # Insert new teacher
+            ensure_school_plan_capacity(school_id, add_students=0, add_teachers=1)
             try:
                 db_execute(c, 'INSERT INTO teachers (school_id, user_id, firstname, lastname, phone, gender, signature_image, profile_image, assigned_classes, subjects_taught) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                            (school_id, user_id, firstname, lastname, phone, gender, '', '', classes_str, subjects_str))
@@ -11860,8 +16898,19 @@ def get_teacher_subject_assignments(school_id, teacher_id='', classname='', term
         )
         rows = c.fetchall()
     out = []
+    seen = set()
     for row in rows:
         teacher_id_row, cls, subject, row_term, row_year, firstname, lastname = row
+        dedupe_key = (
+            (teacher_id_row or '').strip().lower(),
+            (cls or '').strip().lower(),
+            normalize_subject_name(subject or '').lower(),
+            (row_term or '').strip().lower(),
+            (row_year or '').strip().lower(),
+        )
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
         teacher_name = f"{firstname or ''} {lastname or ''}".strip() or teacher_id_row
         out.append({
             'teacher_id': teacher_id_row,
@@ -12010,6 +17059,10 @@ def save_student_message_attachment(file_obj, school_id, created_by=''):
     if not detected_ext or detected_ext not in STUDENT_MESSAGE_ATTACHMENT_ALLOWED_EXTS:
         raise ValueError('Uploaded file content is not a valid supported image.')
     sid = (school_id or '').strip() or 'school'
+    usage = compute_school_storage_usage(sid)
+    quota_bytes = int(usage.get('quota_bytes') or SCHOOL_STORAGE_QUOTA_BYTES)
+    if int(usage.get('used_bytes') or 0) + int(len(raw) or 0) > quota_bytes:
+        raise ValueError('Upload exceeds school storage quota for attachments. Upgrade plan or free storage.')
     date_seg = datetime.now().strftime('%Y/%m')
     rel_dir = os.path.join('uploads', 'student_message_images', sid, date_seg)
     abs_dir = os.path.join(app.static_folder, rel_dir)
@@ -12021,11 +17074,25 @@ def save_student_message_attachment(file_obj, school_id, created_by=''):
         fh.write(raw)
     rel_path = os.path.join(rel_dir, unique_name).replace('\\', '/')
     mime = f'image/{"jpeg" if detected_ext == "jpg" else detected_ext}'
+    rel_thumb_path = ''
+    if Image is not None:
+        try:
+            with Image.open(abs_path) as img:
+                img = img.convert('RGB')
+                img.thumbnail((640, 640))
+                thumb_name = unique_name.rsplit('.', 1)[0] + '_thumb.webp'
+                abs_thumb_path = os.path.join(abs_dir, thumb_name)
+                img.save(abs_thumb_path, format='WEBP', quality=80, method=6)
+                rel_thumb_path = os.path.join(rel_dir, thumb_name).replace('\\', '/')
+        except Exception:
+            rel_thumb_path = ''
     return {
         'attachment_path': rel_path,
+        'attachment_thumb_path': rel_thumb_path,
         'attachment_name': filename[:180],
         'attachment_mime': mime,
         'attachment_size': int(len(raw)),
+        'attachment_scan_status': 'pending',
     }
 
 def create_student_message(
@@ -12038,9 +17105,11 @@ def create_student_message(
     deadline_date='',
     created_by='',
     attachment_path='',
+    attachment_thumb_path='',
     attachment_name='',
     attachment_mime='',
     attachment_size=0,
+    attachment_scan_status='clean',
 ):
     """Create one school-admin message targeted to students."""
     clean_title = (title or '').strip()[:160]
@@ -12051,9 +17120,11 @@ def create_student_message(
     clean_subject = normalize_subject_name(target_subject) if (target_subject or '').strip() else ''
     clean_deadline = (deadline_date or '').strip()
     clean_attachment_path = (attachment_path or '').strip().replace('\\', '/')[:260]
+    clean_attachment_thumb_path = (attachment_thumb_path or '').strip().replace('\\', '/')[:260]
     clean_attachment_name = (attachment_name or '').strip()[:180]
     clean_attachment_mime = (attachment_mime or '').strip()[:80]
     clean_attachment_size = int(max(0, attachment_size or 0))
+    clean_scan_status = (attachment_scan_status or 'clean').strip().lower()
     if not clean_title:
         raise ValueError('Message title is required.')
     if not clean_message:
@@ -12066,18 +17137,22 @@ def create_student_message(
         raise ValueError('Deadline must be in YYYY-MM-DD format.')
     if clean_attachment_path and not clean_attachment_path.startswith('uploads/student_message_images/'):
         raise ValueError('Invalid attachment path.')
+    if clean_attachment_thumb_path and not clean_attachment_thumb_path.startswith('uploads/student_message_images/'):
+        raise ValueError('Invalid attachment thumbnail path.')
     if clean_attachment_size > STUDENT_MESSAGE_ATTACHMENT_MAX_BYTES:
         max_mb = round(STUDENT_MESSAGE_ATTACHMENT_MAX_BYTES / (1024 * 1024), 1)
         raise ValueError(f'Attachment exceeds max size ({max_mb}MB).')
+    if clean_scan_status not in {'pending', 'clean', 'blocked'}:
+        clean_scan_status = 'clean'
     with db_connection(commit=True) as conn:
         c = conn.cursor()
         db_execute(
             c,
             """INSERT INTO student_messages
                (school_id, title, message, target_classname, target_stream, target_subject, deadline_date,
-                attachment_path, attachment_name, attachment_mime, attachment_size,
+                attachment_path, attachment_thumb_path, attachment_name, attachment_mime, attachment_size, attachment_scan_status,
                 is_active, created_by, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, CURRENT_TIMESTAMP)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, CURRENT_TIMESTAMP)""",
             (
                 school_id,
                 clean_title,
@@ -12087,9 +17162,11 @@ def create_student_message(
                 clean_subject,
                 clean_deadline,
                 clean_attachment_path,
+                clean_attachment_thumb_path,
                 clean_attachment_name,
                 clean_attachment_mime,
                 clean_attachment_size,
+                clean_scan_status,
                 (created_by or '').strip(),
             ),
         )
@@ -12101,7 +17178,7 @@ def get_school_student_messages(school_id, limit=20):
         db_execute(
             c,
             """SELECT id, title, message, target_classname, target_stream, target_subject, deadline_date,
-                      attachment_path, attachment_name, attachment_mime, attachment_size,
+                      attachment_path, attachment_thumb_path, attachment_name, attachment_mime, attachment_size, attachment_scan_status,
                       is_active, created_by, created_at
                FROM student_messages
                WHERE school_id = ?
@@ -12124,15 +17201,21 @@ def get_school_student_messages(school_id, limit=20):
             'target_subject': row[5] or '',
             'deadline_date': deadline_raw,
             'attachment_path': row[7] or '',
-            'attachment_name': row[8] or '',
-            'attachment_mime': row[9] or '',
-            'attachment_size': int(row[10] or 0),
+            'attachment_thumb_path': row[8] or '',
+            'attachment_name': row[9] or '',
+            'attachment_mime': row[10] or '',
+            'attachment_size': int(row[11] or 0),
+            'attachment_scan_status': (row[12] or '').strip().lower() or 'clean',
             'attachment_url': _student_message_attachment_url(row[7] or ''),
-            'is_active': bool(int(row[11] or 0)),
-            'created_by': row[12] or '',
-            'created_at': format_timestamp(row[13]),
+            'attachment_thumb_url': _student_message_attachment_url(row[8] or ''),
+            'is_active': bool(int(row[13] or 0)),
+            'created_by': row[14] or '',
+            'created_at': format_timestamp(row[15]),
             'is_expired': bool(deadline_dt and deadline_dt < today),
         })
+        if out[-1].get('attachment_scan_status') not in {'clean', ''}:
+            out[-1]['attachment_url'] = ''
+            out[-1]['attachment_thumb_url'] = ''
     return out
 
 def create_teacher_message(school_id, title, message, target_classname='', target_subject='', deadline_date='', created_by=''):
@@ -12319,7 +17402,7 @@ def get_student_messages_for_student(school_id, classname, stream, student_id=''
         db_execute(
             c,
             """SELECT sm.id, sm.title, sm.message, sm.target_classname, sm.target_stream, sm.target_subject, sm.deadline_date,
-                      sm.attachment_path, sm.attachment_name, sm.attachment_mime, sm.attachment_size,
+                      sm.attachment_path, sm.attachment_thumb_path, sm.attachment_name, sm.attachment_mime, sm.attachment_size, sm.attachment_scan_status,
                       sm.created_at,
                       smr.read_at
                FROM student_messages sm
@@ -12353,15 +17436,21 @@ def get_student_messages_for_student(school_id, classname, stream, student_id=''
             'target_subject': target_subject,
             'deadline_date': deadline_raw,
             'attachment_path': row[7] or '',
-            'attachment_name': row[8] or '',
-            'attachment_mime': row[9] or '',
-            'attachment_size': int(row[10] or 0),
+            'attachment_thumb_path': row[8] or '',
+            'attachment_name': row[9] or '',
+            'attachment_mime': row[10] or '',
+            'attachment_size': int(row[11] or 0),
+            'attachment_scan_status': (row[12] or '').strip().lower() or 'clean',
             'attachment_url': _student_message_attachment_url(row[7] or ''),
-            'created_at': format_timestamp(row[11]),
+            'attachment_thumb_url': _student_message_attachment_url(row[8] or ''),
+            'created_at': format_timestamp(row[13]),
             'is_expired': bool(deadline_dt and deadline_dt < today),
             'is_due_soon': bool(deadline_dt and 0 <= (deadline_dt - today).days <= 3),
-            'is_read': bool(row[12]),
+            'is_read': bool(row[14]),
         })
+        if out[-1].get('attachment_scan_status') not in {'clean', ''}:
+            out[-1]['attachment_url'] = ''
+            out[-1]['attachment_thumb_url'] = ''
     return out
 
 def get_parent_messages_for_children(parent_phone, children, limit_per_school=80):
@@ -12398,7 +17487,7 @@ def get_parent_messages_for_children(parent_phone, children, limit_per_school=80
                 db_execute(
                     c,
                     """SELECT sm.id, sm.title, sm.message, sm.target_classname, sm.target_stream, sm.target_subject, sm.deadline_date,
-                              sm.attachment_path, sm.attachment_name, sm.attachment_mime, sm.attachment_size, sm.created_at,
+                              sm.attachment_path, sm.attachment_thumb_path, sm.attachment_name, sm.attachment_mime, sm.attachment_size, sm.attachment_scan_status, sm.created_at,
                               pmr.read_at
                        FROM student_messages sm
                        LEFT JOIN parent_message_reads pmr
@@ -12448,15 +17537,21 @@ def get_parent_messages_for_children(parent_phone, children, limit_per_school=80
                     'target_subject': target_subject,
                     'deadline_date': deadline_raw,
                     'attachment_path': row[7] or '',
-                    'attachment_name': row[8] or '',
-                    'attachment_mime': row[9] or '',
-                    'attachment_size': int(row[10] or 0),
+                    'attachment_thumb_path': row[8] or '',
+                    'attachment_name': row[9] or '',
+                    'attachment_mime': row[10] or '',
+                    'attachment_size': int(row[11] or 0),
+                    'attachment_scan_status': (row[12] or '').strip().lower() or 'clean',
                     'attachment_url': _student_message_attachment_url(row[7] or ''),
-                    'created_at': format_timestamp(row[11]),
+                    'attachment_thumb_url': _student_message_attachment_url(row[8] or ''),
+                    'created_at': format_timestamp(row[13]),
                     'is_expired': bool(deadline_dt and deadline_dt < today),
                     'is_due_soon': bool(deadline_dt and 0 <= (deadline_dt - today).days <= 3),
-                    'is_read': bool(row[12]),
+                    'is_read': bool(row[14]),
                 })
+                if out[-1].get('attachment_scan_status') not in {'clean', ''}:
+                    out[-1]['attachment_url'] = ''
+                    out[-1]['attachment_thumb_url'] = ''
     out.sort(key=lambda row: (row.get('created_at') or ''), reverse=True)
     return out
 
@@ -12570,8 +17665,18 @@ def mark_all_student_messages_read(school_id, student_id, classname='', stream='
 
 # ==================== REPORTS FUNCTIONS ====================
 
-def load_reports(status_filter='', user_filter='', text_filter=''):
-    """Load reports with optional filtering."""
+def load_reports(status_filter='', user_filter='', text_filter='', page=1, per_page=100, include_total=False):
+    """Load reports with optional filtering and server-side pagination."""
+    try:
+        page = int(page or 1)
+    except Exception:
+        page = 1
+    try:
+        per_page = int(per_page or 100)
+    except Exception:
+        per_page = 100
+    page = max(1, page)
+    per_page = max(20, min(per_page, 300))
     with db_connection() as conn:
         c = conn.cursor()
         where = []
@@ -12589,13 +17694,80 @@ def load_reports(status_filter='', user_filter='', text_filter=''):
             where.append('LOWER(description) LIKE ?')
             params.append(f'%{text_val}%')
 
-        query = 'SELECT id, user_id, description, timestamp, status, read_at FROM reports'
+        has_context_cols = reports_has_context_columns()
+        if has_context_cols:
+            query = """SELECT id, user_id, description, timestamp, status, read_at,
+                              reporter_role, reporter_school_id, source_page
+                       FROM reports"""
+        else:
+            query = """SELECT id, user_id, description, timestamp, status, read_at
+                       FROM reports"""
+        count_query = "SELECT COUNT(*) FROM reports"
         if where:
-            query += ' WHERE ' + ' AND '.join(where)
-        query += ' ORDER BY timestamp DESC LIMIT 1000'
-        db_execute(c, query, tuple(params) if params else None)
-        return [{'id': row[0], 'user_id': row[1], 'description': row[2], 
-                'timestamp': row[3], 'status': row[4], 'read_at': row[5]} for row in c.fetchall()]
+            where_sql = ' WHERE ' + ' AND '.join(where)
+            query += where_sql
+            count_query += where_sql
+        total_rows = 0
+        if include_total:
+            db_execute(c, count_query, tuple(params) if params else None)
+            total_rows = int((c.fetchone() or [0])[0] or 0)
+            max_pages = max(1, (total_rows + per_page - 1) // per_page)
+            if page > max_pages:
+                page = max_pages
+        offset = (page - 1) * per_page
+        query += ' ORDER BY timestamp DESC LIMIT ? OFFSET ?'
+        try:
+            db_execute(c, query, tuple((params or []) + [per_page, offset]))
+            rows = c.fetchall()
+        except Exception as exc:
+            em = (str(exc) or '').lower()
+            missing_context_col = (
+                ('reporter_role' in em and 'does not exist' in em)
+                or ('reporter_school_id' in em and 'does not exist' in em)
+                or ('source_page' in em and 'does not exist' in em)
+            )
+            if not (has_context_cols and missing_context_col):
+                raise
+            logging.warning(
+                "reports context columns missing at runtime; falling back to legacy reports query: %s",
+                exc,
+            )
+            global _REPORTS_HAS_CONTEXT_COLS
+            _REPORTS_HAS_CONTEXT_COLS = False
+            has_context_cols = False
+            legacy_query = """SELECT id, user_id, description, timestamp, status, read_at
+                              FROM reports"""
+            if where:
+                legacy_query += ' WHERE ' + ' AND '.join(where)
+            legacy_query += ' ORDER BY timestamp DESC LIMIT ? OFFSET ?'
+            db_execute(c, legacy_query, tuple((params or []) + [per_page, offset]))
+            rows = c.fetchall()
+        school_ids = (
+            sorted({(row[7] or '').strip() for row in rows if len(row) > 7 and (row[7] or '').strip()})
+            if has_context_cols else []
+        )
+        school_name_map = {}
+        for sid in school_ids:
+            school_row = get_school(sid) or {}
+            school_name_map[sid] = (school_row.get('school_name') or '').strip()
+        out = [
+            {
+                'id': row[0],
+                'user_id': row[1],
+                'description': row[2],
+                'timestamp': row[3],
+                'status': row[4],
+                'read_at': row[5],
+                'reporter_role': (row[6] or '').strip() if has_context_cols and len(row) > 6 else '',
+                'reporter_school_id': (row[7] or '').strip() if has_context_cols and len(row) > 7 else '',
+                'source_page': (row[8] or '').strip() if has_context_cols and len(row) > 8 else '',
+                'reporter_school_name': school_name_map.get((row[7] or '').strip(), '') if has_context_cols and len(row) > 7 else '',
+            }
+            for row in rows
+        ]
+        if include_total:
+            return out, total_rows
+        return out
 
 def mark_all_reports_read():
     """Mark unread reports as read."""
@@ -12659,12 +17831,116 @@ def get_public_table_names():
         )
         return [row[0] for row in c.fetchall() if row and row[0]]
 
-def save_report(user_id, description):
+def save_report(user_id, description, reporter_role='', reporter_school_id='', source_page=''):
     """Save a report."""
+    role_val = (reporter_role or '').strip()[:40]
+    school_val = (reporter_school_id or '').strip()[:80]
+    page_val = (source_page or '').strip()[:350]
     with db_connection(commit=True) as conn:
         c = conn.cursor()
-        db_execute(c, 'INSERT INTO reports (user_id, description, timestamp, status) VALUES (?, ?, ?, ?)',
-                   (user_id, description, datetime.now().isoformat(), 'unread'))
+        if reports_has_context_columns():
+            db_execute(
+                c,
+                """INSERT INTO reports
+                   (user_id, description, timestamp, status, reporter_role, reporter_school_id, source_page)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (user_id, description, datetime.now().isoformat(), 'unread', role_val, school_val, page_val),
+            )
+        else:
+            db_execute(
+                c,
+                """INSERT INTO reports
+                   (user_id, description, timestamp, status)
+                   VALUES (?, ?, ?, ?)""",
+                (user_id, description, datetime.now().isoformat(), 'unread'),
+            )
+
+def log_app_error(exc, source_page='', endpoint='', extra_meta=None):
+    """
+    Persist production/runtime errors with request/user context for super-admin review.
+    Returns generated error UID.
+    """
+    error_uid = datetime.now().strftime('ERR%Y%m%d%H%M%S') + '-' + secrets.token_hex(4)
+    error_type = ''
+    error_message = ''
+    tb_text = ''
+    if exc is not None:
+        error_type = type(exc).__name__
+        error_message = str(exc or '')
+        try:
+            tb_text = ''.join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+        except Exception:
+            tb_text = traceback.format_exc()
+    role_name = ''
+    user_id = ''
+    school_id = ''
+    path = ''
+    method = ''
+    endpoint_val = (endpoint or '').strip()
+    source_page_val = (source_page or '').strip()
+    req_meta = {}
+    if has_request_context():
+        role_name = (session.get('role') or '').strip().lower()
+        user_id = (session.get('user_id') or session.get('parent_phone') or '').strip().lower()
+        school_id = (session.get('school_id') or '').strip()
+        path = (request.path or '').strip()
+        method = (request.method or '').strip().upper()
+        if not endpoint_val:
+            endpoint_val = (request.endpoint or '').strip()
+        if not source_page_val:
+            source_page_val = (request.referrer or '').strip()
+        req_meta = {
+            'ip': get_client_ip(),
+            'user_agent': (request.headers.get('User-Agent', '') or '').strip()[:240],
+            'referrer': (request.referrer or '').strip()[:350],
+            'args': {str(k): str(v)[:180] for k, v in (request.args or {}).items()},
+        }
+    if isinstance(extra_meta, dict):
+        for k, v in extra_meta.items():
+            req_meta[str(k)[:40]] = str(v)[:220]
+    if role_name == 'super_admin':
+        school_id = ''
+    if not ensure_extended_features_schema():
+        logging.warning("Error log skipped (schema unavailable): uid=%s type=%s msg=%s", error_uid, error_type, error_message[:180])
+        return error_uid
+    try:
+        with db_connection(commit=True) as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """INSERT INTO app_error_logs
+                   (error_uid, school_id, role, user_id, endpoint, path, method, error_type, error_message,
+                    traceback_text, source_page, request_meta_json, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
+                (
+                    error_uid,
+                    school_id or None,
+                    role_name[:40],
+                    user_id[:100],
+                    endpoint_val[:120],
+                    path[:280],
+                    method[:12],
+                    error_type[:120],
+                    error_message[:APP_ERROR_LOG_MESSAGE_MAX_CHARS],
+                    tb_text[:APP_ERROR_LOG_TRACEBACK_MAX_CHARS],
+                    source_page_val[:350],
+                    json.dumps(req_meta, default=str)[:APP_ERROR_LOG_REQUEST_META_MAX_CHARS],
+                ),
+            )
+    except Exception as err:
+        logging.warning("Failed to persist app error log uid=%s: %s", error_uid, err)
+    return error_uid
+
+@got_request_exception.connect_via(app)
+def _capture_unhandled_exception(sender, exception, **extra):
+    # Capture only real runtime exceptions; CSRF has a dedicated handled flow.
+    if isinstance(exception, CSRFError):
+        return
+    try:
+        error_uid = log_app_error(exception, endpoint=(request.endpoint or '') if has_request_context() else '')
+        logging.error("Unhandled exception captured: uid=%s type=%s", error_uid, type(exception).__name__)
+    except Exception:
+        logging.exception("Unhandled exception capture failed")
 
 # ==================== ROUTES ====================
 
@@ -12728,6 +18004,220 @@ def home():
     # Render the login page directly as the landing page
     return render_template('shared/login.html')
 
+
+def _issue_school_access_challenge():
+    """Create a simple arithmetic challenge for anti-bot protection."""
+    a = secrets.randbelow(8) + 2
+    b = secrets.randbelow(8) + 2
+    session['school_access_challenge_expected'] = str(a + b)
+    session['school_access_challenge_text'] = f'{a} + {b}'
+    return session['school_access_challenge_text']
+
+
+def _validate_school_access_challenge(user_answer):
+    expected = (session.get('school_access_challenge_expected') or '').strip()
+    if not expected:
+        return False
+    return (str(user_answer or '').strip() == expected)
+
+
+@app.route('/request-school-access', methods=['GET', 'POST'])
+@require_rate_limit('school_access_request_public', 8, 3600, redirect_endpoint='school_access_request', methods=('POST',))
+def school_access_request():
+    """Public school onboarding request form for remote registrations."""
+    challenge_text = session.get('school_access_challenge_text') or _issue_school_access_challenge()
+    tracked_request = None
+    if request.method == 'POST':
+        action = (request.form.get('form_action') or 'submit').strip().lower()
+        if action == 'track':
+            request_id = (request.form.get('track_request_id') or '').strip().upper()
+            admin_email = (request.form.get('track_admin_email') or '').strip().lower()
+            tracked_request = get_school_onboarding_request(request_id)
+            if not tracked_request:
+                flash('Request reference not found.', 'error')
+            elif admin_email and admin_email != (tracked_request.get('admin_email') or '').strip().lower():
+                tracked_request = None
+                flash('Request reference and admin email do not match.', 'error')
+            else:
+                flash(f'Request {request_id} found.', 'success')
+        elif action == 'verify_email':
+            request_id = (request.form.get('verify_request_id') or '').strip().upper()
+            school_email = (request.form.get('verify_school_email') or '').strip().lower()
+            verify_code = (request.form.get('verify_code') or '').strip()
+            try:
+                result = verify_school_onboarding_email_code(
+                    request_id=request_id,
+                    code=verify_code,
+                    school_email=school_email,
+                )
+                tracked_request = get_school_onboarding_request(request_id)
+                if result.get('already_verified'):
+                    flash(f'{request_id} is already email-verified and pending review.', 'success')
+                else:
+                    flash(f'School email verified for {request_id}. Request is now pending super-admin review.', 'success')
+            except Exception as exc:
+                flash(f'Could not verify email code: {str(exc)}', 'error')
+        elif action == 'resend_verify_code':
+            request_id = (request.form.get('resend_request_id') or '').strip().upper()
+            school_email = (request.form.get('resend_school_email') or '').strip().lower()
+            tracked_request = get_school_onboarding_request(request_id)
+            if not tracked_request:
+                flash('Request reference not found.', 'error')
+            elif school_email and school_email != (tracked_request.get('school_email') or '').strip().lower():
+                flash('School email does not match this request.', 'error')
+            else:
+                try:
+                    send_result = issue_school_onboarding_email_verification_code(
+                        request_id=request_id,
+                        ttl_minutes=30,
+                        force_new=True,
+                    )
+                    tracked_request = get_school_onboarding_request(request_id)
+                    flash(
+                        f'New verification code sent to {send_result.get("masked_email") or "school email"}.',
+                        'success',
+                    )
+                except Exception as exc:
+                    flash(f'Could not resend verification code: {str(exc)}', 'error')
+        else:
+            honeypot = (request.form.get('website') or '').strip()
+            if honeypot:
+                flash('Spam protection triggered. Try again.', 'error')
+            elif not _validate_school_access_challenge(request.form.get('challenge_answer', '')):
+                flash('Wrong challenge answer. Please retry.', 'error')
+            else:
+                school_name = (request.form.get('school_name') or '').strip()
+                location = (request.form.get('location') or '').strip()
+                phone = (request.form.get('phone') or '').strip()
+                school_email = (request.form.get('school_email') or '').strip().lower()
+                principal_name = (request.form.get('principal_name') or '').strip()
+                admin_name = (request.form.get('admin_name') or '').strip()
+                admin_email = (request.form.get('admin_email') or '').strip().lower()
+                website_url = (request.form.get('website_url') or '').strip()
+                expected_students = (request.form.get('expected_students') or '0').strip()
+                note = (request.form.get('note') or '').strip()
+                proof_document_path = ''
+                try:
+                    proof_document_path = save_school_onboarding_proof_document(request.files.get('proof_document'))
+                    request_id = create_school_onboarding_request(
+                        school_name=school_name,
+                        location=location,
+                        phone=phone,
+                        school_email=school_email,
+                        principal_name=principal_name,
+                        admin_name=admin_name,
+                        admin_email=admin_email,
+                        website_url=website_url,
+                        proof_document_path=proof_document_path,
+                        expected_students=expected_students,
+                        note=note,
+                        source_ip=get_client_ip(),
+                        user_agent=(request.headers.get('User-Agent', '') or '').strip(),
+                    )
+                    verification_note = (
+                        f'Verify school email with the code sent to {_mask_email_address(school_email)} '
+                        'to move this request to super-admin review queue.'
+                    )
+                    flash(
+                        f'Request submitted successfully. Reference: {request_id}. '
+                        f'{verification_note}',
+                        'success',
+                    )
+                    try:
+                        notify_payload = {
+                            'request_id': request_id,
+                            'school_name': school_name,
+                            'location': location,
+                            'phone': phone,
+                            'school_email': school_email,
+                            'principal_name': principal_name,
+                            'admin_name': admin_name,
+                            'admin_email': admin_email,
+                            'website_url': website_url,
+                            'proof_document_path': proof_document_path,
+                            'expected_students': expected_students,
+                            'note': note,
+                            'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                        }
+                        mail_result = send_onboarding_event_notifications(
+                            'request_submitted',
+                            notify_payload,
+                            actor_user='public_portal',
+                        )
+                        if mail_result.get('errors'):
+                            logging.warning(
+                                "Onboarding request email warning for %s: %s",
+                                request_id,
+                                '; '.join(mail_result.get('errors') or []),
+                            )
+                    except Exception as notify_exc:
+                        logging.warning("Onboarding submit email notification failed for %s: %s", request_id, notify_exc)
+                    # Rotate challenge per successful submission.
+                    challenge_text = _issue_school_access_challenge()
+                    return redirect(url_for('school_access_request'))
+                except Exception as exc:
+                    try:
+                        orphan_abs = _resolve_onboarding_proof_file_path(proof_document_path)
+                        if orphan_abs and os.path.isfile(orphan_abs):
+                            os.remove(orphan_abs)
+                    except Exception:
+                        pass
+                    flash(f'Could not submit request: {str(exc)}', 'error')
+        # Rotate challenge after any post attempt.
+        challenge_text = _issue_school_access_challenge()
+    return render_template(
+        'shared/school_access_request.html',
+        challenge_text=challenge_text,
+        tracked_request=tracked_request,
+    )
+
+
+@app.route('/school-admin-invite/<token>', methods=['GET', 'POST'])
+@require_rate_limit('school_admin_invite_setup', 20, 3600, redirect_endpoint='login', methods=('POST',))
+def school_admin_invite_setup(token):
+    """School-admin password setup via invite token."""
+    invite = get_school_admin_invite(token)
+    if not invite:
+        flash('Invite token is invalid.', 'error')
+        return redirect(url_for('login'))
+    now = datetime.now()
+    if invite.get('used_at'):
+        flash('Invite token was already used.', 'error')
+        return redirect(url_for('login'))
+    expires_at = invite.get('expires_at')
+    if isinstance(expires_at, datetime) and now > expires_at:
+        flash('Invite token has expired.', 'error')
+        return redirect(url_for('login'))
+
+    if request.method == 'POST':
+        new_password = (request.form.get('new_password') or '').strip()
+        confirm_password = (request.form.get('confirm_password') or '').strip()
+        if new_password != confirm_password:
+            flash('Passwords do not match.', 'error')
+        else:
+            ok_pwd, pwd_msg = validate_admin_password_strength(new_password)
+            if not ok_pwd:
+                flash(f'Password policy: {pwd_msg}', 'error')
+            else:
+                try:
+                    with db_connection(commit=True) as conn:
+                        c = conn.cursor()
+                        db_execute(
+                            c,
+                            """UPDATE users
+                               SET password_hash = ?, password_changed_at = ?
+                               WHERE LOWER(username) = LOWER(?) AND role = 'school_admin' AND school_id = ?""",
+                            (hash_password(new_password), datetime.now(), invite.get('username', ''), invite.get('school_id', '')),
+                        )
+                        if c.rowcount <= 0:
+                            raise ValueError('School admin account was not found for this invite.')
+                        _mark_school_admin_invite_used_with_cursor(c, token)
+                    flash('Password set successfully. You can login now.', 'success')
+                    return redirect(url_for('login'))
+                except Exception as exc:
+                    flash(f'Could not set password: {str(exc)}', 'error')
+    return render_template('shared/school_admin_invite_setup.html', invite=invite, expires_at=format_timestamp(invite.get('expires_at')))
+
 @app.errorhandler(CSRFError)
 def csrf_error(error):
     """Handle CSRF token errors."""
@@ -12741,7 +18231,7 @@ def csrf_error(error):
 def enforce_school_operations_toggle():
     """Apply school-level operation lock set by super admin."""
     endpoint = request.endpoint or ''
-    if endpoint in {'static', 'login', 'logout', 'home'}:
+    if endpoint in {'static', 'login', 'logout', 'home', 'school_access_request'}:
         return None
 
     role = session.get('role')
@@ -12790,11 +18280,68 @@ def enforce_school_operations_toggle():
             return None
         return redirect(url_for('teacher_dashboard'))
 
-    if role == 'school_admin' and endpoint != 'school_admin_change_password' and (endpoint in school_admin_blocked_endpoints or request.method == 'POST'):
+    school_admin_allowed_when_locked = {'school_admin_change_password', 'privacy_request', 'report_issue'}
+    if role == 'school_admin' and endpoint not in school_admin_allowed_when_locked and (endpoint in school_admin_blocked_endpoints or request.method == 'POST'):
         flash('School operations are OFF by super admin. School admin is currently in read-only mode.', 'error')
         return redirect(url_for('school_admin_dashboard'))
 
     return None
+
+
+@app.before_request
+def enforce_school_access_policy():
+    """Block app usage for schools that are not currently active/trial-enabled."""
+    endpoint = (request.endpoint or '').strip()
+    if endpoint in {
+        'static',
+        'home',
+        'login',
+        'logout',
+        'terms_privacy',
+        'help',
+        'report_issue',
+        'assistant_guide',
+        'assistant_feedback',
+        'assistant_preferences',
+        'assistant_memory_clear',
+    }:
+        return None
+
+    role = (session.get('role') or '').strip().lower()
+    if role in {'', 'super_admin'}:
+        return None
+
+    school_ids = []
+    if role == 'parent':
+        sid = (session.get('school_id') or '').strip()
+        if sid:
+            school_ids.append(sid)
+        for token in (session.get('parent_student_keys') or []):
+            raw = str(token or '').strip()
+            if '::' not in raw:
+                continue
+            key_sid = raw.split('::', 1)[0].strip()
+            if key_sid and key_sid not in school_ids:
+                school_ids.append(key_sid)
+    else:
+        sid = (session.get('school_id') or '').strip()
+        if sid:
+            school_ids.append(sid)
+
+    if not school_ids:
+        return None
+
+    blocked_message = 'School access is restricted. Contact super admin.'
+    for sid in school_ids:
+        school = get_school(sid) or {}
+        access_state = build_school_access_state(school)
+        if access_state.get('is_allowed', False):
+            return None
+        blocked_message = access_state.get('message') or blocked_message
+
+    session.clear()
+    flash(blocked_message, 'error')
+    return redirect(url_for('login'))
 
 @app.before_request
 def enforce_student_password_change():
@@ -12839,6 +18386,31 @@ def enforce_admin_password_rotation():
     if role == 'super_admin':
         return redirect(url_for('super_admin_change_password'))
     return redirect(url_for('school_admin_change_password'))
+
+
+@app.before_request
+def enforce_session_idle_timeout():
+    """Invalidate authenticated sessions after inactivity window."""
+    user_id = (session.get('user_id') or '').strip()
+    role = (session.get('role') or '').strip().lower()
+    if not user_id and role != 'parent':
+        return None
+    endpoint = (request.endpoint or '').strip()
+    if endpoint in {'static', 'logout', 'login', 'home', 'super_admin_two_factor'}:
+        return None
+    now = datetime.now()
+    raw_last = (session.get('last_activity_at') or '').strip()
+    if raw_last:
+        try:
+            last_at = datetime.fromisoformat(raw_last)
+            if (now - last_at) > app.permanent_session_lifetime:
+                session.clear()
+                flash('Session timed out due to inactivity. Please login again.', 'error')
+                return redirect(url_for('login'))
+        except Exception:
+            pass
+    session['last_activity_at'] = now.isoformat()
+    return None
 
 def _teacher_has_class_or_subject_access(school_id, teacher_id, classname, subject='', term='', academic_year=''):
     cls = canonicalize_classname(classname or '')
@@ -12946,6 +18518,15 @@ def login():
             flash('Please enter username and password.', 'error')
             return render_template('shared/login.html', terms_read=terms_read)
         client_ip = get_client_ip()
+        if RATE_LIMIT_ENABLED:
+            user_allowed, retry_after = _rate_limit_consume(
+                key=f'login_user:{username}:{client_ip}',
+                limit=RATE_LIMIT_LOGIN_USER_PER_MIN,
+                window_seconds=60,
+            )
+            if not user_allowed:
+                flash(f'Too many login attempts for this account. Try again in about {retry_after} second(s).', 'error')
+                return render_template('shared/login.html', terms_read=terms_read)
         blocked, wait_minutes = is_login_blocked('login', username, client_ip)
         if blocked:
             flash(f'Too many failed login attempts. Try again in about {wait_minutes} minute(s).', 'error')
@@ -12997,10 +18578,28 @@ def login():
                 record_login_audit(username, role, user_school_id, 'login', False, 'missing_school_assignment')
                 flash('Account is missing school assignment. Contact administrator.', 'error')
                 return render_template('shared/login.html', terms_read=terms_read)
-            if role != 'super_admin' and not get_school(user_school_id):
+            school_row = get_school(user_school_id) if role != 'super_admin' else None
+            if role != 'super_admin' and not school_row:
                 record_login_audit(username, role, user_school_id, 'login', False, 'invalid_school_assignment')
                 flash('Account is linked to an invalid school. Contact administrator.', 'error')
                 return render_template('shared/login.html', terms_read=terms_read)
+            if role != 'super_admin':
+                access_state = build_school_access_state(school_row or {})
+                if not access_state.get('is_allowed', False):
+                    record_login_audit(
+                        username,
+                        role,
+                        user_school_id,
+                        'login',
+                        False,
+                        f"school_access_{access_state.get('effective_status', 'blocked')}",
+                    )
+                    flash(access_state.get('message') or 'School access is restricted. Contact super admin.', 'error')
+                    return render_template(
+                        'shared/login.html',
+                        terms_read=terms_read,
+                        blocked_access_state=access_state,
+                    )
             if role == 'student':
                 student_row = load_student(user_school_id, username)
                 if not student_row:
@@ -13015,6 +18614,14 @@ def login():
                     return render_template('shared/login.html', terms_read=terms_read)
 
             clear_failed_login('login', username, client_ip)
+            if role == 'super_admin' and SUPER_ADMIN_EMAIL_2FA_ENABLED:
+                session['super_admin_2fa_auth_user'] = username
+                session['super_admin_2fa_auth_school_id'] = user_school_id
+                if not _begin_super_admin_email_2fa(user, client_ip=client_ip):
+                    flash('Could not send 2FA code email. Check SMTP settings.', 'error')
+                    return render_template('shared/login.html', terms_read=terms_read)
+                flash('Verification code sent to your super admin email.', 'success')
+                return redirect(url_for('super_admin_two_factor'))
             return _complete_authenticated_login(user, user_school_id)
         else:
             # Unified parent login path on /login:
@@ -13023,18 +18630,28 @@ def login():
             if parent_phone:
                 candidates = get_parent_students_by_phone(parent_phone)
                 matched = []
+                blocked_parent_message = ''
+                blocked_parent_state = None
                 for row in candidates:
                     password_hash = (row.get('parent_password_hash') or '').strip()
                     if not password_hash:
                         continue
                     if check_password(password_hash, password):
-                        matched.append(row)
+                        sid = (row.get('school_id') or '').strip()
+                        school_row = get_school(sid) if sid else None
+                        access_state = build_school_access_state(school_row or {})
+                        if access_state.get('is_allowed', False):
+                            matched.append(row)
+                        elif not blocked_parent_message:
+                            blocked_parent_message = access_state.get('message') or 'School access is restricted.'
+                            blocked_parent_state = access_state
                 if matched:
                     clear_failed_login('login', username, client_ip)
                     session.clear()
                     session.permanent = True
                     session['role'] = 'parent'
                     session['parent_phone'] = parent_phone
+                    session['school_id'] = (matched[0].get('school_id') or '').strip()
                     session['post_login_welcome_name'] = (matched[0].get('parent_name') or parent_phone).strip()
                     session['parent_student_keys'] = sorted(
                         {f"{row.get('school_id', '')}::{row.get('student_id', '')}" for row in matched},
@@ -13053,11 +18670,51 @@ def login():
                     )
                     flash('Security warning: change your parent password now to a private password only you know.', 'error')
                     return redirect(url_for('parent_dashboard'))
+                if blocked_parent_message:
+                    flash(blocked_parent_message, 'error')
+                    return render_template(
+                        'shared/login.html',
+                        terms_read=terms_read,
+                        blocked_access_state=(blocked_parent_state or {'effective_status': 'suspended', 'reason': blocked_parent_message, 'message': blocked_parent_message}),
+                    )
             register_failed_login('login', username, client_ip)
             record_login_audit(username, '', None, 'login', False, 'invalid_credentials')
             flash('Invalid username or password.', 'error')
     
     return render_template('shared/login.html', terms_read=terms_read)
+
+
+@app.route('/super-admin/2fa', methods=['GET', 'POST'])
+@require_rate_limit('super_admin_2fa_verify', 25, 3600, redirect_endpoint='login', methods=('POST',))
+def super_admin_two_factor():
+    if not SUPER_ADMIN_EMAIL_2FA_ENABLED:
+        return redirect(url_for('login'))
+    pending_user = (session.get('super_admin_2fa_auth_user') or '').strip().lower()
+    pending_school_id = (session.get('super_admin_2fa_auth_school_id') or '').strip()
+    challenge_user = (session.get('super_admin_2fa_pending_user') or '').strip().lower()
+    if not pending_user or not challenge_user or pending_user != challenge_user:
+        flash('2FA session expired. Please login again.', 'error')
+        _clear_super_admin_2fa_state()
+        session.pop('super_admin_2fa_auth_user', None)
+        session.pop('super_admin_2fa_auth_school_id', None)
+        return redirect(url_for('login'))
+
+    if request.method == 'POST':
+        code = (request.form.get('code') or '').strip()
+        valid, reason = _super_admin_2fa_is_valid(code, client_ip=get_client_ip())
+        if not valid:
+            flash(reason or 'Invalid 2FA code.', 'error')
+            return render_template('shared/super_admin_2fa.html', username=pending_user)
+        user = get_user(pending_user)
+        if not user or (user.get('role') or '').strip().lower() != 'super_admin':
+            flash('Super admin account no longer available.', 'error')
+            return redirect(url_for('login'))
+        _clear_super_admin_2fa_state()
+        session.pop('super_admin_2fa_auth_user', None)
+        session.pop('super_admin_2fa_auth_school_id', None)
+        return _complete_authenticated_login(user, pending_school_id)
+    return render_template('shared/super_admin_2fa.html', username=pending_user)
+
 
 @app.route('/admin-otp', methods=['GET', 'POST'])
 def admin_otp_verify():
@@ -13068,6 +18725,95 @@ def admin_otp_verify():
 @app.route('/terms-privacy')
 def terms_privacy():
     return render_template('shared/terms_privacy.html')
+
+
+@app.route('/privacy-request', methods=['GET', 'POST'])
+@require_rate_limit('privacy_request_submit', 20, 3600, redirect_endpoint='privacy_request', methods=('POST',))
+def privacy_request():
+    """Allow users to submit data export/delete/correction requests."""
+    role = (session.get('role') or '').strip().lower()
+    user_id = (session.get('user_id') or '').strip().lower()
+    school_id = (session.get('school_id') or '').strip()
+    if role not in {'super_admin', 'school_admin', 'teacher', 'student', 'parent'}:
+        flash('Login required to submit privacy request.', 'error')
+        return redirect(url_for('login'))
+    if request.method == 'POST':
+        req_type = (request.form.get('request_type') or '').strip().lower()
+        subject_line = (request.form.get('subject_line') or '').strip()
+        details = (request.form.get('details') or '').strip()
+        try:
+            req_id = create_privacy_data_request(
+                role=role,
+                user_id=user_id or (session.get('parent_phone') or ''),
+                school_id=school_id,
+                request_type=req_type,
+                subject_line=subject_line,
+                details=details,
+                source_page=(request.referrer or request.path or '')[:240],
+                source_ip=get_client_ip(),
+            )
+            flash(f'Privacy request submitted. Reference: {req_id}', 'success')
+            return redirect(url_for('privacy_request'))
+        except Exception as exc:
+            flash(f'Could not submit privacy request: {str(exc)}', 'error')
+    return render_template('shared/privacy_request.html', role=role)
+
+
+@app.route('/super-admin/privacy-requests')
+def super_admin_privacy_requests():
+    if (session.get('role') or '').strip().lower() != 'super_admin':
+        return redirect(url_for('login'))
+    status_filter = (request.args.get('status') or '').strip().lower()
+    text_filter = (request.args.get('q') or '').strip()
+    try:
+        page = int(request.args.get('page', 1))
+    except Exception:
+        page = 1
+    try:
+        per_page = int(request.args.get('per_page', 25))
+    except Exception:
+        per_page = 25
+    page = max(1, page)
+    per_page = max(10, min(100, per_page))
+    rows, total_rows = list_privacy_data_requests(
+        status_filter=status_filter,
+        text_filter=text_filter,
+        page=page,
+        per_page=per_page,
+        include_total=True,
+    )
+    total_pages = max(1, math.ceil(total_rows / max(1, per_page)))
+    return render_template(
+        'super/super_admin_privacy_requests.html',
+        requests_data=rows,
+        status_filter=status_filter,
+        text_filter=text_filter,
+        page=page,
+        per_page=per_page,
+        total_rows=total_rows,
+        total_pages=total_pages,
+        last_login_at=format_timestamp(get_last_login_at(session.get('user_id'))),
+    )
+
+
+@app.route('/super-admin/privacy-requests/resolve', methods=['POST'])
+def super_admin_privacy_requests_resolve():
+    if (session.get('role') or '').strip().lower() != 'super_admin':
+        return redirect(url_for('login'))
+    request_id = (request.form.get('request_id') or '').strip()
+    status = (request.form.get('status') or 'resolved').strip().lower()
+    note = (request.form.get('note') or '').strip()
+    try:
+        resolve_privacy_data_request(
+            request_id=request_id,
+            status=status,
+            note=note,
+            actor=session.get('user_id', ''),
+        )
+        flash(f'Privacy request {request_id} updated as {status}.', 'success')
+    except Exception as exc:
+        flash(f'Could not update privacy request: {str(exc)}', 'error')
+    return redirect(url_for('super_admin_privacy_requests'))
 
 
 
@@ -13112,12 +18858,27 @@ def _build_super_admin_school_overview():
     schools = get_all_schools()
     for school in schools:
         school['admin_username'] = get_school_admin_username(school.get('school_id'))
+        school['access_state'] = build_school_access_state(school)
+        school['billing_summary'] = get_school_billing_summary(school.get('school_id'))
+        school['billing_records'] = list_school_billing_records(school.get('school_id'), limit=3)
+        school['latest_backup_drill'] = get_latest_school_backup_drill(school.get('school_id'))
+        school['profile_completeness'] = build_school_profile_completeness(school.get('school_id'))
+        school['access_audit_logs'] = get_school_access_audit_logs(school.get('school_id'), limit=2)
 
     total = len(schools)
     operations_on = sum(1 for s in schools if safe_int(s.get('operations_enabled', 1), 1))
     operations_off = max(0, total - operations_on)
     with_admin = sum(1 for s in schools if (s.get('admin_username') or '').strip())
     without_admin = max(0, total - with_admin)
+    trial_free = sum(1 for s in schools if (s.get('access_state', {}).get('effective_status') == 'trial_free'))
+    active_paid = sum(1 for s in schools if (s.get('access_state', {}).get('effective_status') == 'active_paid'))
+    suspended = sum(1 for s in schools if (s.get('access_state', {}).get('effective_status') == 'suspended'))
+    pending_payment = sum(1 for s in schools if (s.get('access_state', {}).get('effective_status') == 'pending_payment'))
+    billing_overdue = sum(1 for s in schools if int((s.get('billing_summary') or {}).get('overdue_rows', 0) or 0) > 0)
+    billing_due_soon = sum(1 for s in schools if int((s.get('billing_summary') or {}).get('due_soon_rows', 0) or 0) > 0)
+    low_completeness = sum(1 for s in schools if int((s.get('profile_completeness') or {}).get('percentage', 0) or 0) < 80)
+    pending_onboarding_requests = count_school_onboarding_requests('pending')
+    pending_privacy_requests = count_privacy_data_requests('pending')
 
     location_counts = {}
     for school in schools:
@@ -13140,6 +18901,15 @@ def _build_super_admin_school_overview():
         'operations_off': operations_off,
         'with_admin': with_admin,
         'without_admin': without_admin,
+        'trial_free': trial_free,
+        'active_paid': active_paid,
+        'suspended': suspended,
+        'pending_payment': pending_payment,
+        'billing_overdue': billing_overdue,
+        'billing_due_soon': billing_due_soon,
+        'low_completeness': low_completeness,
+        'pending_onboarding_requests': pending_onboarding_requests,
+        'pending_privacy_requests': pending_privacy_requests,
         'location_bars': location_bars,
     }
     return schools, overview
@@ -13168,6 +18938,483 @@ def super_admin_view_schools():
     schools, overview = _build_super_admin_school_overview()
     last_login_at = format_timestamp(get_last_login_at(session.get('user_id')))
     return render_template('super/super_admin_schools.html', schools=schools, overview=overview, last_login_at=last_login_at)
+
+
+@app.route('/super-admin/onboarding-requests')
+def super_admin_onboarding_requests():
+    if session.get('role') != 'super_admin':
+        return redirect(url_for('login'))
+    status_filter = (request.args.get('status') or '').strip().lower()
+    text_filter = (request.args.get('q') or '').strip()
+    try:
+        page = int(request.args.get('page', 1))
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        per_page = int(request.args.get('per_page', 25))
+    except (TypeError, ValueError):
+        per_page = 25
+    per_page = max(10, min(per_page, 100))
+    page = max(1, page)
+
+    onboarding_requests, total_rows = list_school_onboarding_requests(
+        status_filter=status_filter,
+        text_filter=text_filter,
+        page=page,
+        per_page=per_page,
+        include_total=True,
+    )
+    total_pages = max(1, math.ceil(total_rows / max(1, per_page)))
+    _schools, overview = _build_super_admin_school_overview()
+    last_login_at = format_timestamp(get_last_login_at(session.get('user_id')))
+    return render_template(
+        'super/super_admin_onboarding_requests.html',
+        onboarding_requests=onboarding_requests,
+        status_filter=status_filter,
+        text_filter=text_filter,
+        page=page,
+        per_page=per_page,
+        total_rows=total_rows,
+        total_pages=total_pages,
+        overview=overview,
+        last_login_at=last_login_at,
+    )
+
+
+@app.route('/super-admin/onboarding-requests/approve', methods=['POST'])
+def super_admin_onboarding_approve():
+    if session.get('role') != 'super_admin':
+        return redirect(url_for('login'))
+    request_id = (request.form.get('request_id') or '').strip()
+    admin_username_override = (request.form.get('admin_username') or '').strip().lower()
+    access_status = (request.form.get('access_status') or 'trial_free').strip().lower()
+    class_arm_ranking_mode = (request.form.get('class_arm_ranking_mode') or 'separate').strip().lower()
+    review_note = (request.form.get('review_note') or '').strip()
+
+    if not request_id:
+        flash('Request reference is required.', 'error')
+        return redirect(url_for('super_admin_onboarding_requests'))
+    if class_arm_ranking_mode not in {'separate', 'together'}:
+        class_arm_ranking_mode = 'separate'
+    if access_status not in SCHOOL_ACCESS_STATUSES:
+        access_status = 'trial_free'
+
+    onboarding = get_school_onboarding_request(request_id)
+    if not onboarding:
+        flash('Onboarding request not found.', 'error')
+        return redirect(url_for('super_admin_onboarding_requests'))
+    if (onboarding.get('status') or '').strip().lower() == 'pending_verification':
+        flash('Request is still pending verification. Verify school email first.', 'error')
+        return redirect(url_for('super_admin_onboarding_requests'))
+    if onboarding.get('status') == 'approved':
+        flash(f'{request_id} is already approved.', 'warning')
+        return redirect(url_for('super_admin_onboarding_requests'))
+    if onboarding.get('status') == 'cancelled':
+        flash(f'{request_id} is cancelled and cannot be approved.', 'error')
+        return redirect(url_for('super_admin_onboarding_requests'))
+    if int(onboarding.get('school_email_verified', 0) or 0) != 1:
+        flash('School email is not verified for this request.', 'error')
+        return redirect(url_for('super_admin_onboarding_requests'))
+    if not (onboarding.get('proof_document_path') or '').strip():
+        flash('Proof document is missing for this request.', 'error')
+        return redirect(url_for('super_admin_onboarding_requests'))
+    if int(onboarding.get('phone_verified', 0) or 0) != 1 or int(onboarding.get('document_verified', 0) or 0) != 1:
+        flash('Complete phone/document verification checklist before approval.', 'error')
+        return redirect(url_for('super_admin_onboarding_requests'))
+
+    admin_username = admin_username_override or (onboarding.get('admin_email') or '').strip().lower()
+    if not admin_username or not is_valid_email(admin_username):
+        flash('A valid admin email is required for approval.', 'error')
+        return redirect(url_for('super_admin_onboarding_requests'))
+    if get_user(admin_username):
+        flash(f'Admin email {admin_username} already exists. Use another email.', 'error')
+        return redirect(url_for('super_admin_onboarding_requests'))
+    if not ensure_school_admin_invite_schema():
+        flash('Invite schema unavailable. Run startup migrations and retry.', 'error')
+        return redirect(url_for('super_admin_onboarding_requests'))
+
+    try:
+        invite_url = ''
+        with db_connection(commit=True) as conn:
+            c = conn.cursor()
+            school_id = create_school_with_index_id_with_cursor(
+                c,
+                school_name=onboarding.get('school_name', ''),
+                location=onboarding.get('location', ''),
+                phone=onboarding.get('phone', ''),
+                email=onboarding.get('school_email', '') or admin_username,
+                principal_name=onboarding.get('principal_name', ''),
+                motto='',
+            )
+            db_execute(
+                c,
+                'UPDATE schools SET class_arm_ranking_mode = ? WHERE school_id = ?',
+                (class_arm_ranking_mode, school_id),
+            )
+            update_school_access_policy_with_cursor(
+                c=c,
+                school_id=school_id,
+                access_status=access_status,
+                trial_start_date=request.form.get('trial_start_date', ''),
+                trial_end_date=request.form.get('trial_end_date', ''),
+                subscription_plan=request.form.get('subscription_plan', ''),
+                subscription_start_date=request.form.get('subscription_start_date', ''),
+                subscription_end_date=request.form.get('subscription_end_date', ''),
+                payment_due_date=request.form.get('payment_due_date', ''),
+                payment_grace_days=request.form.get('payment_grace_days', '14'),
+                payment_reference=request.form.get('payment_reference', '') or request_id,
+                access_note=request.form.get('access_note', '') or review_note,
+                plan_max_students=request.form.get('plan_max_students', '0'),
+                plan_max_teachers=request.form.get('plan_max_teachers', '0'),
+                plan_storage_quota_mb=request.form.get('plan_storage_quota_mb', '0'),
+                plan_features_json=request.form.get('plan_features_json', '{}'),
+                updated_by=session.get('user_id', ''),
+            )
+            temp_password = secrets.token_urlsafe(24)
+            upsert_user_with_cursor(
+                c,
+                username=admin_username,
+                password_hash=hash_password(temp_password),
+                role='school_admin',
+                school_id=school_id,
+            )
+            invite_info = create_school_admin_invite_with_cursor(
+                c,
+                school_id=school_id,
+                username=admin_username,
+                created_by=session.get('user_id', ''),
+                ttl_hours=72,
+            )
+            invite_url = url_for('school_admin_invite_setup', token=invite_info.get('token', ''), _external=True)
+            db_execute(
+                c,
+                """UPDATE school_onboarding_requests
+                   SET status = 'approved',
+                       review_note = ?,
+                       reviewed_by = ?,
+                       reviewed_at = ?,
+                       linked_school_id = ?,
+                       admin_email = ?,
+                       updated_at = ?
+                   WHERE request_id = ?""",
+                (
+                    review_note[:1000],
+                    (session.get('user_id') or '').strip()[:120],
+                    datetime.now(),
+                    school_id,
+                    admin_username,
+                    datetime.now(),
+                    request_id,
+                ),
+            )
+        invalidate_school_cache(school_id)
+        flash(
+            f'Onboarding approved: {onboarding.get("school_name")} '
+            f'(School ID: {school_id}, Admin: {admin_username}). Invite sent.',
+            'success',
+        )
+        try:
+            notify_payload = dict(onboarding or {})
+            notify_payload['review_note'] = review_note
+            notify_payload['admin_email'] = admin_username
+            notify_payload['invite_url'] = invite_url
+            mail_result = send_onboarding_event_notifications(
+                'approved',
+                notify_payload,
+                actor_user=session.get('user_id', ''),
+                linked_school_id=school_id,
+                admin_username=admin_username,
+            )
+            if mail_result.get('errors'):
+                flash('Approved, but email notification had issues. Check SMTP settings/logs.', 'warning')
+                logging.warning(
+                    "Onboarding approval email warning for %s: %s",
+                    request_id,
+                    '; '.join(mail_result.get('errors') or []),
+                )
+        except Exception as notify_exc:
+            logging.warning("Onboarding approval email notification failed for %s: %s", request_id, notify_exc)
+    except Exception as exc:
+        flash(f'Approval failed: {str(exc)}', 'error')
+    return redirect(url_for('super_admin_onboarding_requests'))
+
+
+@app.route('/super-admin/onboarding-requests/reject', methods=['POST'])
+def super_admin_onboarding_reject():
+    if session.get('role') != 'super_admin':
+        return redirect(url_for('login'))
+    request_id = (request.form.get('request_id') or '').strip()
+    review_note = (request.form.get('review_note') or '').strip()
+    if not request_id:
+        flash('Request reference is required.', 'error')
+        return redirect(url_for('super_admin_onboarding_requests'))
+
+    onboarding = get_school_onboarding_request(request_id)
+    if not onboarding:
+        flash('Onboarding request not found.', 'error')
+        return redirect(url_for('super_admin_onboarding_requests'))
+    if onboarding.get('status') == 'approved':
+        flash('Approved requests cannot be rejected.', 'error')
+        return redirect(url_for('super_admin_onboarding_requests'))
+
+    try:
+        with db_connection(commit=True) as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """UPDATE school_onboarding_requests
+                   SET status = 'rejected',
+                       review_note = ?,
+                       reviewed_by = ?,
+                       reviewed_at = ?,
+                       updated_at = ?
+                   WHERE request_id = ?""",
+                (
+                    review_note[:1000],
+                    (session.get('user_id') or '').strip()[:120],
+                    datetime.now(),
+                    datetime.now(),
+                    request_id,
+                ),
+            )
+        flash(f'Onboarding request {request_id} rejected.', 'success')
+        try:
+            notify_payload = dict(onboarding or {})
+            notify_payload['review_note'] = review_note
+            mail_result = send_onboarding_event_notifications(
+                'rejected',
+                notify_payload,
+                actor_user=session.get('user_id', ''),
+            )
+            if mail_result.get('errors'):
+                flash('Rejected, but email notification had issues. Check SMTP settings/logs.', 'warning')
+                logging.warning(
+                    "Onboarding rejection email warning for %s: %s",
+                    request_id,
+                    '; '.join(mail_result.get('errors') or []),
+                )
+        except Exception as notify_exc:
+            logging.warning("Onboarding rejection email notification failed for %s: %s", request_id, notify_exc)
+    except Exception as exc:
+        flash(f'Rejection failed: {str(exc)}', 'error')
+    return redirect(url_for('super_admin_onboarding_requests'))
+
+
+@app.route('/super-admin/onboarding-requests/set-verification', methods=['POST'])
+def super_admin_onboarding_set_verification():
+    if (session.get('role') or '').strip().lower() != 'super_admin':
+        return redirect(url_for('login'))
+    request_id = (request.form.get('request_id') or '').strip().upper()
+    phone_verified = (request.form.get('phone_verified') or '').strip().lower() in {'1', 'true', 'yes', 'on'}
+    document_verified = (request.form.get('document_verified') or '').strip().lower() in {'1', 'true', 'yes', 'on'}
+    try:
+        set_school_onboarding_manual_verification(
+            request_id=request_id,
+            phone_verified=phone_verified,
+            document_verified=document_verified,
+            reviewer=session.get('user_id', ''),
+        )
+        flash(f'Verification checklist updated for {request_id}.', 'success')
+    except Exception as exc:
+        flash(f'Could not update verification checklist: {str(exc)}', 'error')
+    return redirect(url_for('super_admin_onboarding_requests'))
+
+
+@app.route('/super-admin/onboarding-requests/proof/<request_id>')
+def super_admin_onboarding_download_proof(request_id):
+    if (session.get('role') or '').strip().lower() != 'super_admin':
+        return redirect(url_for('login'))
+    rid = (request_id or '').strip().upper()
+    onboarding = get_school_onboarding_request(rid)
+    if not onboarding:
+        flash('Onboarding request not found.', 'error')
+        return redirect(url_for('super_admin_onboarding_requests'))
+    rel_path = (onboarding.get('proof_document_path') or '').strip()
+    if not rel_path:
+        flash('No proof document uploaded for this request.', 'error')
+        return redirect(url_for('super_admin_onboarding_requests'))
+    abs_path = _resolve_onboarding_proof_file_path(rel_path)
+    if not abs_path or not os.path.isfile(abs_path):
+        flash('Proof document file is unavailable.', 'error')
+        return redirect(url_for('super_admin_onboarding_requests'))
+    ext = os.path.splitext(abs_path)[1].lower()
+    download_name = f"{rid}_proof{ext or ''}"
+    return send_file(abs_path, as_attachment=True, download_name=download_name)
+
+
+@app.route('/super-admin/onboarding-requests/resend-invite', methods=['POST'])
+def super_admin_onboarding_resend_invite():
+    if (session.get('role') or '').strip().lower() != 'super_admin':
+        return redirect(url_for('login'))
+    if not ensure_school_admin_invite_schema():
+        flash('Invite schema unavailable. Run migrations and retry.', 'error')
+        return redirect(url_for('super_admin_onboarding_requests'))
+    request_id = (request.form.get('request_id') or '').strip()
+    onboarding = get_school_onboarding_request(request_id)
+    if not onboarding:
+        flash('Onboarding request not found.', 'error')
+        return redirect(url_for('super_admin_onboarding_requests'))
+    if (onboarding.get('status') or '').strip().lower() != 'approved':
+        flash('Invite can only be resent for approved requests.', 'error')
+        return redirect(url_for('super_admin_onboarding_requests'))
+    school_id = (onboarding.get('linked_school_id') or '').strip()
+    admin_email = (onboarding.get('admin_email') or '').strip().lower()
+    if not school_id or not admin_email:
+        flash('Approved request is missing school/admin details.', 'error')
+        return redirect(url_for('super_admin_onboarding_requests'))
+    try:
+        with db_connection(commit=True) as conn:
+            c = conn.cursor()
+            invite = create_school_admin_invite_with_cursor(
+                c,
+                school_id=school_id,
+                username=admin_email,
+                created_by=session.get('user_id', ''),
+                ttl_hours=72,
+            )
+        invite_url = url_for('school_admin_invite_setup', token=invite.get('token', ''), _external=True)
+        notify_payload = dict(onboarding or {})
+        notify_payload['invite_url'] = invite_url
+        notify_payload['review_note'] = 'Invite re-sent by super admin.'
+        send_onboarding_event_notifications(
+            'approved',
+            notify_payload,
+            actor_user=session.get('user_id', ''),
+            linked_school_id=school_id,
+            admin_username=admin_email,
+        )
+        flash(f'Invite re-sent for {request_id}.', 'success')
+    except Exception as exc:
+        flash(f'Could not resend invite: {str(exc)}', 'error')
+    return redirect(url_for('super_admin_onboarding_requests'))
+
+
+@app.route('/webhooks/payment', methods=['POST'])
+@csrf.exempt
+def payment_webhook():
+    """Receive payment gateway callbacks and update billing/access status."""
+    raw_body = request.get_data() or b''
+    signature = request.headers.get('X-Payment-Signature', '') or request.headers.get('X-Pay-Signature', '')
+    if not verify_payment_webhook_signature(raw_body, signature):
+        return Response('invalid signature', status=401)
+    try:
+        payload = request.get_json(silent=True) or {}
+    except Exception:
+        payload = {}
+    school_id = (payload.get('school_id') or payload.get('metadata', {}).get('school_id') or '').strip()
+    invoice_ref = (payload.get('invoice_ref') or payload.get('reference') or payload.get('payment_reference') or '').strip()
+    status_raw = (payload.get('status') or '').strip().lower()
+    amount_due = payload.get('amount_due', payload.get('expected_amount', 0))
+    amount_paid = payload.get('amount_paid', payload.get('amount', 0))
+    currency = (payload.get('currency') or 'NGN').strip().upper()
+    due_date = (payload.get('due_date') or '').strip()
+    paid_at = (payload.get('paid_at') or payload.get('paid_date') or '').strip()
+    plan_name = (payload.get('plan_name') or payload.get('plan') or '').strip()
+    note = (payload.get('note') or payload.get('gateway_message') or 'webhook').strip()
+    status_map = {
+        'success': 'paid',
+        'successful': 'paid',
+        'paid': 'paid',
+        'complete': 'paid',
+        'pending': 'pending',
+        'processing': 'pending',
+        'part_paid': 'part_paid',
+        'partial': 'part_paid',
+        'overdue': 'overdue',
+        'failed': 'pending',
+    }
+    billing_status = status_map.get(status_raw, 'pending')
+
+    if not school_id and invoice_ref:
+        try:
+            with db_connection() as conn:
+                c = conn.cursor()
+                db_execute(
+                    c,
+                    """SELECT school_id
+                       FROM school_billing_records
+                       WHERE invoice_ref = ?
+                       ORDER BY created_at DESC
+                       LIMIT 1""",
+                    (invoice_ref,),
+                )
+                row = c.fetchone()
+                if row:
+                    school_id = (row[0] or '').strip()
+        except Exception:
+            school_id = ''
+    if not school_id and invoice_ref:
+        try:
+            with db_connection() as conn:
+                c = conn.cursor()
+                db_execute(c, "SELECT school_id FROM schools WHERE payment_reference = ? LIMIT 1", (invoice_ref,))
+                row = c.fetchone()
+                if row:
+                    school_id = (row[0] or '').strip()
+        except Exception:
+            school_id = ''
+
+    if not school_id:
+        return Response('missing school_id', status=400)
+
+    try:
+        create_school_billing_record(
+            school_id=school_id,
+            amount_due=amount_due,
+            amount_paid=amount_paid,
+            currency=currency,
+            status=billing_status,
+            invoice_ref=invoice_ref,
+            plan_name=plan_name,
+            due_date=due_date,
+            paid_at=paid_at,
+            note=f'Webhook: {note}',
+            created_by='payment_webhook',
+        )
+        school = get_school(school_id) or {}
+        if billing_status == 'paid':
+            update_school_access_policy(
+                school_id=school_id,
+                access_status='active_paid',
+                trial_start_date=school.get('trial_start_date', ''),
+                trial_end_date=school.get('trial_end_date', ''),
+                subscription_plan=plan_name or school.get('subscription_plan', ''),
+                subscription_start_date=school.get('subscription_start_date', ''),
+                subscription_end_date=school.get('subscription_end_date', ''),
+                payment_due_date='',
+                payment_grace_days=school.get('payment_grace_days', 14),
+                payment_reference=invoice_ref or school.get('payment_reference', ''),
+                access_note='Activated by payment webhook',
+                plan_max_students=school.get('plan_max_students', 0),
+                plan_max_teachers=school.get('plan_max_teachers', 0),
+                plan_storage_quota_mb=school.get('plan_storage_quota_mb', 0),
+                plan_features_json=school.get('plan_features_json', '{}'),
+                updated_by='payment_webhook',
+            )
+        elif billing_status in {'pending', 'part_paid', 'overdue'}:
+            update_school_access_policy(
+                school_id=school_id,
+                access_status='pending_payment',
+                trial_start_date=school.get('trial_start_date', ''),
+                trial_end_date=school.get('trial_end_date', ''),
+                subscription_plan=plan_name or school.get('subscription_plan', ''),
+                subscription_start_date=school.get('subscription_start_date', ''),
+                subscription_end_date=school.get('subscription_end_date', ''),
+                payment_due_date=due_date or school.get('payment_due_date', ''),
+                payment_grace_days=school.get('payment_grace_days', 14),
+                payment_reference=invoice_ref or school.get('payment_reference', ''),
+                access_note='Awaiting complete payment',
+                plan_max_students=school.get('plan_max_students', 0),
+                plan_max_teachers=school.get('plan_max_teachers', 0),
+                plan_storage_quota_mb=school.get('plan_storage_quota_mb', 0),
+                plan_features_json=school.get('plan_features_json', '{}'),
+                updated_by='payment_webhook',
+            )
+    except Exception as exc:
+        logging.warning("Payment webhook processing failed for school_id=%s: %s", school_id, exc)
+        return Response('failed', status=500)
+    return Response('ok', status=200)
+
 
 @app.route('/super-admin/db-view')
 def super_admin_db_view():
@@ -13227,6 +19474,20 @@ def super_admin_add_school():
     principal_name = request.form.get('principal_name', '').strip()
     motto = request.form.get('motto', '').strip()
     class_arm_ranking_mode = request.form.get('class_arm_ranking_mode', 'separate').strip().lower()
+    access_status = request.form.get('access_status', 'trial_free').strip().lower()
+    trial_start_date = (request.form.get('trial_start_date', '') or '').strip()
+    trial_end_date = (request.form.get('trial_end_date', '') or '').strip()
+    subscription_plan = (request.form.get('subscription_plan', '') or '').strip()
+    subscription_start_date = (request.form.get('subscription_start_date', '') or '').strip()
+    subscription_end_date = (request.form.get('subscription_end_date', '') or '').strip()
+    payment_due_date = (request.form.get('payment_due_date', '') or '').strip()
+    payment_grace_days = (request.form.get('payment_grace_days', '') or '14').strip()
+    payment_reference = (request.form.get('payment_reference', '') or '').strip()
+    access_note = (request.form.get('access_note', '') or '').strip()
+    plan_max_students = (request.form.get('plan_max_students', '') or '0').strip()
+    plan_max_teachers = (request.form.get('plan_max_teachers', '') or '0').strip()
+    plan_storage_quota_mb = (request.form.get('plan_storage_quota_mb', '') or '0').strip()
+    plan_features_json = (request.form.get('plan_features_json', '') or '{}').strip()
     admin_username = request.form.get('admin_username', '').strip().lower()
     admin_password = request.form.get('admin_password', '').strip()
     
@@ -13262,6 +19523,25 @@ def super_admin_add_school():
                     c,
                     'UPDATE schools SET class_arm_ranking_mode = ? WHERE school_id = ?',
                     (class_arm_ranking_mode, school_id),
+                )
+                update_school_access_policy_with_cursor(
+                    c=c,
+                    school_id=school_id,
+                    access_status=access_status,
+                    trial_start_date=trial_start_date,
+                    trial_end_date=trial_end_date,
+                    subscription_plan=subscription_plan,
+                    subscription_start_date=subscription_start_date,
+                    subscription_end_date=subscription_end_date,
+                    payment_due_date=payment_due_date,
+                    payment_grace_days=payment_grace_days,
+                    payment_reference=payment_reference,
+                    access_note=access_note,
+                    plan_max_students=plan_max_students,
+                    plan_max_teachers=plan_max_teachers,
+                    plan_storage_quota_mb=plan_storage_quota_mb,
+                    plan_features_json=plan_features_json,
+                    updated_by=session.get('user_id', ''),
                 )
                 # Create school admin user with the provided username and password.
                 password_hash = hash_password(admin_password)
@@ -13380,6 +19660,92 @@ def super_admin_update_school():
         flash(f'Error updating school profile: {str(exc)}', 'error')
     return redirect(url_for('super_admin_view_schools'))
 
+
+@app.route('/super-admin/update-school-access', methods=['POST'])
+def super_admin_update_school_access():
+    if session.get('role') != 'super_admin':
+        return redirect(url_for('login'))
+    school_id = (request.form.get('school_id', '') or '').strip()
+    if not school_id:
+        flash('School ID is required.', 'error')
+        return redirect(url_for('super_admin_view_schools'))
+    try:
+        update_school_access_policy(
+            school_id=school_id,
+            access_status=request.form.get('access_status', 'trial_free'),
+            trial_start_date=request.form.get('trial_start_date', ''),
+            trial_end_date=request.form.get('trial_end_date', ''),
+            subscription_plan=request.form.get('subscription_plan', ''),
+            subscription_start_date=request.form.get('subscription_start_date', ''),
+            subscription_end_date=request.form.get('subscription_end_date', ''),
+            payment_due_date=request.form.get('payment_due_date', ''),
+            payment_grace_days=request.form.get('payment_grace_days', '14'),
+            payment_reference=request.form.get('payment_reference', ''),
+            access_note=request.form.get('access_note', ''),
+            plan_max_students=request.form.get('plan_max_students', '0'),
+            plan_max_teachers=request.form.get('plan_max_teachers', '0'),
+            plan_storage_quota_mb=request.form.get('plan_storage_quota_mb', '0'),
+            plan_features_json=request.form.get('plan_features_json', '{}'),
+            updated_by=session.get('user_id', ''),
+        )
+        flash(f'Access policy updated for school {school_id}.', 'success')
+    except Exception as exc:
+        flash(f'Error updating school access policy: {str(exc)}', 'error')
+    return redirect(url_for('super_admin_view_schools'))
+
+
+@app.route('/super-admin/school-billing', methods=['POST'])
+def super_admin_school_billing():
+    if session.get('role') != 'super_admin':
+        return redirect(url_for('login'))
+    school_id = (request.form.get('school_id', '') or '').strip()
+    if not school_id:
+        flash('School ID is required for billing update.', 'error')
+        return redirect(url_for('super_admin_view_schools'))
+    try:
+        create_school_billing_record(
+            school_id=school_id,
+            amount_due=request.form.get('amount_due', '0'),
+            amount_paid=request.form.get('amount_paid', '0'),
+            currency=request.form.get('currency', 'NGN'),
+            status=request.form.get('billing_status', 'pending'),
+            invoice_ref=request.form.get('invoice_ref', ''),
+            plan_name=request.form.get('plan_name', ''),
+            due_date=request.form.get('due_date', ''),
+            paid_at=request.form.get('paid_at', ''),
+            note=request.form.get('billing_note', ''),
+            created_by=session.get('user_id', ''),
+        )
+        flash(f'Billing record added for school {school_id}.', 'success')
+    except Exception as exc:
+        flash(f'Billing update failed: {str(exc)}', 'error')
+    return redirect(url_for('super_admin_view_schools'))
+
+
+@app.route('/super-admin/schools/backup-drill', methods=['POST'])
+def super_admin_school_backup_drill():
+    if session.get('role') != 'super_admin':
+        return redirect(url_for('login'))
+    school_id = (request.form.get('school_id', '') or '').strip()
+    if not school_id:
+        flash('School ID is required for backup drill.', 'error')
+        return redirect(url_for('super_admin_view_schools'))
+    try:
+        result = run_school_backup_dry_run(
+            school_id=school_id,
+            actor_user_id=session.get('user_id', ''),
+            actor_role='super_admin',
+        )
+        if result.get('ok'):
+            flash(f'Backup drill passed for school {school_id}.', 'success')
+        else:
+            missing = ', '.join(result.get('missing_sections') or [])
+            flash(f'Backup drill completed with warnings for {school_id}. Missing: {missing}', 'warning')
+    except Exception as exc:
+        flash(f'Backup drill failed for {school_id}: {str(exc)}', 'error')
+    return redirect(url_for('super_admin_view_schools'))
+
+
 @app.route('/super-admin/toggle-school-operations', methods=['POST'])
 def super_admin_toggle_school_operations():
     if session.get('role') != 'super_admin':
@@ -13418,6 +19784,10 @@ def school_admin_dashboard():
             'status': event.get('status', 'planned'),
         })
     total_students = get_total_student_count(school_id)
+    total_teachers = get_total_teacher_count(school_id, include_archived=False)
+    plan_limits = get_school_plan_limits(school)
+    profile_checklist = build_school_profile_completeness(school_id)
+    backup_health = get_backup_health_summary(school_id, days=30)
     parent_count = get_linked_parent_count(school_id)
     teachers_all = get_teachers(school_id, include_archived=True)
     teachers = {tid: t for tid, t in (teachers_all or {}).items() if not int(t.get('is_archived', 0) or 0)}
@@ -13445,6 +19815,7 @@ def school_admin_dashboard():
     try:
         subject_assignments = get_teacher_subject_assignments(
             school_id,
+            term=current_term,
             academic_year=current_year,
         )
     except Exception as exc:
@@ -13483,33 +19854,102 @@ def school_admin_dashboard():
         assignments=assignments,
     )
     missing_score_alerts = []
-    if class_counts:
-        seen_alert_classes = set()
-        for a in assignments:
-            if (a.get('term') or '') != current_term or (a.get('academic_year') or '') != (current_year or ''):
+    # Rule: show missing score alerts only for subjects that have teacher subject assignments.
+    term_students = load_students(school_id, term_filter=current_term)
+
+    def _year_matches_current(row_year, active_year):
+        row_year_val = (row_year or '').strip()
+        active_year_val = (active_year or '').strip()
+        # Keep legacy rows that do not have academic_year set.
+        if not row_year_val:
+            return True
+        if not active_year_val:
+            return True
+        return row_year_val == active_year_val
+
+    try:
+        all_term_subject_assignments = get_teacher_subject_assignments(school_id, term=current_term)
+    except Exception as exc:
+        logging.warning("Failed to load subject assignments for missing score alerts: %s", exc)
+        all_term_subject_assignments = []
+
+    assigned_pairs = {}
+    for row in (all_term_subject_assignments or []):
+        if not _year_matches_current(row.get('academic_year', ''), current_year):
+            continue
+        cls = (row.get('classname') or '').strip()
+        cls_canonical = canonicalize_classname(cls)
+        subj = normalize_subject_name(row.get('subject', ''))
+        if not cls_canonical or not subj:
+            continue
+        assigned_pairs.setdefault(
+            (cls_canonical.lower(), subj.lower()),
+            {'classname': cls or cls_canonical, 'classname_canonical': cls_canonical, 'subject': subj},
+        )
+
+    per_class = {}
+    for pair in assigned_pairs.values():
+        cls = pair.get('classname', '')
+        cls_canonical = canonicalize_classname(pair.get('classname_canonical', '') or cls)
+        subj = pair.get('subject', '')
+        cls_key = (cls_canonical or '').strip().lower()
+        subj_key = (subj or '').strip().lower()
+        if not cls_key or not subj_key:
+            continue
+
+        # Be class-arm aware: SS2 assignments should also evaluate SS2A/SS2B where applicable.
+        target_group = class_arm_ranking_group(cls_canonical, mode='together')
+        eligible_students = 0
+        completed_students = 0
+        for s in (term_students or {}).values():
+            student_class_key = canonicalize_classname(s.get('classname', ''))
+            if not student_class_key:
                 continue
-            cls = (a.get('classname') or '').strip()
-            if not cls or cls in seen_alert_classes:
+            student_group = class_arm_ranking_group(student_class_key, mode='together')
+            if student_class_key.lower() != cls_key and student_group != target_group:
                 continue
-            seen_alert_classes.add(cls)
-            class_students = load_students(school_id, class_filter=cls, term_filter=current_term)
-            progress = compute_class_subject_completion(
-                school_id=school_id,
-                classname=cls,
-                term=current_term,
-                academic_year=current_year,
-                school=school,
-                class_students_data=class_students,
-            )
-            pending_rows = [row for row in progress.get('rows', []) if int(row.get('pending_students', 0)) > 0]
-            if not pending_rows:
+            offered_map = {x.lower(): x for x in normalize_subjects_list(s.get('subjects', []))}
+            offered_subject_key = offered_map.get(subj_key)
+            if not offered_subject_key:
                 continue
-            missing_score_alerts.append({
+            eligible_students += 1
+            score_block = get_subject_score_block((s.get('scores') or {}), offered_subject_key)
+            if is_score_complete_for_subject(score_block, school) and is_score_entry_confirmed(score_block, school):
+                completed_students += 1
+
+        pending_students = max(0, eligible_students - completed_students)
+        if pending_students <= 0:
+            continue
+
+        bucket = per_class.setdefault(
+            cls_key,
+            {
                 'classname': cls,
-                'pending_subjects': len(pending_rows),
-                'subjects': [row.get('subject', '') for row in pending_rows],
-                'total_pending_entries': sum(int(row.get('pending_students', 0)) for row in pending_rows),
-            })
+                'subjects': [],
+                'pending_subjects': 0,
+                'total_pending_entries': 0,
+            },
+        )
+        subject_list = bucket.get('subjects', [])
+        if subj.lower() not in {str(item).lower() for item in subject_list}:
+            subject_list.append(subj)
+        bucket['subjects'] = subject_list
+        bucket['pending_subjects'] = len(subject_list)
+        bucket['total_pending_entries'] = int(bucket.get('total_pending_entries', 0) or 0) + int(pending_students)
+
+    missing_score_alerts = list(per_class.values())
+    for row in missing_score_alerts:
+        row['subjects'] = sorted(
+            normalize_subjects_list(row.get('subjects', [])),
+            key=lambda value: str(value).lower(),
+        )
+        row['pending_subjects'] = len(row.get('subjects', []))
+    missing_score_alerts.sort(
+        key=lambda row: (
+            -(int(row.get('total_pending_entries', 0) or 0)),
+            str(row.get('classname') or '').lower(),
+        )
+    )
     approval_workflow_enabled = result_publication_has_approval_columns()
     last_login_at = format_timestamp(get_last_login_at(session.get('user_id')))
     has_principal_signature = bool((school or {}).get('principal_signature_image'))
@@ -13527,7 +19967,12 @@ def school_admin_dashboard():
     
     return render_template('school/school_admin_dashboard.html', 
                          school=school, 
+                         active_page='dashboard',
                          total_students=total_students,
+                         total_teachers=total_teachers,
+                         plan_limits=plan_limits,
+                         profile_checklist=profile_checklist,
+                         backup_health=backup_health,
                          parent_count=parent_count,
                          teachers=teachers,
                          archived_teachers=archived_teachers,
@@ -13548,6 +19993,289 @@ def school_admin_dashboard():
                          publication_statuses=publication_statuses,
                          missing_score_alerts=missing_score_alerts,
                          approval_workflow_enabled=approval_workflow_enabled)
+
+
+@app.route('/school-admin/notifications')
+def school_admin_notifications():
+    if session.get('role') != 'school_admin':
+        return redirect(url_for('login'))
+
+    school_id = session.get('school_id')
+    school = get_school(school_id) or {}
+    current_term = get_current_term(school)
+    current_year = (school or {}).get('academic_year', '')
+
+    term_students = load_students(school_id, term_filter=current_term)
+
+    def _year_matches_current(row_year, active_year):
+        row_year_val = (row_year or '').strip()
+        active_year_val = (active_year or '').strip()
+        if not row_year_val:
+            return True
+        if not active_year_val:
+            return True
+        return row_year_val == active_year_val
+
+    try:
+        all_term_subject_assignments = get_teacher_subject_assignments(school_id, term=current_term)
+    except Exception as exc:
+        logging.warning("Failed to load subject assignments for school-admin notifications: %s", exc)
+        all_term_subject_assignments = []
+
+    assigned_pairs = {}
+    for row in (all_term_subject_assignments or []):
+        if not _year_matches_current(row.get('academic_year', ''), current_year):
+            continue
+        cls = (row.get('classname') or '').strip()
+        cls_canonical = canonicalize_classname(cls)
+        subj = normalize_subject_name(row.get('subject', ''))
+        if not cls_canonical or not subj:
+            continue
+        assigned_pairs.setdefault(
+            (cls_canonical.lower(), subj.lower()),
+            {'classname': cls or cls_canonical, 'classname_canonical': cls_canonical, 'subject': subj},
+        )
+
+    per_class = {}
+    for pair in assigned_pairs.values():
+        cls = pair.get('classname', '')
+        cls_canonical = canonicalize_classname(pair.get('classname_canonical', '') or cls)
+        subj = pair.get('subject', '')
+        cls_key = (cls_canonical or '').strip().lower()
+        subj_key = (subj or '').strip().lower()
+        if not cls_key or not subj_key:
+            continue
+
+        target_group = class_arm_ranking_group(cls_canonical, mode='together')
+        eligible_students = 0
+        completed_students = 0
+        for s in (term_students or {}).values():
+            student_class_key = canonicalize_classname(s.get('classname', ''))
+            if not student_class_key:
+                continue
+            student_group = class_arm_ranking_group(student_class_key, mode='together')
+            if student_class_key.lower() != cls_key and student_group != target_group:
+                continue
+            offered_map = {x.lower(): x for x in normalize_subjects_list(s.get('subjects', []))}
+            offered_subject_key = offered_map.get(subj_key)
+            if not offered_subject_key:
+                continue
+            eligible_students += 1
+            score_block = get_subject_score_block((s.get('scores') or {}), offered_subject_key)
+            if is_score_complete_for_subject(score_block, school) and is_score_entry_confirmed(score_block, school):
+                completed_students += 1
+
+        pending_students = max(0, eligible_students - completed_students)
+        if pending_students <= 0:
+            continue
+
+        bucket = per_class.setdefault(
+            cls_key,
+            {
+                'classname': cls,
+                'subjects': [],
+                'pending_subjects': 0,
+                'total_pending_entries': 0,
+            },
+        )
+        subject_list = bucket.get('subjects', [])
+        if subj.lower() not in {str(item).lower() for item in subject_list}:
+            subject_list.append(subj)
+        bucket['subjects'] = subject_list
+        bucket['pending_subjects'] = len(subject_list)
+        bucket['total_pending_entries'] = int(bucket.get('total_pending_entries', 0) or 0) + int(pending_students)
+
+    missing_score_alerts = list(per_class.values())
+    for row in missing_score_alerts:
+        row['subjects'] = sorted(
+            normalize_subjects_list(row.get('subjects', [])),
+            key=lambda value: str(value).lower(),
+        )
+        row['pending_subjects'] = len(row.get('subjects', []))
+    missing_score_alerts.sort(
+        key=lambda row: (
+            -(int(row.get('total_pending_entries', 0) or 0)),
+            str(row.get('classname') or '').lower(),
+        )
+    )
+
+    return render_template(
+        'school/school_admin_notifications.html',
+        school=school,
+        active_page='dashboard',
+        current_term=current_term,
+        current_year=current_year,
+        missing_score_alerts=missing_score_alerts,
+        missing_score_alert_count=len(missing_score_alerts),
+        total_pending_entries=sum(int(x.get('total_pending_entries', 0) or 0) for x in missing_score_alerts),
+    )
+
+@app.route('/school-admin/teachers')
+def school_admin_teachers():
+    if session.get('role') != 'school_admin':
+        return redirect(url_for('login'))
+
+    school_id = session.get('school_id')
+    school = get_school(school_id) or {}
+    current_term = get_current_term(school)
+    current_year = (school or {}).get('academic_year', '')
+
+    teachers_all = get_teachers(school_id, include_archived=True) or {}
+    active_teachers = {tid: t for tid, t in teachers_all.items() if not int(t.get('is_archived', 0) or 0)}
+    archived_teachers = {tid: t for tid, t in teachers_all.items() if int(t.get('is_archived', 0) or 0)}
+
+    class_assignments = get_class_assignments(school_id) or []
+    subject_assignments = get_teacher_subject_assignments(
+        school_id,
+        term=current_term,
+        academic_year=current_year,
+    ) or []
+
+    class_map = {}
+    for row in class_assignments:
+        tid = (row.get('teacher_id') or '').strip()
+        cls = (row.get('classname') or '').strip()
+        if not tid or not cls:
+            continue
+        if (row.get('term') or '').strip() != current_term:
+            continue
+        if (row.get('academic_year') or '').strip() != (current_year or ''):
+            continue
+        class_map.setdefault(tid, set()).add(cls)
+
+    subject_map = {}
+    for row in subject_assignments:
+        tid = (row.get('teacher_id') or '').strip()
+        cls = (row.get('classname') or '').strip()
+        subj = normalize_subject_name(row.get('subject', ''))
+        if not tid or not cls or not subj:
+            continue
+        subject_map.setdefault(tid, set()).add(f'{cls}: {subj}')
+
+    def _build_rows(src):
+        rows = []
+        for teacher_id, teacher in (src or {}).items():
+            first = (teacher.get('firstname') or '').strip()
+            last = (teacher.get('lastname') or '').strip()
+            name = f'{first} {last}'.strip() or teacher_id
+            rows.append({
+                'teacher_id': teacher_id,
+                'name': name,
+                'gender': (teacher.get('gender') or 'Not set'),
+                'phone': (teacher.get('phone') or 'Not set'),
+                'classes': sorted(class_map.get(teacher_id, set()), key=lambda x: str(x).lower()),
+                'subjects': sorted(subject_map.get(teacher_id, set()), key=lambda x: str(x).lower()),
+            })
+        rows.sort(key=lambda r: (r.get('name') or '').lower())
+        return rows
+
+    return render_template(
+        'school/school_admin_teachers.html',
+        school=school,
+        active_page='teachers',
+        current_term=current_term,
+        current_year=current_year,
+        teacher_rows=_build_rows(active_teachers),
+        archived_teacher_rows=_build_rows(archived_teachers),
+    )
+
+@app.route('/school-admin/teacher-assignments')
+def school_admin_teacher_assignments():
+    if session.get('role') != 'school_admin':
+        return redirect(url_for('login'))
+
+    school_id = session.get('school_id')
+    school = get_school(school_id) or {}
+    current_term = get_current_term(school)
+    current_year = (school or {}).get('academic_year', '')
+
+    teachers_all = get_teachers(school_id, include_archived=True) or {}
+    teachers = {tid: t for tid, t in teachers_all.items() if not int(t.get('is_archived', 0) or 0)}
+    class_counts = get_student_count_by_class(school_id) or {}
+    class_assignments = get_class_assignments(school_id) or []
+    subject_assignments = get_teacher_subject_assignments(
+        school_id,
+        term=current_term,
+        academic_year=current_year,
+    ) or []
+
+    class_options = sorted(
+        {str(name).strip() for name in class_counts.keys() if str(name).strip()}
+        | {str((row.get('classname') or '')).strip() for row in class_assignments if str((row.get('classname') or '')).strip()},
+        key=lambda v: str(v).lower(),
+    )
+
+    class_subject_options = {}
+    for cls in class_options:
+        config = get_class_subject_config(school_id, cls) or {}
+        subjects = normalize_subjects_list(
+            (config.get('core_subjects') or [])
+            + (config.get('science_subjects') or [])
+            + (config.get('art_subjects') or [])
+            + (config.get('commercial_subjects') or [])
+            + (config.get('optional_subjects') or [])
+        )
+        if not subjects:
+            defaults = _catalog_defaults_for_class(cls)
+            subjects = normalize_subjects_list(
+                (defaults.get('core') or [])
+                + (defaults.get('science') or [])
+                + (defaults.get('art') or [])
+                + (defaults.get('commercial') or [])
+                + (defaults.get('optional') or [])
+            )
+        class_subject_options[cls] = subjects
+
+    subject_options = sorted(
+        {s for values in (class_subject_options or {}).values() for s in (values or []) if str(s).strip()},
+        key=lambda v: str(v).lower(),
+    )
+
+    teacher_class_map = {}
+    for row in class_assignments:
+        tid = (row.get('teacher_id') or '').strip()
+        cls = (row.get('classname') or '').strip()
+        if not tid or not cls:
+            continue
+        if (row.get('term') or '').strip() != current_term:
+            continue
+        if (row.get('academic_year') or '').strip() != (current_year or ''):
+            continue
+        teacher_class_map.setdefault(tid, [])
+        if cls not in teacher_class_map[tid]:
+            teacher_class_map[tid].append(cls)
+    for tid in list(teacher_class_map.keys()):
+        teacher_class_map[tid] = sorted(teacher_class_map[tid], key=lambda x: str(x).lower())
+
+    class_assignment_rows = [
+        row for row in class_assignments
+        if (row.get('term') or '').strip() == current_term
+        and (row.get('academic_year') or '').strip() == (current_year or '')
+    ]
+    class_assignment_rows.sort(key=lambda r: (
+        str(r.get('classname') or '').lower(),
+        str(r.get('teacher_name') or '').lower(),
+    ))
+    subject_assignments.sort(key=lambda r: (
+        str(r.get('classname') or '').lower(),
+        str(r.get('subject') or '').lower(),
+        str(r.get('teacher_name') or '').lower(),
+    ))
+
+    return render_template(
+        'school/school_admin_teacher_assignments.html',
+        school=school,
+        active_page='teacher_assignments',
+        current_term=current_term,
+        current_year=current_year,
+        teachers=teachers,
+        class_options=class_options,
+        subject_options=subject_options,
+        class_subject_options=class_subject_options,
+        teacher_class_map=teacher_class_map,
+        assignments=class_assignment_rows,
+        subject_assignments=subject_assignments,
+    )
 
 
 @app.route('/school-admin/messages')
@@ -13780,6 +20508,7 @@ def school_admin_term_programs():
     return render_template(
         'school/school_term_programs.html',
         school=school,
+        active_page='term_programs',
         role='school_admin',
         managed_school_id=school_id,
         current_term=current_term,
@@ -14274,6 +21003,7 @@ def school_admin_view_parents():
     return render_template(
         'school/school_admin_parents.html',
         school=school,
+        active_page='parents',
         parent_links=parent_links,
         parent_count=parent_count,
         linked_students=linked_students,
@@ -14439,6 +21169,7 @@ def school_admin_settings():
         ss_ranking_mode = request.form.get('ss_ranking_mode', 'together').strip().lower()
         class_arm_ranking_mode = request.form.get('class_arm_ranking_mode', 'separate').strip().lower()
         ss1_stream_mode = request.form.get('ss1_stream_mode', 'separate').strip().lower()
+        parent_timetable_show_teacher = 1 if (request.form.get('parent_timetable_show_teacher', '1') or '1').strip() == '1' else 0
         show_positions = 1 if request.form.get('show_positions', '1').strip() == '1' else 0
         combine_third_raw = (request.form.get('combine_third_term_results', '0') or '0').strip()
         combine_third = 1 if combine_third_raw == '1' else 0
@@ -14483,10 +21214,30 @@ def school_admin_settings():
         if calendar_target_year and not re.fullmatch(r'^\d{4}-\d{4}$', calendar_target_year):
             flash('Calendar academic year must be in YYYY-YYYY format.', 'error')
             return redirect(url_for('school_admin_settings'))
+        existing_calendar = get_school_term_calendar(school_id, calendar_target_year, calendar_target_term) or {}
+        submitted_settings_version = (request.form.get('settings_version', '') or '').strip()
+        current_calendar_for_version = get_school_term_calendar(school_id, calendar_target_year, calendar_target_term)
+        live_school_now = get_school(school_id) or {}
+        live_settings_version = build_school_settings_version_token(live_school_now, current_calendar_for_version)
+        if submitted_settings_version and submitted_settings_version != live_settings_version:
+            flash('Settings were changed by another admin. Reload page and apply your changes again.', 'error')
+            return redirect(url_for('school_admin_settings', calendar_term=calendar_target_term, calendar_year=calendar_target_year))
 
         open_date = (request.form.get('term_open_date', '') or '').strip()
         close_date = (request.form.get('term_close_date', '') or '').strip()
         next_term_begin_date = (request.form.get('next_term_begin_date', '') or '').strip()
+        existing_open_date = (existing_calendar.get('open_date') or '').strip()
+        existing_close_date = (existing_calendar.get('close_date') or '').strip()
+        existing_break_start = (existing_calendar.get('midterm_break_start') or '').strip()
+        existing_break_end = (existing_calendar.get('midterm_break_end') or '').strip()
+        existing_next_term_begin = (existing_calendar.get('next_term_begin_date') or '').strip()
+
+        # Keep existing saved dates when admin updates other settings without changing calendar dates.
+        if not open_date and not close_date and existing_open_date and existing_close_date:
+            open_date = existing_open_date
+            close_date = existing_close_date
+        if not next_term_begin_date and existing_next_term_begin:
+            next_term_begin_date = existing_next_term_begin
 
         if bool(open_date) != bool(close_date):
             flash('Term open and close dates must both be set.', 'error')
@@ -14544,6 +21295,21 @@ def school_admin_settings():
                 break_end_dt = None
                 flash('School program mid-term break is outside the term open/close date range, so it was not applied to Days Open.', 'info')
 
+        calendar_change_requested = any([
+            open_date != existing_open_date,
+            close_date != existing_close_date,
+            break_start != existing_break_start,
+            break_end != existing_break_end,
+            next_term_begin_date != existing_next_term_begin,
+        ])
+        effective_close_dt = _parse_iso_date(existing_close_date) or close_dt
+        if effective_close_dt and date.today() > effective_close_dt and calendar_change_requested:
+            flash(
+                f'{calendar_target_term} ({calendar_target_year}) has ended (closed on {effective_close_dt.isoformat()}) and calendar settings are locked.',
+                'error',
+            )
+            return redirect(url_for('school_admin_settings', calendar_term=calendar_target_term, calendar_year=calendar_target_year))
+
         raw_school_logo = (request.form.get('school_logo') or '').strip()
         normalized_school_logo = normalize_school_logo_url(raw_school_logo)
         uploaded_logo = request.files.get('school_logo_file')
@@ -14583,6 +21349,7 @@ def school_admin_settings():
             'class_arm_ranking_mode': class_arm_ranking_mode,
             'combine_third_term_results': combine_third,
             'ss1_stream_mode': ss1_stream_mode,
+            'parent_timetable_show_teacher': parent_timetable_show_teacher,
             'theme_primary_color': normalize_hex_color(request.form.get('theme_primary_color', ''), '#1E3C72'),
             'theme_secondary_color': normalize_hex_color(request.form.get('theme_secondary_color', ''), '#2A5298'),
             'theme_accent_color': normalize_hex_color(request.form.get('theme_accent_color', ''), '#1F7A8C'),
@@ -14705,6 +21472,8 @@ def school_admin_settings():
     selected_calendar_year = (request.args.get('calendar_year', '') or '').strip() or ((school or {}).get('academic_year', '') or '')
     calendar = get_school_term_calendar(school_id, selected_calendar_year, selected_calendar_term)
     calendar_rows = list_school_term_calendars(school_id)
+    selected_close_dt = _parse_iso_date((calendar.get('close_date') or '').strip()) if calendar else None
+    calendar_edit_locked = bool(selected_close_dt and date.today() > selected_close_dt)
     logo_input_value = (school.get('school_logo') or '').strip() if school else ''
     if logo_input_value.lower().startswith('data:image/'):
         # Do not inject large base64 payloads into the URL input value.
@@ -14718,6 +21487,9 @@ def school_admin_settings():
         calendar_rows=calendar_rows,
         selected_calendar_term=selected_calendar_term,
         selected_calendar_year=selected_calendar_year,
+        calendar_edit_locked=calendar_edit_locked,
+        today_iso=date.today().isoformat(),
+        settings_version=build_school_settings_version_token(school, calendar),
     )
 
 @app.route('/school-admin/score-audit')
@@ -15082,6 +21854,7 @@ def school_admin_add_teacher():
         return redirect(url_for('login'))
     
     school_id = session.get('school_id')
+    fallback_redirect = request.referrer or url_for('school_admin_dashboard')
     username = request.form.get('username', '').strip().lower()
     firstname = normalize_person_name(request.form.get('firstname', '').strip())
     lastname = normalize_person_name(request.form.get('lastname', '').strip())
@@ -15092,20 +21865,26 @@ def school_admin_add_teacher():
         try:
             if not is_valid_email(username):
                 flash('Teacher username must be a valid email address.', 'error')
-                return redirect(url_for('school_admin_dashboard'))
+                return redirect(fallback_redirect)
             if not password:
                 flash('Teacher password is required.', 'error')
-                return redirect(url_for('school_admin_dashboard'))
+                return redirect(fallback_redirect)
             if gender not in {'male', 'female', 'other'}:
                 flash('Teacher gender is required.', 'error')
-                return redirect(url_for('school_admin_dashboard'))
+                return redirect(fallback_redirect)
             existing_user = get_user(username)
             if existing_user:
                 existing_role = (existing_user.get('role') or '').strip().lower()
                 existing_school = (existing_user.get('school_id') or '').strip()
                 if not (existing_role == 'teacher' and existing_school == school_id):
                     flash('This username already belongs to another account/school. Choose a different email.', 'error')
-                    return redirect(url_for('school_admin_dashboard'))
+                    return redirect(fallback_redirect)
+            if not existing_user:
+                try:
+                    ensure_school_plan_capacity(school_id, add_students=0, add_teachers=1)
+                except Exception as exc:
+                    flash(str(exc), 'error')
+                    return redirect(fallback_redirect)
             password_hash = hash_password(password)
             upsert_user(username, password_hash, 'teacher', school_id)
             save_teacher(
@@ -15120,7 +21899,7 @@ def school_admin_add_teacher():
         except Exception as e:
             flash(f'Error adding teacher: {str(e)}', 'error')
     
-    return redirect(url_for('school_admin_dashboard'))
+    return redirect(fallback_redirect)
 
 @app.route('/school-admin/promote-students', methods=['GET', 'POST'])
 def school_admin_promote():
@@ -15265,16 +22044,154 @@ def school_admin_timetable():
     current_year = (school or {}).get('academic_year', '')
     assignments = get_class_assignments(school_id)
     classes = sorted(set(get_student_count_by_class(school_id).keys()) | {a.get('classname', '') for a in assignments if a.get('classname')})
-    teachers = get_teachers(school_id)
+    teachers = get_teachers(school_id) or {}
+    subject_assignment_rows = get_teacher_subject_assignments(
+        school_id,
+        term=current_term,
+        academic_year=current_year,
+    )
+    subject_teacher_by_key = {}
+    for row in subject_assignment_rows:
+        cls_key = canonicalize_classname(row.get('classname', '')).strip().lower()
+        subj_key = normalize_subject_name(row.get('subject', '')).strip().lower()
+        teacher_id_key = (row.get('teacher_id', '') or '').strip()
+        if cls_key and subj_key and teacher_id_key:
+            subject_teacher_by_key[(cls_key, subj_key)] = teacher_id_key
     if request.method == 'POST':
         action = (request.form.get('action', '') or '').strip().lower()
+        actor_user_id = (session.get('user_id') or '').strip()
+        affected_notification_targets = set()
+
+        def _slot_lookup_row(cursor, cls_name, day_num, period_name):
+            db_execute(
+                cursor,
+                """SELECT id, classname, day_of_week, period_label, subject, teacher_id, start_time, end_time, room
+                   FROM class_timetables
+                   WHERE school_id = ? AND LOWER(classname) = LOWER(?) AND day_of_week = ? AND LOWER(period_label) = LOWER(?)
+                   LIMIT 1""",
+                (school_id, canonicalize_classname(cls_name), int(day_num or 0), (period_name or '').strip()),
+            )
+            r = cursor.fetchone()
+            if not r:
+                return {}
+            return {
+                'id': int(r[0] or 0),
+                'classname': r[1] or '',
+                'day_of_week': int(r[2] or 0),
+                'period_label': r[3] or '',
+                'subject': r[4] or '',
+                'teacher_id': r[5] or '',
+                'start_time': r[6] or '',
+                'end_time': r[7] or '',
+                'room': r[8] or '',
+            }
+
         try:
             with db_connection(commit=True) as conn:
                 c = conn.cursor()
                 if action == 'delete':
                     row_id = int(request.form.get('row_id', 0) or 0)
+                    db_execute(
+                        c,
+                        """SELECT id, classname, day_of_week, period_label, subject, teacher_id, start_time, end_time, room
+                           FROM class_timetables
+                           WHERE school_id = ? AND id = ?
+                           LIMIT 1""",
+                        (school_id, row_id),
+                    )
+                    existing = c.fetchone()
+                    if not existing:
+                        raise ValueError('Timetable row not found.')
+                    before_row = {
+                        'id': int(existing[0] or 0),
+                        'classname': existing[1] or '',
+                        'day_of_week': int(existing[2] or 0),
+                        'period_label': existing[3] or '',
+                        'subject': existing[4] or '',
+                        'teacher_id': existing[5] or '',
+                        'start_time': existing[6] or '',
+                        'end_time': existing[7] or '',
+                        'room': existing[8] or '',
+                    }
                     db_execute(c, "DELETE FROM class_timetables WHERE school_id = ? AND id = ?", (school_id, row_id))
+                    log_timetable_change_with_cursor(
+                        c,
+                        school_id,
+                        action='delete',
+                        row_before=before_row,
+                        row_after={},
+                        changed_by=actor_user_id,
+                    )
+                    if before_row.get('classname') and before_row.get('subject'):
+                        affected_notification_targets.add((before_row.get('classname', ''), before_row.get('subject', '')))
                     flash('Timetable row removed.', 'success')
+                elif action == 'restore_history':
+                    history_id = int(request.form.get('history_id', 0) or 0)
+                    history = get_timetable_change_log(school_id, history_id)
+                    if not history:
+                        raise ValueError('History entry not found.')
+                    source_payload = history.get('before') or history.get('after') or {}
+                    classname = canonicalize_classname(source_payload.get('classname', ''))
+                    day_of_week = int(source_payload.get('day_of_week') or 0)
+                    period_label = (source_payload.get('period_label') or '').strip()
+                    subject = normalize_subject_name(source_payload.get('subject', ''))
+                    start_time = (source_payload.get('start_time') or '').strip()
+                    end_time = (source_payload.get('end_time') or '').strip()
+                    room = (source_payload.get('room') or '').strip()
+                    if not classname or not period_label or not subject or day_of_week < 1 or day_of_week > 7:
+                        raise ValueError('History entry is incomplete and cannot be restored.')
+                    teacher_id = subject_teacher_by_key.get((classname.strip().lower(), subject.strip().lower()), '')
+                    if not teacher_id:
+                        raise ValueError(
+                            f'No teacher subject assignment found for "{subject}" in class "{classname}" '
+                            f'for {current_term} {current_year}.'
+                        )
+                    existing_before = _slot_lookup_row(c, classname, day_of_week, period_label)
+                    existing_id = int(existing_before.get('id') or 0)
+                    conflicts = find_timetable_time_conflicts(
+                        school_id,
+                        classname,
+                        day_of_week,
+                        start_time,
+                        end_time,
+                        ignore_row_id=existing_id,
+                    )
+                    if conflicts:
+                        raise ValueError(f"Cannot restore due to time conflict: {conflicts[0].get('message', 'Overlap detected')}")
+                    db_execute(
+                        c,
+                        """INSERT INTO class_timetables
+                           (school_id, classname, day_of_week, period_label, subject, teacher_id, start_time, end_time, room, updated_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                           ON CONFLICT (school_id, classname, day_of_week, period_label) DO UPDATE SET
+                             subject = EXCLUDED.subject,
+                             teacher_id = EXCLUDED.teacher_id,
+                             start_time = EXCLUDED.start_time,
+                             end_time = EXCLUDED.end_time,
+                             room = EXCLUDED.room,
+                             updated_at = CURRENT_TIMESTAMP""",
+                        (school_id, classname, day_of_week, period_label, subject, teacher_id, start_time, end_time, room),
+                    )
+                    after_row = {
+                        'classname': classname,
+                        'day_of_week': day_of_week,
+                        'period_label': period_label,
+                        'subject': subject,
+                        'teacher_id': teacher_id,
+                        'start_time': start_time,
+                        'end_time': end_time,
+                        'room': room,
+                    }
+                    log_timetable_change_with_cursor(
+                        c,
+                        school_id,
+                        action='restore',
+                        row_before=existing_before,
+                        row_after=after_row,
+                        changed_by=actor_user_id,
+                    )
+                    affected_notification_targets.add((classname, subject))
+                    flash('Timetable version restored.', 'success')
                 elif action in {'import', 'upload', 'import_csv'}:
                     upload = request.files.get('timetable_file')
                     if not upload or not (upload.filename or '').strip():
@@ -15294,7 +22211,6 @@ def school_admin_timetable():
                         key = (name or '').strip().lower()
                         if key:
                             day_map[key] = int(d)
-                        if key:
                             day_map[key[:3]] = int(d)
                     imported = 0
                     row_errors = []
@@ -15307,7 +22223,6 @@ def school_admin_timetable():
                         day_raw = (row.get('day_of_week', '') or row.get('day', '')).strip().lower()
                         period_label = (row.get('period_label', '') or row.get('period', '')).strip()
                         subject = normalize_subject_name((row.get('subject', '') or '').strip())
-                        teacher_id = (row.get('teacher_id', '') or row.get('teacher', '')).strip()
                         start_time = (row.get('start_time', '') or row.get('start', '')).strip()
                         end_time = (row.get('end_time', '') or row.get('end', '')).strip()
                         room = (row.get('room', '') or '').strip()
@@ -15324,6 +22239,25 @@ def school_admin_timetable():
                         if end_time and not re.fullmatch(r'\d{2}:\d{2}', end_time):
                             row_errors.append(f'Row {idx}: end_time must be HH:MM.')
                             continue
+                        teacher_id = subject_teacher_by_key.get((classname.strip().lower(), subject.strip().lower()), '')
+                        if not teacher_id:
+                            row_errors.append(
+                                f'Row {idx}: no teacher subject assignment found for "{subject}" in class "{classname}" ({current_term}, {current_year}).'
+                            )
+                            continue
+                        existing_before = _slot_lookup_row(c, classname, day_of_week, period_label)
+                        existing_id = int(existing_before.get('id') or 0)
+                        conflicts = find_timetable_time_conflicts(
+                            school_id,
+                            classname,
+                            day_of_week,
+                            start_time,
+                            end_time,
+                            ignore_row_id=existing_id,
+                        )
+                        if conflicts:
+                            row_errors.append(f'Row {idx}: {conflicts[0].get("message", "Time overlap detected.")}')
+                            continue
                         db_execute(
                             c,
                             """INSERT INTO class_timetables
@@ -15338,6 +22272,25 @@ def school_admin_timetable():
                                  updated_at = CURRENT_TIMESTAMP""",
                             (school_id, classname, day_of_week, period_label, subject, teacher_id, start_time, end_time, room),
                         )
+                        after_row = {
+                            'classname': classname,
+                            'day_of_week': day_of_week,
+                            'period_label': period_label,
+                            'subject': subject,
+                            'teacher_id': teacher_id,
+                            'start_time': start_time,
+                            'end_time': end_time,
+                            'room': room,
+                        }
+                        log_timetable_change_with_cursor(
+                            c,
+                            school_id,
+                            action='update' if existing_before else 'create',
+                            row_before=existing_before,
+                            row_after=after_row,
+                            changed_by=actor_user_id,
+                        )
+                        affected_notification_targets.add((classname, subject))
                         imported += 1
                     if imported:
                         flash(f'Timetable import completed. {imported} row(s) processed.', 'success')
@@ -15352,7 +22305,6 @@ def school_admin_timetable():
                     day_of_week = int(request.form.get('day_of_week', 1) or 1)
                     period_label = (request.form.get('period_label', '') or '').strip()
                     subject = normalize_subject_name(request.form.get('subject', ''))
-                    teacher_id = (request.form.get('teacher_id', '') or '').strip()
                     start_time = (request.form.get('start_time', '') or '').strip()
                     end_time = (request.form.get('end_time', '') or '').strip()
                     room = (request.form.get('room', '') or '').strip()
@@ -15360,6 +22312,28 @@ def school_admin_timetable():
                         raise ValueError('Class, period label, and subject are required.')
                     if day_of_week < 1 or day_of_week > 7:
                         raise ValueError('Day must be between 1 and 7.')
+                    if start_time and not re.fullmatch(r'\d{2}:\d{2}', start_time):
+                        raise ValueError('Start time must be HH:MM.')
+                    if end_time and not re.fullmatch(r'\d{2}:\d{2}', end_time):
+                        raise ValueError('End time must be HH:MM.')
+                    teacher_id = subject_teacher_by_key.get((classname.strip().lower(), subject.strip().lower()), '')
+                    if not teacher_id:
+                        raise ValueError(
+                            f'No teacher subject assignment found for "{subject}" in class "{classname}" '
+                            f'for {current_term} {current_year}. Assign subject teacher first on dashboard.'
+                        )
+                    existing_before = _slot_lookup_row(c, classname, day_of_week, period_label)
+                    existing_id = int(existing_before.get('id') or 0)
+                    conflicts = find_timetable_time_conflicts(
+                        school_id,
+                        classname,
+                        day_of_week,
+                        start_time,
+                        end_time,
+                        ignore_row_id=existing_id,
+                    )
+                    if conflicts:
+                        raise ValueError(f"Cannot save due to time conflict: {conflicts[0].get('message', 'Overlap detected')}")
                     db_execute(
                         c,
                         """INSERT INTO class_timetables
@@ -15374,13 +22348,75 @@ def school_admin_timetable():
                              updated_at = CURRENT_TIMESTAMP""",
                         (school_id, classname, day_of_week, period_label, subject, teacher_id, start_time, end_time, room),
                     )
+                    after_row = {
+                        'classname': classname,
+                        'day_of_week': day_of_week,
+                        'period_label': period_label,
+                        'subject': subject,
+                        'teacher_id': teacher_id,
+                        'start_time': start_time,
+                        'end_time': end_time,
+                        'room': room,
+                    }
+                    log_timetable_change_with_cursor(
+                        c,
+                        school_id,
+                        action='update' if existing_before else 'create',
+                        row_before=existing_before,
+                        row_after=after_row,
+                        changed_by=actor_user_id,
+                    )
+                    affected_notification_targets.add((classname, subject))
                     flash('Timetable saved.', 'success')
+            # Notify affected parents using parent-visible student messages.
+            for cls, subj in sorted(affected_notification_targets):
+                if not cls:
+                    continue
+                scoped_classes = related_classnames_for_class_arm_mode(school_id, cls, school=school) or [cls]
+                for target_class in scoped_classes:
+                    try:
+                        create_student_message(
+                            school_id=school_id,
+                            title='Timetable Updated',
+                            message=(
+                                f'Timetable was updated for {target_class}'
+                                + (f' ({subj})' if subj else '')
+                                + '. Open Parent Timetable to review latest periods.'
+                            ),
+                            target_classname=target_class,
+                            target_subject=subj or '',
+                            created_by=actor_user_id,
+                        )
+                    except Exception:
+                        # Keep timetable save resilient even if notification creation fails.
+                        pass
         except Exception as exc:
             flash(f'Failed to save timetable: {exc}', 'error')
         return redirect(url_for('school_admin_timetable'))
 
     selected_class = (request.args.get('classname', '') or '').strip()
     rows = get_school_timetable_rows(school_id, classname=selected_class)
+    for row in rows:
+        tid = (row.get('teacher_id') or '').strip()
+        profile = teachers.get(tid, {}) if tid else {}
+        if profile:
+            row['teacher_label'] = f"{(profile.get('firstname', '') or '').strip()} {(profile.get('lastname', '') or '').strip()} ({tid})".strip()
+        else:
+            row['teacher_label'] = tid or '-'
+    class_subject_teacher_map = {}
+    for row in subject_assignment_rows:
+        cls = canonicalize_classname(row.get('classname', ''))
+        subj = normalize_subject_name(row.get('subject', ''))
+        tid = (row.get('teacher_id', '') or '').strip()
+        if not cls or not subj or not tid:
+            continue
+        teacher_profile = teachers.get(tid, {}) or {}
+        teacher_name = f"{(teacher_profile.get('firstname', '') or '').strip()} {(teacher_profile.get('lastname', '') or '').strip()}".strip()
+        class_subject_teacher_map.setdefault(cls, {})[subj] = {
+            'teacher_id': tid,
+            'teacher_name': teacher_name or tid,
+        }
+    history_rows = list_timetable_change_logs(school_id, classname=selected_class, limit=120)
     return render_template(
         'school/school_admin_timetable.html',
         school=school,
@@ -15389,25 +22425,19 @@ def school_admin_timetable():
         day_options=DAY_OF_WEEK_OPTIONS,
         rows=rows,
         selected_class=selected_class,
+        class_subject_teacher_map=class_subject_teacher_map,
+        history_rows=history_rows,
     )
 
 @app.route('/school-admin/timetable-template')
 def school_admin_timetable_template():
     if session.get('role') != 'school_admin':
         return redirect(url_for('login'))
-    school_id = session.get('school_id')
-    teachers = get_teachers(school_id) or {}
-    sample_teacher_id = ''
-    try:
-        sample_teacher_id = sorted(teachers.keys())[0] if teachers else ''
-    except Exception:
-        sample_teacher_id = ''
-
     output = StringIO()
     writer = csv.writer(output)
-    writer.writerow(['classname', 'day_of_week', 'period_label', 'subject', 'teacher_id', 'start_time', 'end_time', 'room'])
-    writer.writerow(['JSS1', '1', 'Period 1', 'Mathematics', sample_teacher_id, '08:00', '08:40', 'Room A1'])
-    writer.writerow(['JSS1', 'Monday', 'Period 2', 'English Language', sample_teacher_id, '08:40', '09:20', 'Room A1'])
+    writer.writerow(['classname', 'day_of_week', 'period_label', 'subject', 'start_time', 'end_time', 'room'])
+    writer.writerow(['JSS1', '1', 'Period 1', 'Mathematics', '08:00', '08:40', 'Room A1'])
+    writer.writerow(['JSS1', 'Monday', 'Period 2', 'English Language', '08:40', '09:20', 'Room A1'])
 
     return Response(
         output.getvalue(),
@@ -15426,7 +22456,27 @@ def teacher_timetable():
     current_year = (school or {}).get('academic_year', '')
     classes = sorted(set(get_teacher_classes(school_id, teacher_id, term=current_term, academic_year=current_year)))
     rows = [r for r in get_school_timetable_rows(school_id) if (r.get('teacher_id') or '').strip().lower() == (teacher_id or '').strip().lower() or r.get('classname') in classes]
-    return render_template('teacher/teacher_timetable.html', school=school, rows=rows, day_options=DAY_OF_WEEK_OPTIONS)
+    rows.sort(key=lambda item: (
+        int(item.get('day_of_week') or 0),
+        (_time_to_minutes(item.get('start_time', '')) if _time_to_minutes(item.get('start_time', '')) is not None else 10_000),
+        (item.get('classname') or '').strip().lower(),
+        (item.get('period_label') or '').strip().lower(),
+    ))
+    grouped_rows = []
+    grouped_map = {}
+    for row in rows:
+        day_name = row.get('day_name') or 'Unknown'
+        if day_name not in grouped_map:
+            grouped_map[day_name] = {'day_name': day_name, 'rows': []}
+            grouped_rows.append(grouped_map[day_name])
+        grouped_map[day_name]['rows'].append(row)
+    return render_template(
+        'teacher/teacher_timetable.html',
+        school=school,
+        rows=rows,
+        grouped_rows=grouped_rows,
+        day_options=DAY_OF_WEEK_OPTIONS,
+    )
 
 @app.route('/teacher/subject-ranks')
 def teacher_subject_rank_history():
@@ -15508,7 +22558,7 @@ def teacher_subject_rank_history():
         prev_mark = None
         current_rank = 0
         for idx, row in enumerate(entries, start=1):
-            if prev_mark is None or not same_score(row['mark'], prev_mark):
+            if prev_mark is None or abs(float(row['mark']) - float(prev_mark)) > 1e-6:
                 current_rank = idx
             prev_mark = row['mark']
             rank_rows.append({
@@ -15628,7 +22678,7 @@ def teacher_subject_rank_export():
     prev_mark = None
     current_rank = 0
     for idx, item in enumerate(rank_entries, start=1):
-        if prev_mark is None or not same_score(item['mark'], prev_mark):
+        if prev_mark is None or abs(float(item['mark']) - float(prev_mark)) > 1e-6:
             current_rank = idx
         prev_mark = item['mark']
         writer.writerow([current_rank, item['firstname'], item['student_id'], subject, item['mark'], classname, term, academic_year])
@@ -15936,8 +22986,17 @@ def school_admin_bulk_tools():
     if session.get('role') != 'school_admin':
         return redirect(url_for('login'))
     error_token = (request.args.get('error_token', '') or '').strip()
-    schedule = get_backup_schedule_settings(session.get('school_id'))
-    return render_template('school/school_admin_bulk_tools.html', error_token=error_token, backup_schedule=schedule)
+    school_id = session.get('school_id')
+    schedule = get_backup_schedule_settings(school_id)
+    storage_usage = compute_school_storage_usage(school_id)
+    backup_health = get_backup_health_summary(school_id, days=30)
+    return render_template(
+        'school/school_admin_bulk_tools.html',
+        error_token=error_token,
+        backup_schedule=schedule,
+        storage_usage=storage_usage,
+        backup_health=backup_health,
+    )
 
 @app.route('/school-admin/backup-schedule', methods=['POST'])
 def school_admin_backup_schedule():
@@ -16299,6 +23358,7 @@ def school_admin_restore():
         return redirect(url_for('login'))
     school_id = session.get('school_id')
     mode = (request.form.get('mode', 'merge') or 'merge').strip().lower()
+    dry_run = (request.form.get('dry_run', '') or '').strip().lower() in {'1', 'true', 'yes', 'on'}
     file = request.files.get('backup_file')
     if not file:
         flash('Choose a backup JSON file.', 'error')
@@ -16308,6 +23368,23 @@ def school_admin_restore():
         passphrase = (request.form.get('backup_passphrase', '') or '').strip()
         decrypted = decrypt_backup_blob(raw_body, passphrase) if raw_body.strip().startswith('{') else raw_body
         payload = json.loads(decrypted)
+        verify = verify_backup_payload_summary(payload)
+        if dry_run:
+            record_admin_action_audit(
+                school_id,
+                'backup_restore_dry_run',
+                target_scope='school_backup',
+                payload={'mode': mode, **verify},
+            )
+            if verify.get('ok'):
+                flash(
+                    f"Dry-run passed. students={verify.get('students_count', 0)}, teachers={verify.get('teachers_count', 0)}, "
+                    f"parents={verify.get('parents_count', 0)}, messages={verify.get('messages_count', 0)}.",
+                    'success',
+                )
+            else:
+                flash(f"Dry-run found missing sections: {', '.join(verify.get('missing_sections') or [])}", 'warning')
+            return redirect(url_for('school_admin_bulk_tools'))
         restore_school_backup_payload(school_id, payload, mode=mode)
         record_admin_action_audit(school_id, 'backup_restore', target_scope='school_backup', payload={'mode': mode})
         flash(f'Backup restored successfully using {mode} mode.', 'success')
@@ -16322,28 +23399,41 @@ def school_admin_security():
     ensure_extended_features_schema()
     school_id = session.get('school_id')
     username = (request.args.get('username', '') or '').strip().lower()
+    try:
+        page = int((request.args.get('page', '') or '1').strip())
+    except Exception:
+        page = 1
+    try:
+        per_page = int((request.args.get('per_page', '') or '100').strip())
+    except Exception:
+        per_page = 100
+    page = max(1, page)
+    per_page = max(50, min(per_page, 300))
     with db_connection() as conn:
         c = conn.cursor()
+        where = ['school_id = ?']
+        params = [school_id]
         if username:
-            db_execute(
-                c,
-                """SELECT username, role, endpoint, ip_address, success, reason, created_at
-                   FROM login_audit_logs
-                   WHERE school_id = ? AND LOWER(username) = LOWER(?)
-                   ORDER BY created_at DESC
-                   LIMIT 300""",
-                (school_id, username),
-            )
-        else:
-            db_execute(
-                c,
-                """SELECT username, role, endpoint, ip_address, success, reason, created_at
-                   FROM login_audit_logs
-                   WHERE school_id = ?
-                   ORDER BY created_at DESC
-                   LIMIT 300""",
-                (school_id,),
-            )
+            where.append('LOWER(username) = LOWER(?)')
+            params.append(username)
+        db_execute(
+            c,
+            f"""SELECT COUNT(*)
+                FROM login_audit_logs
+                WHERE {' AND '.join(where)}""",
+            tuple(params),
+        )
+        total_rows = int((c.fetchone() or [0])[0] or 0)
+        offset = (page - 1) * per_page
+        db_execute(
+            c,
+            f"""SELECT username, role, endpoint, ip_address, success, reason, created_at
+                FROM login_audit_logs
+                WHERE {' AND '.join(where)}
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?""",
+            tuple(params + [per_page, offset]),
+        )
         rows = c.fetchall() or []
     logs = [{
         'username': r[0] or '',
@@ -16354,7 +23444,18 @@ def school_admin_security():
         'reason': r[5] or '',
         'created_at': format_timestamp(r[6]),
     } for r in rows]
-    return render_template('school/school_admin_security.html', logs=logs, username=username, policy_days=ADMIN_PASSWORD_MAX_AGE_DAYS, timeout_minutes=SESSION_TIMEOUT_MINUTES)
+    total_pages = max(1, (total_rows + per_page - 1) // per_page)
+    return render_template(
+        'school/school_admin_security.html',
+        logs=logs,
+        username=username,
+        policy_days=ADMIN_PASSWORD_MAX_AGE_DAYS,
+        timeout_minutes=SESSION_TIMEOUT_MINUTES,
+        page=page,
+        per_page=per_page,
+        total_pages=total_pages,
+        total_rows=total_rows,
+    )
 
 @app.route('/school-admin/action-audit')
 def school_admin_action_audit():
@@ -16367,10 +23468,15 @@ def school_admin_action_audit():
     date_from = (request.args.get('date_from', '') or '').strip()
     date_to = (request.args.get('date_to', '') or '').strip()
     try:
-        limit = int((request.args.get('limit', '') or '300').strip())
+        page = int((request.args.get('page', '') or '1').strip())
     except Exception:
-        limit = 300
-    limit = max(50, min(limit, 1000))
+        page = 1
+    try:
+        per_page = int((request.args.get('per_page', '') or '120').strip())
+    except Exception:
+        per_page = 120
+    page = max(1, page)
+    per_page = max(50, min(per_page, 300))
     where = ['school_id = ?']
     params = [school_id]
     if action_type:
@@ -16389,12 +23495,21 @@ def school_admin_action_audit():
         c = conn.cursor()
         db_execute(
             c,
+            f"""SELECT COUNT(*)
+                FROM admin_action_audit_logs
+                WHERE {' AND '.join(where)}""",
+            tuple(params),
+        )
+        total_rows = int((c.fetchone() or [0])[0] or 0)
+        offset = (page - 1) * per_page
+        db_execute(
+            c,
             f"""SELECT id, action_type, actor_user_id, actor_role, target_scope, payload_json, created_at
                 FROM admin_action_audit_logs
                 WHERE {' AND '.join(where)}
                 ORDER BY created_at DESC
-                LIMIT ?""",
-            tuple(params + [limit]),
+                LIMIT ? OFFSET ?""",
+            tuple(params + [per_page, offset]),
         )
         rows = c.fetchall() or []
     logs = [{
@@ -16406,6 +23521,7 @@ def school_admin_action_audit():
         'payload_json': (r[5] or ''),
         'created_at': format_timestamp(r[6]),
     } for r in rows]
+    total_pages = max(1, (total_rows + per_page - 1) // per_page)
     return render_template(
         'school/school_admin_action_audit.html',
         logs=logs,
@@ -16413,7 +23529,10 @@ def school_admin_action_audit():
         actor_user_id=actor_user_id,
         date_from=date_from,
         date_to=date_to,
-        limit=limit,
+        page=page,
+        per_page=per_page,
+        total_pages=total_pages,
+        total_rows=total_rows,
     )
 
 @app.route('/school-admin/action-audit/export')
@@ -16471,6 +23590,154 @@ def school_admin_action_audit_export():
         headers={'Content-Disposition': f'attachment; filename=action_audit_{school_id}.csv'},
     )
 
+@app.route('/school-admin/health')
+def school_admin_health():
+    if session.get('role') != 'school_admin':
+        return redirect(url_for('login'))
+    ensure_extended_features_schema()
+    school_id = session.get('school_id')
+    school = get_school(school_id) or {}
+    db_ok = True
+    db_error = ''
+    try:
+        with db_connection() as conn:
+            c = conn.cursor()
+            db_execute(c, 'SELECT 1')
+            c.fetchone()
+    except Exception as exc:
+        db_ok = False
+        db_error = str(exc)[:300]
+    queue_stats = {'queued': 0, 'sent': 0, 'failed': 0}
+    scan_stats = {'pending': 0, 'blocked': 0}
+    try:
+        queue_stats = get_notification_delivery_stats(school_id, days=30)
+    except Exception:
+        queue_stats = {'queued': 0, 'sent': 0, 'failed': 0}
+    try:
+        with db_connection() as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """SELECT LOWER(COALESCE(attachment_scan_status, 'clean')) AS status, COUNT(*)
+                   FROM student_messages
+                   WHERE school_id = ?
+                   GROUP BY LOWER(COALESCE(attachment_scan_status, 'clean'))""",
+                (school_id,),
+            )
+            for row in (c.fetchall() or []):
+                key = (row[0] or '').strip().lower()
+                count = int(row[1] or 0)
+                if key == 'pending':
+                    scan_stats['pending'] = count
+                elif key == 'blocked':
+                    scan_stats['blocked'] = count
+    except Exception:
+        scan_stats = {'pending': 0, 'blocked': 0}
+    storage_usage = compute_school_storage_usage(school_id)
+    backup_schedule = get_backup_schedule_settings(school_id)
+    worker_running = bool(_BACKGROUND_WORKER_STARTED and _BACKGROUND_WORKER_THREAD and _BACKGROUND_WORKER_THREAD.is_alive())
+    return render_template(
+        'school/school_admin_health.html',
+        school=school,
+        active_page='health',
+        db_ok=db_ok,
+        db_error=db_error,
+        queue_stats=queue_stats,
+        scan_stats=scan_stats,
+        storage_usage=storage_usage,
+        storage_quota_bytes=get_effective_school_storage_quota_bytes(school),
+        backup_schedule=backup_schedule,
+        worker_running=worker_running,
+    )
+
+@app.route('/school-admin/disaster-recovery-drill', methods=['GET', 'POST'])
+def school_admin_disaster_recovery_drill():
+    if session.get('role') != 'school_admin':
+        return redirect(url_for('login'))
+    ensure_extended_features_schema()
+    school_id = session.get('school_id')
+    school = get_school(school_id) or {}
+    result = None
+    if request.method == 'POST':
+        started = datetime.now()
+        try:
+            payload = build_school_backup_payload(school_id)
+            payload_json = json.dumps(payload)
+            parsed = json.loads(payload_json)
+            required_sections = {'school', 'students', 'teachers', 'parents', 'messages'}
+            available_sections = set(parsed.keys()) if isinstance(parsed, dict) else set()
+            missing_sections = sorted([section for section in required_sections if section not in available_sections])
+            duration_ms = int((datetime.now() - started).total_seconds() * 1000)
+            ok = len(missing_sections) == 0
+            result = {
+                'ok': ok,
+                'duration_ms': duration_ms,
+                'missing_sections': missing_sections,
+                'backup_size_bytes': len(payload_json.encode('utf-8')),
+                'checked_at': format_timestamp(datetime.now()),
+            }
+            record_admin_action_audit(
+                school_id,
+                'disaster_recovery_drill',
+                target_scope='school_backup',
+                payload=result,
+            )
+            if ok:
+                flash('Disaster recovery drill completed successfully.', 'success')
+            else:
+                flash('Drill completed with warnings. Review missing backup sections.', 'warning')
+        except Exception as exc:
+            result = {
+                'ok': False,
+                'duration_ms': int((datetime.now() - started).total_seconds() * 1000),
+                'missing_sections': [],
+                'backup_size_bytes': 0,
+                'error': str(exc)[:300],
+                'checked_at': format_timestamp(datetime.now()),
+            }
+            record_admin_action_audit(
+                school_id,
+                'disaster_recovery_drill',
+                target_scope='school_backup',
+                payload=result,
+            )
+            flash(f'Disaster recovery drill failed: {exc}', 'error')
+    recent_drills = []
+    try:
+        with db_connection() as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """SELECT payload_json, created_at
+                   FROM admin_action_audit_logs
+                   WHERE school_id = ?
+                     AND LOWER(action_type) = 'disaster_recovery_drill'
+                   ORDER BY created_at DESC
+                   LIMIT 12""",
+                (school_id,),
+            )
+            for row in (c.fetchall() or []):
+                payload_obj = {}
+                try:
+                    payload_obj = json.loads(row[0] or '{}')
+                except Exception:
+                    payload_obj = {}
+                recent_drills.append({
+                    'ok': bool(payload_obj.get('ok')),
+                    'duration_ms': int(payload_obj.get('duration_ms') or 0),
+                    'backup_size_bytes': int(payload_obj.get('backup_size_bytes') or 0),
+                    'created_at': format_timestamp(row[1]),
+                })
+    except Exception:
+        recent_drills = []
+    return render_template(
+        'school/school_admin_disaster_recovery_drill.html',
+        school=school,
+        active_page='recovery_drill',
+        result=result,
+        recent_drills=recent_drills,
+    )
+
 @app.route('/school-admin/analytics')
 def school_admin_analytics():
     if session.get('role') != 'school_admin':
@@ -16490,8 +23757,10 @@ def school_admin_analytics():
     class_pass_rows, subject_rows, attendance_impact_rows = build_school_analytics_data(school_id, selected_term, selected_year)
     assistant_usage = get_assistant_usage_summary(school_id, days=assistant_days)
     assistant_feedback = get_assistant_feedback_summary(school_id, days=assistant_days)
+    assistant_quality = get_assistant_quality_summary(school_id, days=assistant_days)
     action_audit = get_admin_action_audit_summary(school_id, days=assistant_days)
     notification_stats = get_notification_delivery_stats(school_id, days=assistant_days)
+    backup_health = get_backup_health_summary(school_id, days=assistant_days)
     return render_template(
         'school/school_admin_analytics.html',
         school=school,
@@ -16503,8 +23772,10 @@ def school_admin_analytics():
         attendance_impact_rows=attendance_impact_rows,
         assistant_usage=assistant_usage,
         assistant_feedback=assistant_feedback,
+        assistant_quality=assistant_quality,
         action_audit=action_audit,
         notification_stats=notification_stats,
+        backup_health=backup_health,
     )
 
 @app.route('/school-admin/data-integrity')
@@ -16598,6 +23869,11 @@ def school_admin_add_students_by_class():
             })
         if not rows:
             flash('Add at least one student name.', 'error')
+            return redirect(url_for('school_admin_add_students_by_class'))
+        try:
+            ensure_school_plan_capacity(school_id, add_students=len(rows), add_teachers=0)
+        except Exception as exc:
+            flash(str(exc), 'error')
             return redirect(url_for('school_admin_add_students_by_class'))
 
         # First-time class setup: generate IDs based on alphabetical class list order.
@@ -16718,19 +23994,20 @@ def school_admin_assign_teacher():
         return redirect(url_for('login'))
     
     school_id = session.get('school_id')
+    fallback_redirect = request.referrer or url_for('school_admin_dashboard')
     teacher_id = request.form.get('teacher_id', '').strip()
     classname = request.form.get('classname', '').strip()
     term = request.form.get('term', 'First Term').strip()
     valid_terms = {'First Term', 'Second Term', 'Third Term'}
     if term not in valid_terms:
         flash('Invalid term selected.', 'error')
-        return redirect(url_for('school_admin_dashboard'))
+        return redirect(fallback_redirect)
     
     if teacher_id and classname:
         try:
             if teacher_id not in get_teachers(school_id):
                 flash('Selected teacher does not belong to your school.', 'error')
-                return redirect(url_for('school_admin_dashboard'))
+                return redirect(fallback_redirect)
             school = get_school(school_id)
             academic_year = (school.get('academic_year', '') or '').strip() if school else ''
             assign_teacher_to_class(school_id, teacher_id, classname, term, academic_year)
@@ -16746,7 +24023,7 @@ def school_admin_assign_teacher():
     else:
         flash('Please select a teacher and class.', 'error')
     
-    return redirect(url_for('school_admin_dashboard'))
+    return redirect(fallback_redirect)
 
 @app.route('/school-admin/assign-subject-teacher', methods=['POST'])
 def school_admin_assign_subject_teacher():
@@ -16755,6 +24032,7 @@ def school_admin_assign_subject_teacher():
         return redirect(url_for('login'))
 
     school_id = session.get('school_id')
+    fallback_redirect = request.referrer or url_for('school_admin_dashboard')
     teacher_id = request.form.get('teacher_id', '').strip()
     term = request.form.get('term', 'First Term').strip()
     assignment_scope = (request.form.get('assignment_scope', 'all_compatible') or 'all_compatible').strip().lower()
@@ -16770,17 +24048,17 @@ def school_admin_assign_subject_teacher():
     valid_terms = {'First Term', 'Second Term', 'Third Term'}
     if term not in valid_terms:
         flash('Invalid term selected.', 'error')
-        return redirect(url_for('school_admin_dashboard'))
+        return redirect(fallback_redirect)
 
     if not teacher_id:
         flash('Please select teacher.', 'error')
-        return redirect(url_for('school_admin_dashboard'))
+        return redirect(fallback_redirect)
     if teacher_id not in get_teachers(school_id):
         flash('Selected teacher does not belong to your school.', 'error')
-        return redirect(url_for('school_admin_dashboard'))
+        return redirect(fallback_redirect)
     if not subjects:
         flash('Select at least one subject for assignment.', 'error')
-        return redirect(url_for('school_admin_dashboard'))
+        return redirect(fallback_redirect)
 
     try:
         school = get_school(school_id)
@@ -16789,7 +24067,7 @@ def school_admin_assign_subject_teacher():
         class_candidates = get_school_classnames(school_id)
         if not class_candidates:
             flash('No classes available for subject assignment yet.', 'error')
-            return redirect(url_for('school_admin_dashboard'))
+            return redirect(fallback_redirect)
 
         class_subject_options = {}
         for cls in class_candidates:
@@ -16821,21 +24099,21 @@ def school_admin_assign_subject_teacher():
                 'No compatible class found for selected subject(s): ' + ', '.join(subjects),
                 'error',
             )
-            return redirect(url_for('school_admin_dashboard'))
+            return redirect(fallback_redirect)
 
         if assignment_scope == 'selected':
             if not selected_classnames and legacy_classname:
                 selected_classnames = [legacy_classname]
             if not selected_classnames:
                 flash('Select at least one class or use "All compatible classes".', 'error')
-                return redirect(url_for('school_admin_dashboard'))
+                return redirect(fallback_redirect)
             invalid_classes = [cls for cls in selected_classnames if cls not in compatible_classes]
             if invalid_classes:
                 flash(
                     'Selected class(es) are not compatible with chosen subject(s): ' + ', '.join(invalid_classes),
                     'error',
                 )
-                return redirect(url_for('school_admin_dashboard'))
+                return redirect(fallback_redirect)
             target_classes = [cls for cls in class_candidates if cls in set(selected_classnames)]
         else:
             target_classes = compatible_classes
@@ -16874,7 +24152,7 @@ def school_admin_assign_subject_teacher():
                 + ('...' if len(conflicts) > 6 else ''),
                 'error',
             )
-            return redirect(url_for('school_admin_dashboard'))
+            return redirect(fallback_redirect)
 
         for cls in target_classes:
             assign_teacher_to_subjects(school_id, teacher_id, cls, subjects, term, academic_year)
@@ -16893,7 +24171,7 @@ def school_admin_assign_subject_teacher():
     except Exception as e:
         flash(f'Error assigning subject teacher: {str(e)}', 'error')
 
-    return redirect(url_for('school_admin_dashboard'))
+    return redirect(fallback_redirect)
 
 @app.route('/school-admin/send-student-message', methods=['POST'])
 def school_admin_send_student_message():
@@ -17059,6 +24337,7 @@ def school_admin_remove_teacher_assignment():
         return redirect(url_for('login'))
 
     school_id = session.get('school_id')
+    fallback_redirect = request.referrer or url_for('school_admin_dashboard')
     teacher_id = request.form.get('teacher_id', '').strip()
     classname = request.form.get('classname', '').strip()
     term = request.form.get('term', '').strip()
@@ -17066,7 +24345,7 @@ def school_admin_remove_teacher_assignment():
 
     if not teacher_id or not classname or not term or not academic_year:
         flash('Missing assignment details.', 'error')
-        return redirect(url_for('school_admin_dashboard'))
+        return redirect(fallback_redirect)
 
     try:
         remove_teacher_from_class(school_id, teacher_id, classname, term, academic_year)
@@ -17074,7 +24353,7 @@ def school_admin_remove_teacher_assignment():
     except Exception as exc:
         flash(f'Error removing assignment: {str(exc)}', 'error')
 
-    return redirect(url_for('school_admin_dashboard'))
+    return redirect(fallback_redirect)
 
 @app.route('/school-admin/remove-subject-teacher-assignment', methods=['POST'])
 def school_admin_remove_subject_teacher_assignment():
@@ -17083,6 +24362,7 @@ def school_admin_remove_subject_teacher_assignment():
         return redirect(url_for('login'))
 
     school_id = session.get('school_id')
+    fallback_redirect = request.referrer or url_for('school_admin_dashboard')
     teacher_id = request.form.get('teacher_id', '').strip()
     classname = request.form.get('classname', '').strip()
     subject = request.form.get('subject', '').strip()
@@ -17090,13 +24370,13 @@ def school_admin_remove_subject_teacher_assignment():
     academic_year = request.form.get('academic_year', '').strip()
     if not teacher_id or not classname or not subject or not term or not academic_year:
         flash('Missing subject assignment details.', 'error')
-        return redirect(url_for('school_admin_dashboard'))
+        return redirect(fallback_redirect)
     try:
         remove_teacher_subject_assignment(school_id, teacher_id, classname, subject, term, academic_year)
         flash(f'Removed subject assignment: {subject} ({classname})', 'success')
     except Exception as exc:
         flash(f'Error removing subject assignment: {str(exc)}', 'error')
-    return redirect(url_for('school_admin_dashboard'))
+    return redirect(fallback_redirect)
 
 # ==================== TEACHER ROUTES ====================
 
@@ -17119,7 +24399,6 @@ def teacher_dashboard():
     teacher_profile_image = (teacher_profile.get('profile_image') or '').strip()
     has_teacher_signature = bool(teacher_profile.get('signature_image'))
     teacher_subjects = normalize_subjects_list(teacher_profile.get('subjects_taught', []))
-    teacher_subjects_set = {s.lower() for s in teacher_subjects}
     last_login_at = format_timestamp(get_last_login_at(session.get('user_id')))
     
     classes = get_teacher_classes(school_id, teacher_id, term=current_term, academic_year=current_year)
@@ -17345,7 +24624,7 @@ def teacher_dashboard():
                 continue
             subject_rank_summary['available_students'] += 1
             score_block = (student.get('scores') or {}).get(subject_key, {})
-            if not is_score_complete_for_subject(score_block, school):
+            if not (is_score_complete_for_subject(score_block, school) and is_score_entry_confirmed(score_block, school)):
                 missing_scores += 1
                 continue
             mark = float(subject_overall_mark(score_block))
@@ -17478,7 +24757,7 @@ def teacher_dashboard():
                 continue
             eligible += 1
             score_block = get_subject_score_block((student.get('scores') or {}), subject_key)
-            if is_score_complete_for_subject(score_block, school):
+            if is_score_complete_for_subject(score_block, school) and is_score_entry_confirmed(score_block, school):
                 completed += 1
         pending = max(0, eligible - completed)
         if pending <= 0:
@@ -17533,7 +24812,7 @@ def teacher_dashboard():
             for subj_key in matched:
                 eligible_entries += 1
                 score_block = get_subject_score_block((st.get('scores') or {}), subj_key)
-                if not is_score_complete_for_subject(score_block, school):
+                if not (is_score_complete_for_subject(score_block, school) and is_score_entry_confirmed(score_block, school)):
                     pending_entries += 1
         submitted_at = submitted_map.get(cls, '')
         subject_submit_rows.append({
@@ -17584,6 +24863,56 @@ def teacher_dashboard():
         for item in (subject_assignment_summary or [])
         if str(item.get('classname') or '').strip()
     }
+    teacher_period_notifications = []
+    teacher_period_notifications_paused_reason = ''
+    now_local = datetime.now()
+    current_day = int(now_local.isoweekday())
+    current_minutes = (now_local.hour * 60) + now_local.minute
+    teacher_period_notifications_paused_reason = get_school_closed_reason_for_date(
+        term_calendar,
+        program_row=term_program_for_progress,
+        target_date=now_local.date(),
+    )
+    if not teacher_period_notifications_paused_reason:
+        teacher_timetable_rows = get_school_timetable_rows(school_id)
+        for row in teacher_timetable_rows:
+            row_teacher_id = (row.get('teacher_id') or '').strip().lower()
+            if row_teacher_id != (teacher_id or '').strip().lower():
+                continue
+            if int(row.get('day_of_week') or 0) != current_day:
+                continue
+            start_min = _time_to_minutes(row.get('start_time', ''))
+            end_min = _time_to_minutes(row.get('end_time', ''))
+            if start_min is None or end_min is None or end_min <= start_min:
+                continue
+            status = ''
+            minutes_delta = 0
+            if start_min <= current_minutes < end_min:
+                status = 'ongoing'
+                minutes_delta = max(0, end_min - current_minutes)
+            elif current_minutes < start_min and (start_min - current_minutes) <= 20:
+                status = 'upcoming'
+                minutes_delta = start_min - current_minutes
+            else:
+                continue
+            teacher_period_notifications.append({
+                'status': status,
+                'minutes_delta': minutes_delta,
+                'classname': row.get('classname', ''),
+                'period_label': row.get('period_label', ''),
+                'subject': row.get('subject', ''),
+                'start_time': row.get('start_time', ''),
+                'end_time': row.get('end_time', ''),
+                'room': row.get('room', ''),
+                'day_name': row.get('day_name', ''),
+            })
+    teacher_period_notifications.sort(
+        key=lambda x: (
+            0 if x.get('status') == 'ongoing' else 1,
+            int(x.get('minutes_delta', 0) or 0),
+            (x.get('classname', '') or '').lower(),
+        )
+    )
 
     return render_template('teacher/teacher_dashboard.html', 
                          classes=classes, 
@@ -17628,7 +24957,318 @@ def teacher_dashboard():
                          selected_rank_group_classes=selected_rank_group_classes,
                          subject_rank_rows=subject_rank_rows,
                          subject_rank_summary=subject_rank_summary,
-                         subject_assignment_form_map=subject_assignment_form_map)
+                         subject_assignment_form_map=subject_assignment_form_map,
+                         teacher_period_notifications=teacher_period_notifications,
+                         teacher_period_notifications_paused_reason=teacher_period_notifications_paused_reason)
+
+
+@app.route('/teacher/notifications')
+def teacher_notifications():
+    if session.get('role') != 'teacher':
+        return redirect(url_for('login'))
+
+    school_id = session.get('school_id')
+    teacher_id = session.get('user_id')
+    school = get_school(school_id) or {}
+    current_term = get_current_term(school)
+    current_year = (school.get('academic_year', '') or '').strip()
+
+    teacher_profile = get_teachers(school_id).get(teacher_id, {})
+    teacher_name = f"{teacher_profile.get('firstname', '')} {teacher_profile.get('lastname', '')}".strip() or teacher_id
+    teacher_phone = (teacher_profile.get('phone') or '').strip()
+    teacher_profile_image = (teacher_profile.get('profile_image') or '').strip()
+    last_login_at = format_timestamp(get_last_login_at(session.get('user_id')))
+
+    classes = get_teacher_classes(school_id, teacher_id, term=current_term, academic_year=current_year)
+    class_students_data = load_students_for_classes(school_id, classes, term_filter=current_term)
+    subject_assignment_rows = get_teacher_subject_assignments(
+        school_id,
+        teacher_id=teacher_id,
+        term=current_term,
+        academic_year=current_year,
+    )
+
+    subject_map_by_class = {}
+    subject_assignment_set = set()
+    for row in subject_assignment_rows:
+        cls = (row.get('classname') or '').strip()
+        subj = normalize_subject_name(row.get('subject', ''))
+        if not cls or not subj:
+            continue
+        subject_map_by_class.setdefault(cls, set()).add(subj)
+        subject_assignment_set.add(subj)
+
+    subject_students_data = load_students_for_classes(school_id, subject_map_by_class.keys(), term_filter=current_term)
+
+    class_publish_status = {}
+    for classname in classes:
+        class_students = [s for s in class_students_data.values() if s.get('classname') == classname and s.get('term') == current_term]
+        class_student_ids = [sid for sid, s in class_students_data.items() if s.get('classname') == classname and s.get('term') == current_term]
+        behaviour_progress = class_behaviour_completion(school_id, classname, current_term, current_year, class_student_ids)
+        subject_progress = compute_class_subject_completion(
+            school_id=school_id,
+            classname=classname,
+            term=current_term,
+            academic_year=current_year,
+            school=school,
+            class_students_data={idx: s for idx, s in enumerate(class_students)},
+        )
+        subject_pending_count = sum(1 for row in subject_progress.get('rows', []) if int(row.get('pending_students', 0)) > 0)
+        class_publish_status[classname] = {
+            'subject_progress': subject_progress.get('rows', []),
+            'subject_pending_count': subject_pending_count,
+            'behaviour_missing_count': int(behaviour_progress.get('missing_count', 0) or 0),
+        }
+
+    teacher_missing_score_alerts = []
+    for classname in classes:
+        status_row = class_publish_status.get(classname, {})
+        if int(status_row.get('subject_pending_count', 0) or 0) <= 0:
+            continue
+        pending_subject_names = [
+            row.get('subject', '')
+            for row in (status_row.get('subject_progress') or [])
+            if int(row.get('pending_students', 0) or 0) > 0
+        ]
+        teacher_missing_score_alerts.append({
+            'scope': 'class_owner',
+            'classname': classname,
+            'subject': '',
+            'pending_students': sum(
+                int(row.get('pending_students', 0) or 0)
+                for row in (status_row.get('subject_progress') or [])
+                if int(row.get('pending_students', 0) or 0) > 0
+            ),
+            'message': f'{classname}: pending subjects - {", ".join(pending_subject_names[:6])}' + ('...' if len(pending_subject_names) > 6 else ''),
+        })
+
+    for classname in classes:
+        status_row = class_publish_status.get(classname, {})
+        if int(status_row.get('behaviour_missing_count', 0) or 0) > 0:
+            teacher_missing_score_alerts.append({
+                'scope': 'class_owner',
+                'classname': classname,
+                'subject': 'Behaviour Assessment',
+                'pending_students': int(status_row.get('behaviour_missing_count', 0) or 0),
+                'message': f'{classname}: behaviour assessment pending for {int(status_row.get("behaviour_missing_count", 0) or 0)} student(s).',
+            })
+
+    seen_subject_alerts = set()
+    for row in subject_assignment_rows:
+        classname = (row.get('classname') or '').strip()
+        subject = normalize_subject_name(row.get('subject', ''))
+        key = (classname.lower(), subject.lower())
+        if not classname or not subject or key in seen_subject_alerts:
+            continue
+        seen_subject_alerts.add(key)
+        eligible = 0
+        completed = 0
+        for student in subject_students_data.values():
+            if (student.get('classname') or '').strip().lower() != classname.lower():
+                continue
+            offered = {x.lower(): x for x in normalize_subjects_list(student.get('subjects', []))}
+            subject_key = offered.get(subject.lower(), '')
+            if not subject_key:
+                continue
+            eligible += 1
+            score_block = get_subject_score_block((student.get('scores') or {}), subject_key)
+            if is_score_complete_for_subject(score_block, school) and is_score_entry_confirmed(score_block, school):
+                completed += 1
+        pending = max(0, eligible - completed)
+        if pending <= 0:
+            continue
+        teacher_missing_score_alerts.append({
+            'scope': 'subject_teacher',
+            'classname': classname,
+            'subject': subject,
+            'pending_students': pending,
+            'message': f'{classname} - {subject}: {pending} student(s) pending.',
+        })
+
+    teacher_missing_score_alerts.sort(
+        key=lambda x: (
+            (x.get('scope', '') or '').lower(),
+            -(int(x.get('pending_students', 0) or 0)),
+            (x.get('classname', '') or '').lower(),
+            (x.get('subject', '') or '').lower(),
+        )
+    )
+
+    subject_classes = sorted({r.get('classname', '') for r in subject_assignment_rows if r.get('classname', '')})
+    dashboard_classes = sorted(set(classes) | set(subject_classes))
+    teacher_messages = get_teacher_messages_for_teacher(
+        school_id=school_id,
+        teacher_id=teacher_id,
+        classes=dashboard_classes,
+        subjects=list(subject_assignment_set),
+        limit=20,
+    )
+    unread_teacher_messages = sum(1 for row in teacher_messages if not row.get('is_read'))
+
+    return render_template(
+        'teacher/teacher_notifications.html',
+        school=school,
+        active_page='notifications',
+        teacher_id=teacher_id,
+        teacher_name=teacher_name,
+        teacher_phone=teacher_phone,
+        teacher_profile_image=teacher_profile_image,
+        classes=classes,
+        current_term=current_term,
+        current_year=current_year,
+        last_login_at=last_login_at,
+        teacher_missing_score_alerts=teacher_missing_score_alerts,
+        missing_score_alert_count=len(teacher_missing_score_alerts),
+        total_pending_entries=sum(int(x.get('pending_students', 0) or 0) for x in teacher_missing_score_alerts),
+        teacher_sidebar_profile_image=teacher_profile_image,
+        teacher_sidebar_display_name=teacher_name,
+        teacher_unread_notifications=unread_teacher_messages,
+        teacher_score_nav_tree=[],
+        teacher_selected_score_subject='',
+        teacher_selected_score_class='',
+        teacher_has_class_assignment_nav=bool(classes),
+    )
+
+
+@app.route('/teacher/class-list')
+def teacher_class_list():
+    if session.get('role') != 'teacher':
+        return redirect(url_for('login'))
+
+    school_id = session.get('school_id')
+    teacher_id = session.get('user_id')
+    school = get_school(school_id) or {}
+    current_term = get_current_term(school)
+    current_year = (school.get('academic_year', '') or '').strip()
+
+    teacher_profile = get_teachers(school_id).get(teacher_id, {})
+    teacher_name = f"{teacher_profile.get('firstname', '')} {teacher_profile.get('lastname', '')}".strip() or teacher_id
+    teacher_phone = (teacher_profile.get('phone') or '').strip()
+    teacher_profile_image = (teacher_profile.get('profile_image') or '').strip()
+    last_login_at = format_timestamp(get_last_login_at(session.get('user_id')))
+
+    classes = get_teacher_classes(school_id, teacher_id, term=current_term, academic_year=current_year)
+    class_students_data = load_students_for_classes(school_id, classes, term_filter=current_term)
+    subject_assignment_rows = get_teacher_subject_assignments(
+        school_id,
+        teacher_id=teacher_id,
+        term=current_term,
+        academic_year=current_year,
+    )
+
+    subject_assignment_by_class = {}
+    subject_assignment_set = set()
+    for row in subject_assignment_rows:
+        cls = (row.get('classname') or '').strip()
+        subj = normalize_subject_name(row.get('subject', ''))
+        if not cls or not subj:
+            continue
+        subject_assignment_by_class.setdefault(cls, set()).add(subj)
+        subject_assignment_set.add(subj)
+
+    subject_classes = sorted({r.get('classname', '') for r in subject_assignment_rows if r.get('classname', '')})
+    dashboard_classes = sorted(set(classes) | set(subject_classes))
+    if set(dashboard_classes) == set(classes):
+        students = class_students_data
+    else:
+        students = load_students_for_classes(school_id, dashboard_classes, term_filter=current_term)
+
+    subject_map_by_class = {}
+    for row in subject_assignment_rows:
+        cls = (row.get('classname') or '').strip()
+        subj = normalize_subject_name(row.get('subject', ''))
+        if not cls or not subj:
+            continue
+        subject_map_by_class.setdefault(cls, set()).add(subj)
+
+    class_owner_set = {(c or '').strip().lower() for c in classes}
+    recent_students = []
+    for sid, s in sorted(
+        students.items(),
+        key=lambda item: (
+            (item[1].get('classname', '') or '').strip().lower(),
+            (item[1].get('firstname', '') or '').strip().lower(),
+            (item[0] or '').strip().lower(),
+        ),
+    ):
+        classname = (s.get('classname') or '').strip()
+        is_class_owner = classname.lower() in class_owner_set if classname else False
+        offered_subjects = normalize_subjects_list(s.get('subjects', []))
+        matched_subjects = []
+        if not is_class_owner:
+            allowed_for_class = subject_map_by_class.get(classname, set())
+            if not allowed_for_class:
+                continue
+            matched_subjects = [x for x in offered_subjects if x in allowed_for_class]
+            if not matched_subjects:
+                continue
+        student_view = dict(s)
+        student_view['is_class_owner'] = bool(is_class_owner)
+        student_view['matched_subjects'] = matched_subjects
+        if is_class_owner:
+            scope_complete = is_student_score_complete(s, school, current_term)
+        else:
+            scores_map = s.get('scores', {}) if isinstance(s.get('scores', {}), dict) else {}
+            scope_complete = bool(matched_subjects) and all(
+                is_score_complete_for_subject(
+                    get_subject_score_block(scores_map, subj),
+                    school,
+                )
+                for subj in matched_subjects
+            )
+        student_view['scope_complete'] = bool(scope_complete)
+        recent_students.append((sid, student_view))
+
+    viewed_student_ids = get_viewed_student_ids_for_classes(school_id, classes, current_term, current_year)
+    pending_stream_students = {
+        sid for sid, s in class_students_data.items()
+        if class_uses_stream_for_school(school, s.get('classname', '')) and (s.get('stream') in ('', 'N/A', None))
+    }
+    stream_managed_students = {
+        sid for sid, s in class_students_data.items()
+        if class_uses_stream_for_school(school, s.get('classname', ''))
+    }
+
+    teacher_messages = get_teacher_messages_for_teacher(
+        school_id=school_id,
+        teacher_id=teacher_id,
+        classes=dashboard_classes,
+        subjects=list(subject_assignment_set),
+        limit=20,
+    )
+    unread_teacher_messages = sum(1 for row in teacher_messages if not row.get('is_read'))
+
+    viewed_count = sum(1 for sid, _s in recent_students if sid in viewed_student_ids)
+    pending_view_count = max(0, len(recent_students) - viewed_count)
+
+    return render_template(
+        'teacher/teacher_class_list.html',
+        active_page='class_list',
+        school=school,
+        teacher_id=teacher_id,
+        teacher_name=teacher_name,
+        teacher_phone=teacher_phone,
+        teacher_profile_image=teacher_profile_image,
+        classes=classes,
+        has_class_assignment=bool(classes),
+        current_term=current_term,
+        current_year=current_year,
+        last_login_at=last_login_at,
+        recent_students=recent_students,
+        viewed_student_ids=viewed_student_ids,
+        pending_stream_students=pending_stream_students,
+        stream_managed_students=stream_managed_students,
+        unread_teacher_messages=unread_teacher_messages,
+        viewed_count=viewed_count,
+        pending_view_count=pending_view_count,
+        teacher_sidebar_profile_image=teacher_profile_image,
+        teacher_sidebar_display_name=teacher_name,
+        teacher_unread_notifications=unread_teacher_messages,
+        teacher_score_nav_tree=[],
+        teacher_selected_score_subject='',
+        teacher_selected_score_class='',
+        teacher_has_class_assignment_nav=bool(classes),
+    )
 
 @app.route('/teacher/send-student-message', methods=['POST'])
 def teacher_send_student_message():
@@ -17698,9 +25338,11 @@ def teacher_send_student_message():
             deadline_date=deadline_date,
             created_by=f'teacher:{teacher_id}',
             attachment_path=attachment.get('attachment_path', ''),
+            attachment_thumb_path=attachment.get('attachment_thumb_path', ''),
             attachment_name=attachment.get('attachment_name', ''),
             attachment_mime=attachment.get('attachment_mime', ''),
             attachment_size=attachment.get('attachment_size', 0),
+            attachment_scan_status=attachment.get('attachment_scan_status', 'clean'),
         )
         recipient_estimate = 0
         try:
@@ -18241,7 +25883,7 @@ def teacher_submit_to_class_teacher():
             if not subj_key:
                 continue
             score_block = get_subject_score_block((st.get('scores') or {}), subj_key)
-            if not is_score_complete_for_subject(score_block, school):
+            if not (is_score_complete_for_subject(score_block, school) and is_score_entry_confirmed(score_block, school)):
                 pending_entries += 1
     if pending_entries > 0:
         flash(f'Cannot submit yet. {pending_entries} pending subject score entries remain in {classname}.', 'error')
@@ -18674,11 +26316,20 @@ def teacher_enter_scores():
             current_term,
             current_year,
         )
-        class_students_for_handover = load_students(
-            school_id,
-            class_filter=class_name,
-            term_filter=current_term,
+        class_students_for_handover = {}
+        requires_handover_check = any(
+            (row.get('teacher_id') or '').strip()
+            and (row.get('teacher_id') or '').strip() != teacher_id
+            and (row.get('teacher_id') or '').strip() not in submitted_teacher_ids
+            and normalize_subject_name(row.get('subject', ''))
+            for row in (class_subject_assignments or [])
         )
+        if requires_handover_check:
+            class_students_for_handover = load_students(
+                school_id,
+                class_filter=class_name,
+                term_filter=current_term,
+            )
         protected_subjects = set()
         for row in class_subject_assignments:
             assigned_teacher = (row.get('teacher_id') or '').strip()
@@ -18697,7 +26348,7 @@ def teacher_enter_scores():
                     if not offered_key:
                         continue
                     score_block = get_subject_score_block((st_now.get('scores') or {}), offered_key)
-                    if not is_score_complete_for_subject(score_block, school):
+                    if not (is_score_complete_for_subject(score_block, school) and is_score_entry_confirmed(score_block, school)):
                         pending_count += 1
                 if pending_count > 0:
                     protected_subjects.add(subject_name)
@@ -18768,6 +26419,8 @@ def teacher_enter_scores():
             subj_key = subject_key_map.get(subject, '')
             subject_scores = {}
             subject_comment = (request.form.get(f'subject_comment_{subj_key}', '') or '').strip()[:300]
+            row_touched = (request.form.get(f'entry_touched_{subj_key}', '0') or '').strip() == '1'
+            previous_subject_block = get_subject_score_block(existing_scores, subject)
             
             # Test scores (based on school settings)
             if school.get('test_enabled', 1):
@@ -18859,6 +26512,9 @@ def teacher_enter_scores():
             overall = subject_scores['overall_mark']
             subject_scores['grade'] = grade_from_score(overall, grade_cfg)
             subject_scores['subject_teacher_comment'] = subject_comment
+            if row_touched or is_score_entry_confirmed(previous_subject_block, school) or bool(subject_comment):
+                subject_scores['entry_confirmed'] = 1
+                subject_scores['entry_confirmed_v2'] = 1
             
             scores[subject] = subject_scores
 
@@ -18975,7 +26631,7 @@ def teacher_enter_scores():
                         continue
                     eligible += 1
                     score_block = get_subject_score_block((st_now.get('scores') or {}), offered_key)
-                    if is_score_complete_for_subject(score_block, school):
+                    if is_score_complete_for_subject(score_block, school) and is_score_entry_confirmed(score_block, school):
                         completed += 1
                 pending = max(0, eligible - completed)
                 if pending > 0:
@@ -19017,6 +26673,7 @@ def teacher_upload_csv():
     school_id = session.get('school_id')
     teacher_id = session.get('user_id')
     school = get_school(school_id) or {}
+    teacher_profile = get_teachers(school_id).get(teacher_id, {})
     current_term = get_current_term(school)
     current_year = school.get('academic_year', '')
     allowed_classes = set(get_teacher_classes(school_id, teacher_id, term=current_term, academic_year=current_year))
@@ -19151,6 +26808,8 @@ def teacher_upload_csv():
                 test_total_max = max(0.0, safe_float(school.get('test_score_max', 30), 30))
                 existing_scores = student.get('scores', {}) if isinstance(student.get('scores', {}), dict) else {}
                 subject_scores = existing_scores.get(subject_key, {}) if isinstance(existing_scores.get(subject_key, {}), dict) else {}
+                previous_subject_scores = dict(subject_scores) if isinstance(subject_scores, dict) else {}
+                entry_touched = False
                 subject_scores.pop('overall_mark', None)
                 subject_scores.pop('total_score', None)
                 subject_scores.pop('grade', None)
@@ -19159,6 +26818,8 @@ def teacher_upload_csv():
                     for i in range(1, max_tests + 1):
                         test_col = headers.get(f'test {i}')
                         raw_test = (row.get(test_col, '') if test_col else '')
+                        if str(raw_test).strip() != '':
+                            entry_touched = True
                         test_val = float(subject_scores.get(f'test_{i}', 0) or 0) if str(raw_test).strip() == '' else parse_csv_float(raw_test, idx, f'Test {i} for {student_id} {subject_key}')
                         if test_val < 0 or test_val > test_total_max:
                             raise ValueError(f'Row {idx}: Test {i} for {student_id} {subject_key} must be 0..{test_total_max:g}.')
@@ -19177,6 +26838,8 @@ def teacher_upload_csv():
                             raise ValueError(f'Row {idx}: combined exam mode does not allow Objective/Theory values. Use Exam Score only.')
                         exam_col = headers.get('exam score')
                         raw_exam = row.get(exam_col, '') if exam_col else ''
+                        if str(raw_exam).strip() != '':
+                            entry_touched = True
                         exam_score = float(subject_scores.get('exam_score', subject_scores.get('total_exam', 0)) or 0) if str(raw_exam).strip() == '' else parse_csv_float(raw_exam, idx, f'Exam score for {student_id} {subject_key}')
                         exam_max = max(0.0, safe_float(exam_config.get('exam_score_max', 70), 70))
                         if exam_score < 0 or exam_score > exam_max:
@@ -19195,6 +26858,8 @@ def teacher_upload_csv():
                         thy_col = headers.get('theory')
                         raw_obj = row.get(obj_col, '') if obj_col else ''
                         raw_thy = row.get(thy_col, '') if thy_col else ''
+                        if str(raw_obj).strip() != '' or str(raw_thy).strip() != '':
+                            entry_touched = True
                         objective = float(subject_scores.get('objective', 0) or 0) if str(raw_obj).strip() == '' else parse_csv_float(raw_obj, idx, f'Objective for {student_id} {subject_key}')
                         theory = float(subject_scores.get('theory', 0) or 0) if str(raw_thy).strip() == '' else parse_csv_float(raw_thy, idx, f'Theory for {student_id} {subject_key}')
                         objective_max = max(0.0, safe_float(exam_config.get('objective_max', 30), 30))
@@ -19221,6 +26886,12 @@ def teacher_upload_csv():
                     )
                 subject_scores['total_score'] = subject_scores['overall_mark']
                 subject_scores['grade'] = grade_from_score(subject_scores['overall_mark'], grade_cfg)
+                if entry_touched or is_score_entry_confirmed(previous_subject_scores, school):
+                    subject_scores['entry_confirmed'] = 1
+                    subject_scores['entry_confirmed_v2'] = 1
+                else:
+                    subject_scores.pop('entry_confirmed', None)
+                    subject_scores.pop('entry_confirmed_v2', None)
                 existing_scores[subject_key] = subject_scores
                 student['scores'] = existing_scores
                 student['term'] = current_term
@@ -20017,7 +27688,6 @@ def student_view_result():
         target_term,
         target_year,
     )
-    show_positions = bool((school or {}).get('show_positions', 1))
     teacher_signature = signoff.get('teacher_signature', '')
     principal_signature = signoff.get('principal_signature', '')
     teacher_name = signoff.get('teacher_name', '')
@@ -20709,6 +28379,159 @@ def parent_period_attendance():
         current_attendance_term_token=current_attendance_term_token,
         prev_attendance_term=prev_attendance_term,
         next_attendance_term=next_attendance_term,
+        unread_parent_messages=unread_parent_messages,
+    )
+
+
+@app.route('/parent/timetable')
+def parent_timetable():
+    if session.get('role') != 'parent':
+        return redirect(url_for('parent_portal'))
+    allowed_keys = _parent_allowed_student_keys()
+    if not allowed_keys:
+        flash('Parent session expired. Please login again.', 'error')
+        return redirect(url_for('parent_portal'))
+
+    key_pairs = []
+    student_ids_by_school = {}
+    for key in sorted(allowed_keys):
+        if '::' not in key:
+            continue
+        school_id, student_id = key.split('::', 1)
+        school_id = (school_id or '').strip()
+        student_id = (student_id or '').strip()
+        if not school_id or not student_id:
+            continue
+        key_pairs.append((key, school_id, student_id))
+        student_ids_by_school.setdefault(school_id, []).append(student_id)
+
+    schools_by_id = {sid: (get_school(sid) or {}) for sid in student_ids_by_school.keys()}
+    students_by_key = {}
+    for sid, student_ids in student_ids_by_school.items():
+        rows = load_students_for_student_ids(sid, student_ids)
+        for student_id, student in rows.items():
+            students_by_key[f'{sid}::{student_id}'] = student
+
+    children = []
+    for key, school_id, student_id in key_pairs:
+        student = students_by_key.get(key)
+        if not student:
+            continue
+        school = schools_by_id.get(school_id, {})
+        children.append({
+            'key': key,
+            'school_id': school_id,
+            'school_name': (school or {}).get('school_name', school_id),
+            'student_id': student_id,
+            'firstname': student.get('firstname', ''),
+            'classname': student.get('classname', ''),
+            'stream': student.get('stream', ''),
+        })
+    children.sort(key=lambda row: ((row.get('firstname') or '').lower(), (row.get('student_id') or '').lower()))
+
+    selected_key = (request.args.get('student_key', '') or '').strip()
+    if not selected_key and children:
+        selected_key = children[0].get('key', '')
+    if not selected_key or selected_key not in allowed_keys or '::' not in selected_key:
+        flash('Student access is not allowed for this parent account.', 'error')
+        return redirect(url_for('parent_dashboard'))
+
+    selected_school_id, selected_student_id = selected_key.split('::', 1)
+    selected_student = students_by_key.get(selected_key) or load_student(selected_school_id, selected_student_id)
+    if not selected_student:
+        flash('Student not found.', 'error')
+        return redirect(url_for('parent_dashboard'))
+    selected_school = schools_by_id.get(selected_school_id, {}) or {}
+
+    print_mode = (request.args.get('print', '') or '').strip() == '1'
+    class_name = canonicalize_classname(selected_student.get('classname', ''))
+    class_scope = set(related_classnames_for_class_arm_mode(selected_school_id, class_name, school=selected_school))
+    if not class_scope and class_name:
+        class_scope = {class_name}
+    offered_subjects = normalize_subjects_list(selected_student.get('subjects', []))
+    if not offered_subjects:
+        scores = selected_student.get('scores', {}) if isinstance(selected_student.get('scores', {}), dict) else {}
+        offered_subjects = normalize_subjects_list(list(scores.keys()))
+    if not offered_subjects:
+        cfg = get_class_subject_config(selected_school_id, class_name) or {}
+        offered_subjects = normalize_subjects_list(
+            (cfg.get('core_subjects') or [])
+            + (cfg.get('science_subjects') or [])
+            + (cfg.get('art_subjects') or [])
+            + (cfg.get('commercial_subjects') or [])
+            + (cfg.get('optional_subjects') or [])
+        )
+    offered_subjects_set = {normalize_subject_name(s).lower() for s in offered_subjects if normalize_subject_name(s)}
+    if not offered_subjects_set:
+        flash('This student has no configured subject offers yet. Ask school admin to complete subject setup.', 'warning')
+
+    timetable_rows = get_school_timetable_rows(selected_school_id)
+    teachers = get_teachers(selected_school_id) or {}
+    show_teacher_names = bool((selected_school or {}).get('parent_timetable_show_teacher', 1))
+    visible_rows = []
+    for row in timetable_rows:
+        row_class = canonicalize_classname(row.get('classname', ''))
+        if class_scope and row_class not in class_scope:
+            continue
+        subject = normalize_subject_name(row.get('subject', ''))
+        if not subject:
+            continue
+        if subject.lower() not in offered_subjects_set:
+            continue
+        teacher_id = (row.get('teacher_id') or '').strip()
+        if show_teacher_names and teacher_id:
+            profile = teachers.get(teacher_id, {}) or {}
+            teacher_name = f"{(profile.get('firstname', '') or '').strip()} {(profile.get('lastname', '') or '').strip()}".strip()
+            row['teacher_display'] = teacher_name or teacher_id
+        elif show_teacher_names:
+            row['teacher_display'] = '-'
+        else:
+            row['teacher_display'] = 'Hidden by school policy'
+        visible_rows.append(row)
+    def _row_sort_key(item):
+        start_minutes = _time_to_minutes(item.get('start_time', ''))
+        return (
+            int(item.get('day_of_week') or 0),
+            start_minutes if start_minutes is not None else 10_000,
+            (item.get('period_label') or '').strip().lower(),
+        )
+    visible_rows.sort(key=_row_sort_key)
+    grouped_rows = []
+    grouped_map = {}
+    for row in visible_rows:
+        day = row.get('day_name') or 'Unknown'
+        if day not in grouped_map:
+            grouped_map[day] = {'day_name': day, 'rows': []}
+            grouped_rows.append(grouped_map[day])
+        grouped_map[day]['rows'].append(row)
+
+    parent_theme_accent = '#1F7A8C'
+    if children:
+        first_school_id = (children[0].get('school_id') or '').strip()
+        first_school = schools_by_id.get(first_school_id, {}) if first_school_id else {}
+        parent_theme_accent = normalize_hex_color(first_school.get('theme_accent_color', ''), '#1F7A8C')
+
+    parent_messages = get_parent_messages_for_children(
+        parent_phone=session.get('parent_phone', ''),
+        children=children,
+        limit_per_school=80,
+    )
+    unread_parent_messages = sum(1 for row in parent_messages if not row.get('is_read'))
+
+    return render_template(
+        'parent/parent_timetable.html',
+        parent_phone=session.get('parent_phone', ''),
+        parent_theme_accent=parent_theme_accent,
+        children=children,
+        selected_key=selected_key,
+        selected_student=selected_student,
+        selected_school=selected_school,
+        class_scope=sorted(class_scope, key=lambda x: str(x).lower()),
+        offered_subjects=offered_subjects,
+        timetable_rows=visible_rows,
+        grouped_rows=grouped_rows,
+        show_teacher_names=show_teacher_names,
+        print_mode=print_mode,
         unread_parent_messages=unread_parent_messages,
     )
 
@@ -21542,9 +29365,17 @@ def school_admin_correct_result():
     if not snapshot:
         flash('Published snapshot not found for correction.', 'error')
         return redirect(url_for('school_admin_student_result', student_id=sid, term=target_token))
+    correction_version = build_result_correction_version_token(snapshot)
     exam_config = get_assessment_config_for_class(school_id, snapshot.get('classname', ''))
 
     if request.method == 'POST':
+        submitted_correction_version = (request.form.get('correction_version', '') or '').strip()
+        if submitted_correction_version and submitted_correction_version != correction_version:
+            flash(
+                'This result changed before your submission was saved. Reload and apply the correction again.',
+                'error',
+            )
+            return redirect(url_for('school_admin_correct_result', student_id=sid, term=target_token))
         classname_for_lock = snapshot.get('classname', student.get('classname', ''))
         term_lock = get_term_edit_lock_status(school_id, classname_for_lock, target_term, target_year)
         if term_lock.get('locked'):
@@ -21705,6 +29536,7 @@ def school_admin_correct_result():
         term=target_term,
         academic_year=target_year,
         term_token=target_token,
+        correction_version=correction_version,
         subject_rows=subject_rows,
         teacher_comment=snapshot.get('teacher_comment', ''),
         principal_comment=snapshot.get('principal_comment', ''),
@@ -22229,17 +30061,98 @@ def assistant_guide():
         body = {'ok': False, 'error': 'unauthorized'}
         return Response(json.dumps(body), status=403, mimetype='application/json')
 
+    client_ip = (get_client_ip() or request.remote_addr or 'unknown').strip()
+    allowed, retry_after = _rate_limit_consume(
+        key=f'assistant_guide:{role}:{client_ip}',
+        limit=APP_ASSISTANT_RATE_LIMIT_PER_MIN,
+        window_seconds=60,
+    )
+    if not allowed:
+        body = {
+            'ok': False,
+            'error': f'Too many assistant requests. Please wait about {retry_after} seconds and try again.',
+        }
+        return Response(json.dumps(body), status=429, mimetype='application/json')
+
     question = (request.form.get('question', '') or '').strip()
+    response_mode = (request.form.get('response_mode', '') or '').strip().lower()
+    default_mode = _assistant_default_response_mode_for_role(role)
+    if response_mode not in APP_ASSISTANT_RESPONSE_MODES:
+        response_mode = get_assistant_user_preference(role=role, key='response_mode', default=default_mode)
+    if response_mode not in APP_ASSISTANT_RESPONSE_MODES:
+        response_mode = default_mode
+    set_assistant_user_preference(role=role, key='response_mode', value=response_mode)
+    history_raw = (request.form.get('history', '') or '').strip()
+    history_rows = []
+    if history_raw:
+        try:
+            parsed_history = json.loads(history_raw)
+            if isinstance(parsed_history, list):
+                for item in parsed_history[-8:]:
+                    if not isinstance(item, dict):
+                        continue
+                    role_val = (item.get('role') or '').strip().lower()
+                    text_val = str(item.get('text') or '').strip()
+                    if role_val in {'user', 'assistant'} and text_val:
+                        history_rows.append({'role': role_val, 'text': text_val[:400]})
+        except Exception:
+            history_rows = []
+    memory_rows = get_assistant_memory_history(
+        role=role,
+        days=APP_ASSISTANT_MEMORY_DAYS,
+        max_exchanges=APP_ASSISTANT_MEMORY_MAX_EXCHANGES,
+    )
+    merged_history = []
+    for item in (memory_rows or []) + (history_rows or []):
+        if not isinstance(item, dict):
+            continue
+        role_val = (item.get('role') or '').strip().lower()
+        text_val = str(item.get('text') or '').strip()
+        if role_val in {'user', 'assistant'} and text_val:
+            merged_history.append({'role': role_val, 'text': text_val[:400]})
+    if len(merged_history) > 16:
+        merged_history = merged_history[-16:]
     if not question:
-        body = {'ok': False, 'error': 'Please enter a question.'}
+        body = {'ok': False, 'error': 'Type your question first. You can also paste an error message or traceback.'}
         return Response(json.dumps(body), status=400, mimetype='application/json')
 
     if len(question) > APP_ASSISTANT_MAX_QUESTION_CHARS:
-        question = question[:APP_ASSISTANT_MAX_QUESTION_CHARS]
+        body = {
+            'ok': False,
+            'error': f'Your message is too long ({len(question)} chars). Please shorten it to {APP_ASSISTANT_MAX_QUESTION_CHARS} chars or less.',
+        }
+        return Response(json.dumps(body), status=422, mimetype='application/json')
 
     teacher_scope = _assistant_get_teacher_scope() if role == 'teacher' else None
     source_page = (request.form.get('page', '') or '').strip()
-    payload = _assistant_build_response(role, question, teacher_scope=teacher_scope, source_page=source_page)
+    payload = _assistant_build_response(
+        role,
+        question,
+        teacher_scope=teacher_scope,
+        source_page=source_page,
+        conversation_history=merged_history,
+        response_mode=response_mode,
+    )
+    school_id = (session.get('school_id') or '').strip()
+    boosted_prompts = get_assistant_prompt_boosts(
+        school_id,
+        role=role,
+        days=45,
+        limit=2,
+        source_page=source_page,
+    ) if school_id and role != 'super_admin' else []
+    if boosted_prompts:
+        merged_prompts = []
+        seen_prompts = set()
+        for item in list(boosted_prompts) + list(payload.get('quick_prompts') or []):
+            text = str(item or '').strip()
+            key = _assistant_normalize_text(text)
+            if text and key and key not in seen_prompts:
+                merged_prompts.append(text)
+                seen_prompts.add(key)
+            if len(merged_prompts) >= 6:
+                break
+        payload['quick_prompts'] = merged_prompts
     llm_available = bool((os.environ.get('OPENAI_API_KEY', '') or '').strip())
     should_try_llm = llm_available and not payload.get('action_blocked')
     if should_try_llm:
@@ -22248,9 +30161,10 @@ def assistant_guide():
             question,
             payload.get('links') or [],
             knowledge_context=payload.get('knowledge_context', ''),
+            response_mode=response_mode,
         )
         if llm_payload:
-            payload['answer'] = llm_payload.get('answer') or payload.get('answer', '')
+            payload['answer'] = _assistant_enforce_guide_only_text(llm_payload.get('answer') or payload.get('answer', ''))
             payload['steps'] = llm_payload.get('steps') or payload.get('steps', [])
             payload['used_llm'] = True
         else:
@@ -22262,6 +30176,16 @@ def assistant_guide():
         question=question,
         source_page=source_page,
         used_llm=bool(payload.get('used_llm')),
+        confidence=float(payload.get('confidence') or 0.0),
+        unresolved=bool(payload.get('unresolved')),
+        response_mode=response_mode,
+    )
+    save_assistant_memory_exchange(
+        role=role,
+        question=question,
+        answer=(payload.get('answer') or ''),
+        source_page=source_page,
+        response_mode=response_mode,
     )
     payload.pop('needs_llm', None)
     payload.pop('action_blocked', None)
@@ -22283,6 +30207,25 @@ def assistant_feedback():
     log_assistant_feedback(role, question, answer, helpful, source_page=page)
     return Response(json.dumps({'ok': True}), mimetype='application/json')
 
+@app.route('/assistant/preferences', methods=['POST'])
+def assistant_preferences():
+    role = _current_role()
+    if role not in {'super_admin', 'school_admin', 'teacher', 'student', 'parent'}:
+        return Response(json.dumps({'ok': False, 'error': 'unauthorized'}), status=403, mimetype='application/json')
+    mode = (request.form.get('response_mode', '') or '').strip().lower()
+    if mode not in APP_ASSISTANT_RESPONSE_MODES:
+        return Response(json.dumps({'ok': False, 'error': 'invalid_response_mode'}), status=400, mimetype='application/json')
+    saved = set_assistant_user_preference(role=role, key='response_mode', value=mode)
+    return Response(json.dumps({'ok': bool(saved), 'response_mode': mode}), mimetype='application/json')
+
+@app.route('/assistant/memory/clear', methods=['POST'])
+def assistant_memory_clear():
+    role = _current_role()
+    if role not in {'super_admin', 'school_admin', 'teacher', 'student', 'parent'}:
+        return Response(json.dumps({'ok': False, 'error': 'unauthorized'}), status=403, mimetype='application/json')
+    cleared = clear_assistant_memory(role=role)
+    return Response(json.dumps({'ok': True, 'cleared': int(cleared)}), mimetype='application/json')
+
 @app.route('/help')
 def help():
     ref = (request.referrer or '').strip()
@@ -22300,23 +30243,34 @@ def help():
     return render_template('shared/help.html', back_url=back_url)
 
 @app.route('/report_issue', methods=['GET', 'POST'])
+@require_rate_limit('report_issue', RATE_LIMIT_REPORT_ISSUE_PER_MIN, 60, redirect_endpoint='report_issue', methods=('POST',))
 def report_issue():
     if 'user_id' not in session:
         return redirect(url_for('login'))
     
     if request.method == 'POST':
         description = (request.form.get('description', '') or request.form.get('issue_description', '')).strip()
+        source_page = (request.form.get('source_page', '') or '').strip()
+        if not source_page:
+            source_page = (request.referrer or '').strip()
         if not description:
             flash('Please describe the issue before submitting.', 'error')
             return redirect(url_for('report_issue'))
         if len(description) > 2000:
             flash('Report is too long. Keep it within 2000 characters.', 'error')
             return redirect(url_for('report_issue'))
-        save_report(session['user_id'], description)
+        save_report(
+            session['user_id'],
+            description,
+            reporter_role=(session.get('role') or ''),
+            reporter_school_id=(session.get('school_id') or ''),
+            source_page=source_page,
+        )
         flash('Thank you for your observation. We will fix it.', 'success')
         return redirect(url_for('report_issue'))
     
-    return render_template('shared/report_issue.html')
+    source_page = (request.args.get('from', '') or request.referrer or '').strip()
+    return render_template('shared/report_issue.html', source_page=source_page)
 
 @app.route('/view-reports')
 def view_reports():
@@ -22326,16 +30280,141 @@ def view_reports():
     if session.get('role') != 'super_admin':
         flash('Only super admin can view reported issues.', 'error')
         return redirect(url_for('menu'))
+    # Best-effort schema heal for deployments upgraded without running init/migrations.
+    ensure_extended_features_schema()
     status_filter = (request.args.get('status', '') or '').strip().lower()
     user_filter = (request.args.get('user', '') or '').strip()
     text_filter = (request.args.get('q', '') or '').strip()
-    reports = load_reports(status_filter=status_filter, user_filter=user_filter, text_filter=text_filter)
+    try:
+        page = int((request.args.get('page', '') or '1').strip())
+    except Exception:
+        page = 1
+    try:
+        per_page = int((request.args.get('per_page', '') or '40').strip())
+    except Exception:
+        per_page = 40
+    page = max(1, page)
+    per_page = max(20, min(per_page, 200))
+    reports, total_rows = load_reports(
+        status_filter=status_filter,
+        user_filter=user_filter,
+        text_filter=text_filter,
+        page=page,
+        per_page=per_page,
+        include_total=True,
+    )
+    total_pages = max(1, (total_rows + per_page - 1) // per_page)
+    if page > total_pages:
+        page = total_pages
     return render_template(
         'super/report_viewer_reports.html',
         reports=reports,
         status_filter=status_filter,
         user_filter=user_filter,
         text_filter=text_filter,
+        page=page,
+        per_page=per_page,
+        total_pages=total_pages,
+        total_rows=total_rows,
+    )
+
+@app.route('/super-admin/error-logs')
+def super_admin_error_logs():
+    if session.get('role') != 'super_admin':
+        return redirect(url_for('login'))
+    ensure_extended_features_schema()
+    role_filter = (request.args.get('role', '') or '').strip().lower()
+    endpoint_filter = (request.args.get('endpoint', '') or '').strip().lower()
+    text_filter = (request.args.get('q', '') or '').strip().lower()
+    try:
+        page = int((request.args.get('page', '') or '1').strip())
+    except Exception:
+        page = 1
+    try:
+        per_page = int((request.args.get('per_page', '') or '50').strip())
+    except Exception:
+        per_page = 50
+    page = max(1, page)
+    per_page = max(20, min(per_page, 200))
+    where = []
+    params = []
+    if role_filter:
+        where.append('LOWER(COALESCE(role, \'\')) = ?')
+        params.append(role_filter)
+    if endpoint_filter:
+        where.append('LOWER(COALESCE(endpoint, \'\')) LIKE ?')
+        params.append(f'%{endpoint_filter}%')
+    if text_filter:
+        where.append('(LOWER(COALESCE(error_message, \'\')) LIKE ? OR LOWER(COALESCE(traceback_text, \'\')) LIKE ? OR LOWER(COALESCE(path, \'\')) LIKE ?)')
+        params.extend([f'%{text_filter}%', f'%{text_filter}%', f'%{text_filter}%'])
+    where_sql = ('WHERE ' + ' AND '.join(where)) if where else ''
+    rows = []
+    total_rows = 0
+    try:
+        with db_connection() as conn:
+            c = conn.cursor()
+            db_execute(c, f'SELECT COUNT(*) FROM app_error_logs {where_sql}', tuple(params) if params else None)
+            total_rows = int((c.fetchone() or [0])[0] or 0)
+            offset = (page - 1) * per_page
+            db_execute(
+                c,
+                f"""SELECT error_uid, school_id, role, user_id, endpoint, path, method, error_type,
+                           error_message, traceback_text, source_page, request_meta_json, created_at
+                    FROM app_error_logs
+                    {where_sql}
+                    ORDER BY created_at DESC
+                    LIMIT ? OFFSET ?""",
+                tuple((params or []) + [per_page, offset]),
+            )
+            rows = c.fetchall() or []
+    except Exception as exc:
+        flash(f'Failed to load error logs: {exc}', 'error')
+        rows = []
+        total_rows = 0
+    items = []
+    for row in rows:
+        meta = {}
+        try:
+            meta = json.loads(row[11] or '{}')
+            if not isinstance(meta, dict):
+                meta = {}
+        except Exception:
+            meta = {}
+        items.append({
+            'error_uid': (row[0] or '').strip(),
+            'school_id': (row[1] or '').strip(),
+            'role': (row[2] or '').strip(),
+            'user_id': (row[3] or '').strip(),
+            'endpoint': (row[4] or '').strip(),
+            'path': (row[5] or '').strip(),
+            'method': (row[6] or '').strip(),
+            'error_type': (row[7] or '').strip(),
+            'error_message': (row[8] or '').strip(),
+            'traceback_text': (row[9] or '').strip(),
+            'source_page': (row[10] or '').strip(),
+            'request_meta': meta,
+            'created_at': format_timestamp(row[12]),
+            'suggestion': suggest_error_resolution(
+                error_type=(row[7] or ''),
+                error_message=(row[8] or ''),
+                endpoint=(row[4] or ''),
+                path=(row[5] or ''),
+                traceback_text=(row[9] or ''),
+            ),
+        })
+    total_pages = max(1, (total_rows + per_page - 1) // per_page)
+    if page > total_pages:
+        page = total_pages
+    return render_template(
+        'super/super_admin_error_logs.html',
+        logs=items,
+        role_filter=role_filter,
+        endpoint_filter=endpoint_filter,
+        text_filter=text_filter,
+        page=page,
+        per_page=per_page,
+        total_pages=total_pages,
+        total_rows=total_rows,
     )
 
 @app.route('/view-reports/mark-all-read', methods=['POST'])
@@ -22402,6 +30481,80 @@ def view_reports_delete():
     else:
         flash('Report not found.', 'error')
     return redirect(url_for('view_reports'))
+
+
+def suggest_error_resolution(error_type='', error_message='', endpoint='', path='', traceback_text=''):
+    et = (error_type or '').strip().lower()
+    em = (error_message or '').strip().lower()
+    ep = (endpoint or '').strip().lower()
+    pth = (path or '').strip().lower()
+    tb = (traceback_text or '').strip().lower()
+    summary = 'Check request payload, DB schema, and role permissions for this action.'
+    steps = [
+        'Reproduce on the same page with the same role and input.',
+        'Confirm current database schema includes required columns/tables.',
+        'Review server logs around the error timestamp for earlier failures.',
+    ]
+
+    if 'undefinedcolumn' in et or 'column' in em and 'does not exist' in em:
+        summary = 'Database schema is behind application code (missing column).'
+        steps = [
+            'Run migration/startup DDL and restart the app.',
+            'Verify the missing column exists in PostgreSQL for the target table.',
+            'Retry the page after schema update.',
+        ]
+    elif 'nameerror' in et or 'is not defined' in em:
+        summary = 'Python symbol missing or renamed in code path.'
+        steps = [
+            'Open the function in traceback and fix the undefined name reference.',
+            'Replace old helper names with the current helper where required.',
+            'Run syntax check and retest the endpoint.',
+        ]
+    elif 'integrityerror' in et or 'duplicate key' in em or 'unique constraint' in em:
+        summary = 'Duplicate or conflicting record violates unique constraint.'
+        steps = [
+            'Check whether the entity already exists (ID/username/class+term pair).',
+            'Use update flow instead of insert when record exists.',
+            'Add pre-insert validation to prevent duplicates.',
+        ]
+    elif 'csrf' in et or 'csrf' in em:
+        summary = 'CSRF token missing/expired for form or request.'
+        steps = [
+            'Refresh the page to get a new token.',
+            'Ensure the form includes csrf_token hidden input.',
+            'For API calls, send CSRF header/token consistently.',
+        ]
+    elif 'permission' in et or 'forbidden' in em or ep in {'login', 'logout'}:
+        summary = 'Role/session permission mismatch for endpoint access.'
+        steps = [
+            'Confirm logged-in role is allowed for this endpoint.',
+            'Check school operations/access status gates.',
+            'Validate session has school_id/user_id as expected.',
+        ]
+    elif 'timeout' in et or 'timed out' in em:
+        summary = 'Operation timed out; query or external call is too slow.'
+        steps = [
+            'Retry once and inspect DB/network latency.',
+            'Add narrower filters or pagination to reduce query load.',
+            'Move heavy operation to background worker if needed.',
+        ]
+    elif 'assistant' in ep or '/assistant' in pth:
+        summary = 'Assistant request issue (rate-limit, parsing, or context mismatch).'
+        steps = [
+            'Check assistant endpoint payload fields and response mode values.',
+            'Verify rate limit and session role authorization.',
+            'Review source_page/context mapping for this screen.',
+        ]
+
+    if 'reporter_role' in em and 'does not exist' in em:
+        summary = 'Reports table missing context columns introduced by newer code.'
+        steps = [
+            'Run migration/startup DDL to add reporter_role/reporter_school_id/source_page.',
+            'Re-open Super Admin reports page after migration.',
+            'Confirm reports_has_context_columns() returns true.',
+        ]
+
+    return {'summary': summary, 'steps': steps}
 
 # ==================== MAIN ====================
 
@@ -22512,6 +30665,22 @@ def validate_production_env():
     if len(backup_key) < 32:
         raise RuntimeError('BACKUP_SIGNING_KEY is too short. Use at least 32 characters in production.')
 
+def get_runtime_build_stamp():
+    """Return a human-readable build stamp for startup verification."""
+    try:
+        mtime = os.path.getmtime(__file__)
+        ts = datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S')
+    except Exception:
+        ts = 'unknown'
+    tag = (os.environ.get('APP_BUILD_TAG', '') or '').strip()
+    return f'{ts}{" | " + tag if tag else ""}'
+
+try:
+    start_background_worker()
+except Exception as _worker_boot_exc:
+    logging.warning("Background worker did not start: %s", _worker_boot_exc)
+atexit.register(stop_background_worker)
+
 if __name__ == '__main__':
     # Enforce production env guards at process startup entrypoint.
     validate_production_env()
@@ -22531,4 +30700,8 @@ if __name__ == '__main__':
         or '0'
     )
     debug = str(debug_flag).strip().lower() in ('1', 'true', 'yes')
+    build_stamp = get_runtime_build_stamp()
+    startup_msg = f"[startup] Student Score build: {build_stamp} | debug={debug} | port={port}"
+    print(startup_msg)
+    logging.info(startup_msg)
     app.run(host='0.0.0.0', port=port, debug=debug)

@@ -31,6 +31,23 @@
     });
   }
 
+  const sideGroups = Array.from(sidebar.querySelectorAll("details.side-group"));
+  sideGroups.forEach((group, idx) => {
+    const summary = group.querySelector("summary.side-group-toggle");
+    if (!summary) return;
+    if (!summary.id) summary.id = "side-group-toggle-" + (idx + 1);
+    summary.setAttribute("role", "button");
+    summary.setAttribute("aria-controls", "side-group-links-" + (idx + 1));
+    const linksWrap = group.querySelector(".side-group-links");
+    if (linksWrap && !linksWrap.id) linksWrap.id = "side-group-links-" + (idx + 1);
+    const hasActiveChild = !!group.querySelector(".side-link.active");
+    if (hasActiveChild) group.open = true;
+    summary.setAttribute("aria-expanded", group.open ? "true" : "false");
+    group.addEventListener("toggle", () => {
+      summary.setAttribute("aria-expanded", group.open ? "true" : "false");
+    });
+  });
+
   let overlay = document.querySelector(".rail-overlay");
   if (!overlay) {
     overlay = document.createElement("div");

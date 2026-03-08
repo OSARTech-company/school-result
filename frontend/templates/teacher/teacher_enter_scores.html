@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Enter Scores - Teacher Dashboard</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260303c') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260308f') }}">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f5f7fa; }
@@ -107,6 +107,7 @@
                                 <tr class="subject-row" data-subj-key="{{ subj_key }}">
                                     <th>
                                         {{ subject }}
+                                        <input type="hidden" name="entry_touched_{{ subj_key }}" value="0" class="entry-touched" data-subj-key="{{ subj_key }}">
                                         {% if row_locked_by_submission %}
                                         <br><small style="color:#b36b00; font-weight:600;">Locked: waiting for subject teacher submission</small>
                                         {% endif %}
@@ -188,6 +189,7 @@
                                     </td>
                                     <td>
                                         <input type="text"
+                                               class="subject-comment-input"
                                                name="subject_comment_{{ subj_key }}"
                                                maxlength="300"
                                                placeholder="Comment for parent"
@@ -235,7 +237,7 @@
     </div>
     </div>
     </div>
-    <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260303c') }}"></script>
+    <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260306e') }}"></script>
     <script>
         (function () {
             const table = document.getElementById('score-entry-table');
@@ -302,8 +304,24 @@
                 rows.forEach((row) => recalcForSubject(row.dataset.subjKey));
             }
 
+            function markTouched(subjKey) {
+                const touched = document.querySelector(`.entry-touched[data-subj-key="${subjKey}"]`);
+                if (touched) touched.value = '1';
+            }
+
             document.querySelectorAll('.calc-input').forEach((input) => {
-                input.addEventListener('input', () => recalcForSubject(input.dataset.subjKey));
+                input.addEventListener('input', () => {
+                    recalcForSubject(input.dataset.subjKey);
+                    markTouched(input.dataset.subjKey);
+                });
+            });
+
+            document.querySelectorAll('.subject-comment-input').forEach((input) => {
+                input.addEventListener('input', () => {
+                    const row = input.closest('.subject-row[data-subj-key]');
+                    if (!row) return;
+                    markTouched(row.dataset.subjKey);
+                });
             });
 
             recalcAll();
@@ -311,4 +329,5 @@
     </script>
 </body>
 </html>
+
 

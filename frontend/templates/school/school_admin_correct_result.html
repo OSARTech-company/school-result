@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Correct Result - {{ student_name }}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260303c') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260307f') }}">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
   <style>
     .center-modal-overlay {
@@ -89,6 +89,7 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <input type="hidden" name="student_id" value="{{ student_id }}">
         <input type="hidden" name="term" value="{{ term_token }}">
+        <input type="hidden" name="correction_version" value="{{ correction_version or '' }}">
         <input type="hidden" name="correction_reason" id="correction_reason_input">
 
         <h2>Subject Totals</h2>
@@ -146,7 +147,7 @@
   </div>
     </div>
   </div>
-  <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260303c') }}"></script>
+  <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260306e') }}"></script>
   <script>
     (function () {
       const openBtn = document.getElementById('open-correction-reason-modal');
@@ -195,3 +196,4 @@
   </script>
 </body>
 </html>
+

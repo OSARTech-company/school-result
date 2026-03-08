@@ -5,14 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>View Schools - Super Admin</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260303c') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260308b') }}">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 </head>
 <body>
     <div class="app-shell topbar-layout">
         <div class="side-taskbar">
             <div class="side-brand">
-                <i class="fas fa-graduation-cap"></i>
+                <img src="{{ url_for('static', filename='img/osartech-logo.png') }}" alt="Osartech Logo" class="brand-logo">
                 <span>Super Admin</span>
             </div>
             <div class="side-links">
@@ -28,9 +28,21 @@
                     <i class="fas fa-school"></i>
                     <span>View Schools</span>
                 </a>
+                <a href="{{ url_for('super_admin_onboarding_requests') }}" class="side-link">
+                    <i class="fas fa-user-plus"></i>
+                    <span>Onboarding Requests</span>
+                </a>
+                <a href="{{ url_for('super_admin_privacy_requests') }}" class="side-link">
+                    <i class="fas fa-user-shield"></i>
+                    <span>Privacy Requests</span>
+                </a>
                 <a href="{{ url_for('view_reports') }}" class="side-link">
                     <i class="fas fa-clipboard-list"></i>
                     <span>Reported Issues</span>
+                </a>
+                <a href="{{ url_for('super_admin_error_logs') }}" class="side-link">
+                    <i class="fas fa-triangle-exclamation"></i>
+                    <span>Error Logs</span>
                 </a>
                 <form method="post" action="{{ url_for('logout') }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -63,7 +75,7 @@
                 {% if schools %}
                     {% for school in schools %}
                         <div class="school-card">
-                            <div style="flex: 1;">
+                            <div class="school-card-main">
                                 <div class="school-name">{{ school.school_name }}</div>
                                 <div class="school-id">ID: {{ school.id }}</div>
                                 <div class="school-meta">
@@ -72,9 +84,57 @@
                                     Email: {{ school.email or 'Not set' }} |
                                     Admin: {{ school.admin_username or 'Not set' }} |
                                     Arm Ranking: <strong>{{ 'Together' if school.class_arm_ranking_mode == 'together' else 'Separate' }}</strong> |
-                                    Operations: <strong class="{{ 'op-on' if school.operations_enabled else 'op-off' }}">{{ 'ON' if school.operations_enabled else 'OFF' }}</strong>
+                                    Operations: <strong class="{{ 'op-on' if school.operations_enabled else 'op-off' }}">{{ 'ON' if school.operations_enabled else 'OFF' }}</strong> |
+                                    Access: <strong class="{{ 'op-on' if school.access_state and school.access_state.is_allowed else 'op-off' }}">{{ (school.access_state.effective_status if school.access_state else school.access_status)|replace('_', ' ')|title }}</strong>
                                 </div>
-                                <form action="{{ url_for('super_admin_update_school') }}" method="POST" class="inline-form">
+                                <div class="school-meta">
+                                    Trial: {{ school.trial_start_date or '-' }} to {{ school.trial_end_date or '-' }} |
+                                    Plan: {{ school.subscription_plan or '-' }} |
+                                    Subscription: {{ school.subscription_start_date or '-' }} to {{ school.subscription_end_date or '-' }} |
+                                    Payment Ref: {{ school.payment_reference or '-' }}
+                                </div>
+                                <div class="school-meta">
+                                    Payment Due: {{ school.payment_due_date or '-' }} |
+                                    Grace: {{ school.payment_grace_days or 14 }} day(s) |
+                                    Max Students: {{ school.plan_max_students if school.plan_max_students else 'Unlimited' }} |
+                                    Max Teachers: {{ school.plan_max_teachers if school.plan_max_teachers else 'Unlimited' }} |
+                                    Storage: {{ school.plan_storage_quota_mb if school.plan_storage_quota_mb else 'Unlimited' }} MB
+                                </div>
+                                <div class="school-meta">
+                                    Profile Setup: <strong>{{ school.profile_completeness.percentage if school.profile_completeness else 0 }}%</strong> |
+                                    Billing Outstanding: <strong>{{ school.billing_summary.outstanding if school.billing_summary else 0 }}</strong>
+                                    {% if school.billing_summary and school.billing_summary.latest_status %}
+                                    | Last Billing Status: <strong>{{ school.billing_summary.latest_status|replace('_', ' ')|title }}</strong>
+                                    {% endif %}
+                                    {% if school.billing_summary and school.billing_summary.due_soon_rows %}
+                                    | Due Soon: <strong>{{ school.billing_summary.due_soon_rows }}</strong>
+                                    {% endif %}
+                                    {% if school.latest_backup_drill and school.latest_backup_drill.created_at %}
+                                    | Last Backup Drill: <strong class="{{ 'op-on' if school.latest_backup_drill.ok else 'op-off' }}">{{ 'Passed' if school.latest_backup_drill.ok else 'Warning' }}</strong> ({{ school.latest_backup_drill.created_at }})
+                                    {% else %}
+                                    | Last Backup Drill: <strong>-</strong>
+                                    {% endif %}
+                                </div>
+                                {% if school.access_audit_logs %}
+                                <div class="school-meta">
+                                    Last Access Change:
+                                    {% set al = school.access_audit_logs[0] %}
+                                    <strong>{{ al.old_status|replace('_', ' ')|title }}</strong>
+                                    ->
+                                    <strong>{{ al.new_status|replace('_', ' ')|title }}</strong>
+                                    by {{ al.changed_by or 'system' }} ({{ al.created_at }})
+                                </div>
+                                {% endif %}
+                                {% if school.billing_records %}
+                                <div class="school-meta">
+                                    Recent Billing:
+                                    {% for rec in school.billing_records %}
+                                    [{{ rec.invoice_ref or 'no-ref' }} | {{ rec.status|replace('_', ' ')|title }} | Due {{ rec.due_date or '-' }} | {{ rec.amount_paid }}/{{ rec.amount_due }} {{ rec.currency }}]
+                                    {% if not loop.last %}&nbsp;{% endif %}
+                                    {% endfor %}
+                                </div>
+                                {% endif %}
+                                <form action="{{ url_for('super_admin_update_school') }}" method="POST" class="inline-form super-admin-inline-form">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                     <input type="hidden" name="school_id" value="{{ school.school_id }}"/>
                                     <input type="text" name="school_name" value="{{ school.school_name }}" placeholder="School name" required>
@@ -89,15 +149,63 @@
                                     </select>
                                     <button type="submit" class="btn btn-primary"><i class="fas fa-pen"></i> Update School</button>
                                 </form>
-                                <form action="{{ url_for('super_admin_update_school_admin') }}" method="POST" class="inline-form">
+                                <form action="{{ url_for('super_admin_update_school_admin') }}" method="POST" class="inline-form super-admin-inline-form super-admin-inline-form-compact">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                     <input type="hidden" name="school_id" value="{{ school.school_id }}"/>
                                     <input type="email" name="admin_username" value="{{ school.admin_username or '' }}" placeholder="School admin email" required>
                                     <input type="password" name="admin_password" placeholder="New password (optional)" autocomplete="new-password">
                                     <button type="submit" class="btn btn-primary"><i class="fas fa-user-edit"></i> Update Admin</button>
                                 </form>
+                                <form action="{{ url_for('super_admin_update_school_access') }}" method="POST" class="inline-form super-admin-inline-form">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                    <input type="hidden" name="school_id" value="{{ school.school_id }}"/>
+                                    <select name="access_status" title="Access status">
+                                        <option value="trial_free" {% if school.access_status == 'trial_free' %}selected{% endif %}>Trial Free</option>
+                                        <option value="active_paid" {% if school.access_status == 'active_paid' %}selected{% endif %}>Active Paid</option>
+                                        <option value="pending_payment" {% if school.access_status == 'pending_payment' %}selected{% endif %}>Pending Payment</option>
+                                        <option value="suspended" {% if school.access_status == 'suspended' %}selected{% endif %}>Suspended</option>
+                                    </select>
+                                    <input type="date" name="trial_start_date" value="{{ school.trial_start_date or '' }}" title="Trial start date">
+                                    <input type="date" name="trial_end_date" value="{{ school.trial_end_date or '' }}" title="Trial end date">
+                                    <input type="text" name="subscription_plan" value="{{ school.subscription_plan or '' }}" placeholder="Plan">
+                                    <input type="date" name="subscription_start_date" value="{{ school.subscription_start_date or '' }}" title="Subscription start date">
+                                    <input type="date" name="subscription_end_date" value="{{ school.subscription_end_date or '' }}" title="Subscription end date">
+                                    <input type="date" name="payment_due_date" value="{{ school.payment_due_date or '' }}" title="Payment due date">
+                                    <input type="number" name="payment_grace_days" value="{{ school.payment_grace_days or 14 }}" min="0" max="365" title="Payment grace days">
+                                    <input type="text" name="payment_reference" value="{{ school.payment_reference or '' }}" placeholder="Payment ref">
+                                    <input type="number" name="plan_max_students" value="{{ school.plan_max_students or 0 }}" min="0" placeholder="Max students">
+                                    <input type="number" name="plan_max_teachers" value="{{ school.plan_max_teachers or 0 }}" min="0" placeholder="Max teachers">
+                                    <input type="number" name="plan_storage_quota_mb" value="{{ school.plan_storage_quota_mb or 0 }}" min="0" placeholder="Storage MB">
+                                    <input type="text" name="plan_features_json" value="{{ school.plan_features_json or '{}' }}" placeholder="Plan features JSON">
+                                    <input type="text" name="access_note" value="{{ school.access_note or '' }}" placeholder="Access note">
+                                    <button type="submit" class="btn btn-primary"><i class="fas fa-key"></i> Update Access</button>
+                                </form>
+                                <form action="{{ url_for('super_admin_school_billing') }}" method="POST" class="inline-form super-admin-inline-form">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                    <input type="hidden" name="school_id" value="{{ school.school_id }}"/>
+                                    <input type="text" name="invoice_ref" placeholder="Invoice ref">
+                                    <input type="text" name="plan_name" value="{{ school.subscription_plan or '' }}" placeholder="Plan name">
+                                    <input type="number" step="0.01" min="0" name="amount_due" placeholder="Amount due">
+                                    <input type="number" step="0.01" min="0" name="amount_paid" placeholder="Amount paid">
+                                    <input type="date" name="due_date" value="{{ school.payment_due_date or '' }}" title="Due date">
+                                    <input type="date" name="paid_at" title="Paid date">
+                                    <select name="billing_status" title="Billing status">
+                                        <option value="pending">Pending</option>
+                                        <option value="part_paid">Part Paid</option>
+                                        <option value="paid">Paid</option>
+                                        <option value="overdue">Overdue</option>
+                                        <option value="waived">Waived</option>
+                                    </select>
+                                    <input type="text" name="billing_note" placeholder="Billing note">
+                                    <button type="submit" class="btn btn-primary"><i class="fas fa-receipt"></i> Add Billing</button>
+                                </form>
                             </div>
-                            <div style="display:flex; flex-direction:column; gap:8px; align-items:flex-end;">
+                            <div class="school-card-actions">
+                                <form action="{{ url_for('super_admin_school_backup_drill') }}" method="POST">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                                    <input type="hidden" name="school_id" value="{{ school.school_id }}"/>
+                                    <button type="submit" class="btn btn-secondary"><i class="fas fa-shield-check"></i> Run Backup Drill</button>
+                                </form>
                                 <form action="{{ url_for('super_admin_toggle_school_operations') }}" method="POST">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                     <input type="hidden" name="school_id" value="{{ school.school_id }}"/>
@@ -125,7 +233,8 @@
             </div>
         </div>
     </div>
-    <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260303c') }}"></script>
+    <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260306e') }}"></script>
 </body>
 </html>
+
 

@@ -5,14 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Super Admin Dashboard - Student Score Management System</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260303c') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260308d') }}">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" integrity="sha384-3B6NwesSXE7YJlcLI9RpRqGf2p/EgVH8BgoKTaUrmKNDkHPStTQ3EyoYjCGXaOTS" crossorigin="anonymous" referrerpolicy="no-referrer">
 </head>
 <body>
     <div class="app-shell topbar-layout">
         <div class="side-taskbar">
             <div class="side-brand">
-                <i class="fas fa-graduation-cap"></i>
+                <img src="{{ url_for('static', filename='img/osartech-logo.png') }}" alt="Osartech Logo" class="brand-logo">
                 <span>Super Admin</span>
             </div>
             <div class="side-links">
@@ -28,9 +28,21 @@
                     <i class="fas fa-school"></i>
                     <span>View Schools</span>
                 </a>
+                <a href="{{ url_for('super_admin_onboarding_requests') }}" class="side-link">
+                    <i class="fas fa-user-plus"></i>
+                    <span>Onboarding Requests</span>
+                </a>
+                <a href="{{ url_for('super_admin_privacy_requests') }}" class="side-link">
+                    <i class="fas fa-user-shield"></i>
+                    <span>Privacy Requests</span>
+                </a>
                 <a href="{{ url_for('view_reports') }}" class="side-link">
                     <i class="fas fa-clipboard-list"></i>
                     <span>Reported Issues</span>
+                </a>
+                <a href="{{ url_for('super_admin_error_logs') }}" class="side-link">
+                    <i class="fas fa-triangle-exclamation"></i>
+                    <span>Error Logs</span>
                 </a>
                 <form method="post" action="{{ url_for('logout') }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -74,6 +86,34 @@
                         <h3>{{ overview.with_admin }}</h3>
                         <p>Schools with Admin</p>
                     </div>
+                    <div class="stat-card">
+                        <h3>{{ overview.pending_payment }}</h3>
+                        <p>Pending Payment</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>{{ overview.suspended }}</h3>
+                        <p>Suspended</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>{{ overview.billing_overdue }}</h3>
+                        <p>Billing Overdue</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>{{ overview.billing_due_soon }}</h3>
+                        <p>Billing Due Soon</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>{{ overview.low_completeness }}</h3>
+                        <p>Low Setup &lt;80%</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>{{ overview.pending_onboarding_requests }}</h3>
+                        <p>Pending Onboarding</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>{{ overview.pending_privacy_requests }}</h3>
+                        <p>Pending Privacy</p>
+                    </div>
                 </div>
 
                 <div class="layout-main">
@@ -103,7 +143,7 @@
             </div>
         </div>
     </div>
-    <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260303c') }}"></script>
+    <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260306e') }}"></script>
     <script>
       (function () {
         var bars = document.querySelectorAll('.location-bar-fill[data-pct]');
@@ -118,4 +158,5 @@
     {% include 'shared/_ai_assistant_widget.html' %}
 </body>
 </html>
+
 

@@ -790,3 +790,106 @@ def test_rate_limit_consume_allows_after_window(app_module, monkeypatch):
 
     now["t"] = 1062.0
     assert m._rate_limit_consume("check_result:1.2.3.4", 1, 60)[0] is True
+
+
+def test_timetable_time_ranges_overlap_logic(app_module):
+    m = app_module
+    assert m.timetable_time_ranges_overlap("08:00", "08:40", "08:20", "09:00") is True
+    assert m.timetable_time_ranges_overlap("08:00", "08:40", "08:40", "09:00") is False
+    assert m.timetable_time_ranges_overlap("09:00", "08:40", "08:00", "09:00") is False
+
+
+def test_find_timetable_time_conflicts_detects_overlap(app_module, monkeypatch):
+    m = app_module
+    monkeypatch.setattr(
+        m,
+        "get_school_timetable_rows",
+        lambda school_id, classname='': [
+            {
+                "id": 22,
+                "classname": "JSS1",
+                "day_of_week": 1,
+                "period_label": "Period 1",
+                "subject": "Mathematics",
+                "start_time": "08:00",
+                "end_time": "08:40",
+            }
+        ],
+    )
+    rows = m.find_timetable_time_conflicts("SCH", "JSS1", 1, "08:20", "08:50")
+    assert rows and rows[0]["id"] == 22
+
+
+def test_parent_timetable_filters_to_child_subjects_only(client, app_module, monkeypatch):
+    m = app_module
+    monkeypatch.setattr(m, "_parent_allowed_student_keys", lambda: {"SCH::STU1"})
+    monkeypatch.setattr(
+        m,
+        "get_school",
+        lambda school_id: {
+            "school_id": school_id,
+            "school_name": "Alpha School",
+            "theme_accent_color": "#1F7A8C",
+            "parent_timetable_show_teacher": 1,
+        },
+    )
+    monkeypatch.setattr(
+        m,
+        "load_students_for_student_ids",
+        lambda school_id, ids: {
+            "STU1": {
+                "firstname": "Aka",
+                "classname": "JSS1",
+                "stream": "Science",
+                "subjects": ["Mathematics"],
+                "scores": {},
+            }
+        },
+    )
+    monkeypatch.setattr(
+        m,
+        "get_school_timetable_rows",
+        lambda school_id, classname='': [
+            {
+                "id": 1,
+                "classname": "JSS1",
+                "day_of_week": 1,
+                "day_name": "Monday",
+                "period_label": "Period 1",
+                "subject": "Mathematics",
+                "teacher_id": "T1",
+                "start_time": "08:00",
+                "end_time": "08:40",
+                "room": "A1",
+            },
+            {
+                "id": 2,
+                "classname": "JSS1",
+                "day_of_week": 1,
+                "day_name": "Monday",
+                "period_label": "Period 2",
+                "subject": "French",
+                "teacher_id": "T2",
+                "start_time": "08:40",
+                "end_time": "09:20",
+                "room": "A1",
+            },
+        ],
+    )
+    monkeypatch.setattr(
+        m,
+        "get_teachers",
+        lambda school_id: {"T1": {"firstname": "Grace", "lastname": "Doe"}, "T2": {"firstname": "John", "lastname": "Roe"}},
+    )
+    monkeypatch.setattr(m, "get_parent_messages_for_children", lambda **kwargs: [])
+    monkeypatch.setattr(m, "get_class_subject_config", lambda school_id, classname: {})
+
+    with client.session_transaction() as sess:
+        sess["role"] = "parent"
+        sess["parent_phone"] = "+234000000000"
+
+    resp = client.get("/parent/timetable?student_key=SCH::STU1")
+    body = resp.data.decode("utf-8")
+    assert resp.status_code == 200
+    assert "Mathematics" in body
+    assert "French" not in body

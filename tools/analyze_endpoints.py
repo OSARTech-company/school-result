@@ -11,7 +11,7 @@ for r in sorted(app.url_map.iter_rules(), key=lambda r: r.rule):
     routes.append({'endpoint': r.endpoint, 'rule': r.rule, 'methods': methods})
 
 # collect template url_for endpoints
-template_dir = os.path.join(os.path.dirname(__file__), '..', 'templates')
+template_dir = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'templates')
 endpoints_in_templates = set()
 for root, dirs, files in os.walk(template_dir):
     for fn in files:

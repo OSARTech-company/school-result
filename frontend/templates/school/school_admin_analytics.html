@@ -4,7 +4,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>School Analytics</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260303c') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260307f') }}">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 </head>
 <body>
@@ -99,6 +99,18 @@
                 <div class="stat-label">Not Helpful</div>
                 <div class="stat-value" style="font-size: 1.6rem; font-weight: 800;">{{ assistant_feedback.not_helpful if assistant_feedback else 0 }}</div>
             </div>
+            <div class="stat-card">
+                <div class="stat-label">Avg Confidence</div>
+                <div class="stat-value" style="font-size: 1.6rem; font-weight: 800;">{{ ('%.2f'|format(assistant_usage.avg_confidence|default(0))) if assistant_usage else '0.00' }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Low Confidence</div>
+                <div class="stat-value" style="font-size: 1.6rem; font-weight: 800;">{{ assistant_usage.low_confidence if assistant_usage else 0 }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Unresolved</div>
+                <div class="stat-value" style="font-size: 1.6rem; font-weight: 800;">{{ assistant_usage.unresolved_total if assistant_usage else 0 }}</div>
+            </div>
         </div>
         <h3>Usage by Role</h3>
         <table>
@@ -122,6 +134,58 @@
             {% endfor %}
             </tbody>
         </table>
+        <h3 style="margin-top: 14px;">Response Modes</h3>
+        <table>
+            <thead><tr><th>Mode</th><th>Count</th></tr></thead>
+            <tbody>
+            {% for row in (assistant_usage.response_mode_rows if assistant_usage else []) %}
+            <tr><td>{{ row.mode }}</td><td>{{ row.count }}</td></tr>
+            {% else %}
+            <tr><td colspan="2">No response mode data yet.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        <h3 style="margin-top: 14px;">Top Unresolved Questions</h3>
+        <table>
+            <thead><tr><th>Question</th><th>Count</th></tr></thead>
+            <tbody>
+            {% for row in (assistant_usage.top_unresolved_questions if assistant_usage else []) %}
+            <tr><td>{{ row.question }}</td><td>{{ row.count }}</td></tr>
+            {% else %}
+            <tr><td colspan="2">No unresolved question pattern yet.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        <h3 style="margin-top: 14px;">Top Unresolved Pages</h3>
+        <table>
+            <thead><tr><th>Page</th><th>Count</th></tr></thead>
+            <tbody>
+            {% for row in (assistant_usage.top_unresolved_pages if assistant_usage else []) %}
+            <tr><td>{{ row.page }}</td><td>{{ row.count }}</td></tr>
+            {% else %}
+            <tr><td colspan="2">No unresolved page pattern yet.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        <h3 style="margin-top: 14px;">Quality Indicators</h3>
+        <table>
+            <thead><tr><th>Metric</th><th>Value</th></tr></thead>
+            <tbody>
+            <tr><td>Low-confidence rate</td><td>{{ assistant_quality.low_confidence_rate if assistant_quality else 0 }}%</td></tr>
+            <tr><td>Unresolved rate</td><td>{{ assistant_quality.unresolved_rate if assistant_quality else 0 }}%</td></tr>
+            </tbody>
+        </table>
+        <h3 style="margin-top: 14px;">Top Not Helpful Questions</h3>
+        <table>
+            <thead><tr><th>Question</th><th>Count</th></tr></thead>
+            <tbody>
+            {% for row in (assistant_quality.not_helpful_top if assistant_quality else []) %}
+            <tr><td>{{ row.question }}</td><td>{{ row.count }}</td></tr>
+            {% else %}
+            <tr><td colspan="2">No negative feedback pattern yet.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
     </div>
 
     <div class="card">
@@ -132,6 +196,22 @@
             <tr><td>Queued</td><td>{{ notification_stats.queued if notification_stats else 0 }}</td></tr>
             <tr><td>Sent</td><td>{{ notification_stats.sent if notification_stats else 0 }}</td></tr>
             <tr><td>Failed</td><td>{{ notification_stats.failed if notification_stats else 0 }}</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="card">
+        <h2>Backup Health (Last {{ assistant_days if assistant_days else 30 }} Days)</h2>
+        <table>
+            <thead><tr><th>Metric</th><th>Value</th></tr></thead>
+            <tbody>
+            <tr><td>Backup exports</td><td>{{ backup_health.exports if backup_health else 0 }}</td></tr>
+            <tr><td>Restore runs</td><td>{{ backup_health.restores if backup_health else 0 }}</td></tr>
+            <tr><td>Restore dry-runs</td><td>{{ backup_health.restore_dry_runs if backup_health else 0 }}</td></tr>
+            <tr><td>Frequency (days)</td><td>{{ backup_health.scheduled_frequency_days if backup_health else 7 }}</td></tr>
+            <tr><td>Last backup</td><td>{{ backup_health.last_backup_at if backup_health and backup_health.last_backup_at else 'N/A' }}</td></tr>
+            <tr><td>Next due</td><td>{{ backup_health.next_due_at if backup_health and backup_health.next_due_at else 'N/A' }}</td></tr>
+            <tr><td>Overdue</td><td>{{ 'Yes' if backup_health and backup_health.is_overdue else 'No' }}</td></tr>
             </tbody>
         </table>
     </div>
@@ -153,6 +233,7 @@
 </div>
     </div>
 </div>
-<script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260303c') }}"></script>
+<script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260306e') }}"></script>
 </body>
 </html>
+

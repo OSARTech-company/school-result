@@ -5,12 +5,35 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Teacher Dashboard - Student Score Management System</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260303c') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260308f') }}">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         .school-logo, .school-logo-fallback { position: absolute; top: 14px; right: 14px; object-fit: contain; padding: 4px; }
+        .teacher-title-row { display: inline-flex; align-items: center; gap: 10px; }
+        .teacher-title-avatar, .teacher-title-avatar-fallback {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            border: 1px solid #cfe0f3;
+            background: #f8fbff;
+            box-shadow: 0 2px 6px rgba(2, 6, 23, 0.12);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: #1e3a5f;
+            font-weight: 800;
+            flex: 0 0 40px;
+        }
+        .teacher-title-avatar { object-fit: cover; }
+        .teacher-title-avatar-fallback i { font-size: 15px; }
+        .teacher-title-avatar-fallback span { font-size: 13px; line-height: 1; margin-left: 3px; }
         @media (max-width: 768px) {
             .school-logo, .school-logo-fallback { width: 54px; height: 54px; top: 10px; right: 10px; font-size: 20px; }
+            .teacher-title-avatar, .teacher-title-avatar-fallback {
+                width: 34px;
+                height: 34px;
+                flex-basis: 34px;
+            }
         }
         .term-progress-wrap { display: flex; align-items: center; gap: 16px; }
         .term-progress-ring { width: 110px; height: 110px; flex: 0 0 auto; }
@@ -62,11 +85,6 @@
             border-radius: 6px;
         }
         .side-class-link.active { background: rgba(255,255,255,0.14); color: #fff; font-weight: 700; }
-        .student-message-card { border: 1px solid #dbe4ef; border-radius: 10px; padding: 12px; background: #f8fbff; margin-bottom: 10px; }
-        .student-message-card.is-unread { border-left: 4px solid #0F4C81; background: #eef6ff; }
-        .student-message-card h4 { margin: 0 0 6px; font-size: 1rem; color: #1e3a5f; }
-        .student-message-meta { color: #5b6475; font-size: 0.86rem; margin-bottom: 6px; }
-        .student-message-actions { margin-top: 10px; display: flex; gap: 8px; align-items: center; }
         .welcome-modal-overlay {
             position: fixed;
             inset: 0;
@@ -87,7 +105,7 @@
         .welcome-modal-card ol { margin: 8px 0 14px 18px; color: #334155; }
     </style>
 </head>
-<body style="--brand: {{ school.theme_primary_color if school and school.theme_primary_color else '#0F4C81' }}; --brand-2: {{ school.theme_secondary_color if school and school.theme_secondary_color else '#1F7A8C' }}; --accent: {{ school.theme_accent_color if school and school.theme_accent_color else '#1F7A8C' }};" data-teacher-account="{{ teacher_phone|default(teacher_name, true)|default('teacher', true)|e }}" data-unread-teacher-messages="{{ unread_teacher_messages|default(0, true)|int }}">
+<body style="--brand: {{ school.theme_primary_color if school and school.theme_primary_color else '#0F4C81' }}; --brand-2: {{ school.theme_secondary_color if school and school.theme_secondary_color else '#1F7A8C' }}; --accent: {{ school.theme_accent_color if school and school.theme_accent_color else '#1F7A8C' }};">
     {% set has_class_assignment = (classes|length) > 0 %}
     {% set active_tab = (request.args.get('tab', 'overview') or 'overview').strip().lower() %}
     {% if active_tab not in ['overview', 'score', 'submission'] %}
@@ -96,118 +114,31 @@
     {% if not has_class_assignment and active_tab == 'submission' %}
         {% set active_tab = 'overview' %}
     {% endif %}
+    {% set active_page = 'score_entry' if active_tab == 'score' else 'dashboard' %}
+    {% set teacher_sidebar_profile_image = teacher_profile_image %}
+    {% set teacher_sidebar_display_name = teacher_name %}
+    {% set teacher_unread_notifications = unread_teacher_messages %}
+    {% set teacher_score_nav_tree = score_nav_tree %}
+    {% set teacher_selected_score_subject = selected_score_subject %}
+    {% set teacher_selected_score_class = selected_score_class %}
+    {% set teacher_has_class_assignment_nav = has_class_assignment %}
     <div class="app-shell topbar-layout">
-        <div class="side-taskbar">
-            <div class="side-brand teacher-brand">
-                {% if teacher_profile_image %}
-                <img src="{{ teacher_profile_image }}" alt="Profile Picture" class="teacher-brand-photo">
-                {% else %}
-                <i class="fas fa-user-circle teacher-brand-photo"></i>
-                {% endif %}
-                <div class="teacher-brand-name">{{ teacher_name or 'Teacher' }}</div>
-                <div class="teacher-brand-org">OSARTECH</div>
-            </div>
-            <div class="side-links">
-                <a href="{{ url_for('teacher_dashboard', tab='overview') }}" class="side-link {{ 'active' if active_tab == 'overview' else '' }}">
-                    <i class="fas fa-home"></i>
-                    <span>Overview</span>
-                </a>
-                <a href="{{ url_for('teacher_messages') }}" class="side-link">
-                    <i class="fas fa-bell"></i>
-                    <span>Messages</span>
-                    {% if unread_teacher_messages %}
-                    <span class="notif-badge">{{ unread_teacher_messages }}</span>
-                    {% endif %}
-                </a>
-                <a href="{{ url_for('teacher_dashboard', tab='score') }}" class="side-link {{ 'active' if active_tab == 'score' else '' }}">
-                    <i class="fas fa-pen-to-square"></i>
-                    <span>Score Entry</span>
-                </a>
-                {% if score_nav_tree %}
-                {% set show_score_nav_submenu = (active_tab == 'score') %}
-                {% if show_score_nav_submenu %}
-                <div class="side-submenu-wrap">
-                    {% for node in score_nav_tree %}
-                    <div class="side-submenu-subject">
-                        <a href="{{ url_for('teacher_dashboard', tab='score', score_subject=node.subject) }}"
-                           class="side-subject-link {{ 'active' if selected_score_subject == node.subject else '' }}">
-                            {{ node.subject }}
-                        </a>
-                        {% if selected_score_subject == node.subject %}
-                        <div class="side-submenu-classes">
-                            {% for cls in node.classes %}
-                            <a href="{{ url_for('teacher_dashboard', tab='score', score_subject=node.subject, score_class=cls) }}"
-                               class="side-class-link {{ 'active' if selected_score_class == cls else '' }}">
-                                {{ cls }}
-                            </a>
-                            {% endfor %}
-                        </div>
-                        {% endif %}
-                    </div>
-                    {% endfor %}
-                </div>
-                {% endif %}
-                {% endif %}
-                {% if has_class_assignment %}
-                <a href="{{ url_for('teacher_dashboard', tab='submission') }}" class="side-link {{ 'active' if active_tab == 'submission' else '' }}">
-                    <i class="fas fa-paper-plane"></i>
-                    <span>Submission</span>
-                </a>
-                {% endif %}
-                {% if has_class_assignment %}
-                <a href="{{ url_for('teacher_attendance') }}" class="side-link">
-                    <i class="fas fa-user-check"></i>
-                    <span>Attendance</span>
-                </a>
-                <a href="{{ url_for('teacher_period_attendance') }}" class="side-link">
-                    <i class="fas fa-clock"></i>
-                    <span>Period Attendance</span>
-                </a>
-                {% endif %}
-                <a href="{{ url_for('teacher_timetable') }}" class="side-link">
-                    <i class="fas fa-table"></i>
-                    <span>Timetable</span>
-                </a>
-                <a href="{{ url_for('teacher_subject_rank_history') }}" class="side-link">
-                    <i class="fas fa-list-ol"></i>
-                    <span>Subject Ranks</span>
-                </a>
-                <a href="{{ url_for('teacher_upload_csv') }}" class="side-link">
-                    <i class="fas fa-file-csv"></i>
-                    <span>Upload CSV</span>
-                </a>
-                <a href="{{ url_for('view_students') }}" class="side-link">
-                    <i class="fas fa-users"></i>
-                    <span>View Students</span>
-                </a>
-                {% if has_class_assignment %}
-                <a href="{{ url_for('teacher_behaviour_assessment', classname=(classes[0] if classes else '')) }}" class="side-link">
-                    <i class="fas fa-user-check"></i>
-                    <span>Behaviour</span>
-                </a>
-                {% endif %}
-                <a href="{{ url_for('report_issue') }}" class="side-link">
-                    <i class="fas fa-bug"></i>
-                    <span>Report Issue</span>
-                </a>
-                <a href="{{ url_for('help', role='teacher') }}" class="side-link">
-                    <i class="fas fa-question-circle"></i>
-                    <span>Help</span>
-                </a>
-                <form method="post" action="{{ url_for('logout') }}">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <button type="submit" class="side-link side-link-logout">
-                        <i class="fas fa-sign-out-alt"></i>
-                        <span>Logout</span>
-                    </button>
-                </form>
-            </div>
-        </div>
+        {% include 'teacher/_teacher_sidebar.html' %}
         
         <div class="main-content">
             <div class="container">
                 <div class="header">
-                    <h1><i class="fas fa-chalkboard-teacher"></i> Teacher Dashboard</h1>
+                    {% set teacher_initial = ((teacher_name if teacher_name else 'T')[:1] or 'T')|upper %}
+                    <h1>
+                        <span class="teacher-title-row">
+                            {% if teacher_profile_image %}
+                            <img src="{{ teacher_profile_image }}" alt="{{ teacher_name }} Profile Picture" class="teacher-title-avatar" />
+                            {% else %}
+                            <span class="teacher-title-avatar-fallback"><i class="fas fa-user" aria-hidden="true"></i><span>{{ teacher_initial }}</span></span>
+                            {% endif %}
+                            <span><i class="fas fa-chalkboard-teacher"></i> Teacher Dashboard</span>
+                        </span>
+                    </h1>
                     <p class="meta-line">
                         <strong>School:</strong> {{ school.school_name if school else '-' }} |
                         <strong>Teacher:</strong> {{ teacher_name }} |
@@ -216,6 +147,19 @@
                         <strong>Subject Assignments:</strong> {{ subject_assignment_count or 0 }} |
                         <strong>Last Login:</strong> {{ last_login_at }}
                     </p>
+                    {% if school_access_state %}
+                    {% set access_status = (school_access_state.effective_status or '') %}
+                    {% set access_class = 'is-active' if access_status in ['trial_free', 'active_paid'] else ('is-warning' if access_status == 'pending_payment' else 'is-blocked') %}
+                    <div class="access-badge-row">
+                        <span class="access-badge {{ access_class }}">
+                            <i class="fas fa-shield-alt" aria-hidden="true"></i>
+                            Access: {{ access_status|replace('_', ' ')|title }}
+                        </span>
+                        {% if school_access_state.reason %}
+                        <p class="access-badge-note">{{ school_access_state.reason }}</p>
+                        {% endif %}
+                    </div>
+                    {% endif %}
                     {% set school_initial = ((school.school_name if school and school.school_name else 'S')[:1] or 'S')|upper %}
                     {% if school and school.school_logo %}
                     <img
@@ -254,7 +198,7 @@
                     </div>
                 </div>
 
-                <div class="card" id="teacher-messages-card">
+                <div class="card" id="assignment-overview-card">
                     <h2><i class="fas fa-link"></i> Assignment Overview</h2>
                     <div class="assignment-overview">
                         <div class="assignment-box">
@@ -314,68 +258,49 @@
                     {% endif %}
                 </div>
 
-                <div class="layout-main">
+                <div class="layout-main {% if active_tab == 'overview' %}teacher-layout-overview{% else %}teacher-layout-single{% endif %}">
                 <div class="layout-side">
                 {% if active_tab == 'overview' %}
                 <div class="card">
-                    <h2><i class="fas fa-paper-plane"></i> Send Assignment / Note To Students</h2>
-                    {% if subject_assignment_form_map %}
-                    <p class="note">Send to students in a class you are assigned to for the selected subject.</p>
-                    <form method="post" action="{{ url_for('teacher_send_student_message') }}" enctype="multipart/form-data">
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                        <div class="grid">
-                            <div>
-                                <label>Type</label>
-                                <select name="message_kind" required>
-                                    <option value="assignment">Assignment</option>
-                                    <option value="note">Note</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label>Class</label>
-                                <select name="target_classname" id="teacher-student-msg-class" required>
-                                    {% for cls in subject_assignment_form_map.keys()|list|sort %}
-                                    <option value="{{ cls }}">{{ cls }}</option>
-                                    {% endfor %}
-                                </select>
-                            </div>
-                            <div>
-                                <label>Subject</label>
-                                <select name="target_subject" id="teacher-student-msg-subject" required></select>
-                            </div>
-                            <div>
-                                <label>Deadline (Optional)</label>
-                                <input type="date" name="deadline_date">
-                            </div>
-                            <div>
-                                <label>Title (Optional)</label>
-                                <input type="text" name="title" maxlength="160" placeholder="Auto-generated if empty">
-                            </div>
-                            <div>
-                                <label>Attach Image (Optional)</label>
-                                <input type="file" name="attachment_image" accept=".jpg,.jpeg,.png,.gif,.webp,image/*">
-                            </div>
-                        </div>
-                        <div class="mt-12">
-                            <label>Message / Assignment Details</label>
-                            <textarea name="message" rows="4" maxlength="12000" required placeholder="Type assignment instructions or class note..."></textarea>
-                            <p class="note">Image formats: JPG, PNG, GIF, WEBP. Max image size: 8MB. Note max length: 12,000 characters.</p>
-                        </div>
-                        <div class="mt-12">
-                            <button type="submit" class="btn btn-primary"><i class="fas fa-paper-plane"></i> Send To Students</button>
-                        </div>
-                    </form>
+                    <h2><i class="fas fa-clock"></i> Period Notifications</h2>
+                    <p class="note">Shows your ongoing period and periods starting within the next 20 minutes.</p>
+                    {% if teacher_period_notifications_paused_reason %}
+                    <p class="note"><strong>Paused:</strong> {{ teacher_period_notifications_paused_reason }}.</p>
+                    <p class="success-note">Period alerts resume automatically when school is open.</p>
+                    {% elif teacher_period_notifications %}
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Status</th>
+                                <th>Class</th>
+                                <th>Period</th>
+                                <th>Subject</th>
+                                <th>Time</th>
+                                <th>Room</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in teacher_period_notifications %}
+                            <tr>
+                                <td>
+                                    {% if item.status == 'ongoing' %}
+                                    <span class="chip chip-success">Ongoing ({{ item.minutes_delta }} min left)</span>
+                                    {% else %}
+                                    <span class="chip chip-warning">Starts in {{ item.minutes_delta }} min</span>
+                                    {% endif %}
+                                </td>
+                                <td>{{ item.classname }}</td>
+                                <td>{{ item.period_label }}</td>
+                                <td>{{ item.subject }}</td>
+                                <td>{{ item.start_time }} - {{ item.end_time }}</td>
+                                <td>{{ item.room or '-' }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
                     {% else %}
-                    <p class="note">No subject assignment found yet. Ask school admin to assign your class subjects first.</p>
+                    <p class="success-note">No period alert right now.</p>
                     {% endif %}
-                </div>
-                <div class="card">
-                    <h2><i class="fas fa-bell"></i> School Notifications</h2>
-                    <p class="note">Open a dedicated messages page to keep the dashboard focused.</p>
-                    <p class="note">Unread notifications: <strong>{{ unread_teacher_messages or 0 }}</strong></p>
-                    <a href="{{ url_for('teacher_messages') }}" class="btn btn-primary">
-                        <i class="fas fa-external-link-alt"></i> Open Messages
-                    </a>
                 </div>
                 <div class="card">
                     <h2><i class="fas fa-circle-notch"></i> Term Open-Day Progress</h2>
@@ -480,87 +405,12 @@
                     {% endif %}
                 </div>
 
-                {% if has_class_assignment %}
-                <div class="card">
-                    <h2><i class="fas fa-bell"></i> Missing Score Alerts</h2>
-                    {% if teacher_missing_score_alerts %}
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Scope</th>
-                                <th>Class</th>
-                                <th>Subject</th>
-                                <th>Pending Students</th>
-                                <th>Details</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for alert in teacher_missing_score_alerts %}
-                            <tr class="student-row">
-                                <td>{{ 'Class Owner' if alert.scope == 'class_owner' else 'Subject Teacher' }}</td>
-                                <td>{{ alert.classname }}</td>
-                                <td>{{ alert.subject or '-' }}</td>
-                                <td>{{ alert.pending_students }}</td>
-                                <td>{{ alert.message }}</td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                    {% else %}
-                    <p class="success-note">No missing score alerts right now.</p>
-                    {% endif %}
-                </div>
-                {% if subject_submit_rows %}
-                <div class="card">
-                    <h2><i class="fas fa-share-square"></i> Submit Subject Scores To Class Teacher</h2>
-                    <p class="note">Use one button per class after all your assigned subject scores are complete.</p>
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Class</th>
-                                <th>Your Subjects</th>
-                                <th>Pending Entries</th>
-                                <th>Status</th>
-                                <th>Action</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for row in subject_submit_rows %}
-                            <tr class="student-row">
-                                <td>{{ row.classname }}</td>
-                                <td>{{ row.subjects|join(', ') }}</td>
-                                <td>{{ row.pending_entries }}</td>
-                                <td>
-                                    {% if row.is_submitted %}
-                                    <span class="chip chip-success">Submitted{% if row.submitted_at %} ({{ row.submitted_at }}){% endif %}</span>
-                                    {% elif row.ready %}
-                                    <span class="chip chip-primary">Ready</span>
-                                    {% else %}
-                                    <span class="chip chip-warning">Pending</span>
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    <form method="POST" action="{{ url_for('teacher_submit_to_class_teacher') }}" class="inline-form">
-                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
-                                        <input type="hidden" name="classname" value="{{ row.classname }}" />
-                                        <button type="submit" class="btn btn-primary btn-xs" {% if (not row.ready) or row.is_submitted %}disabled{% endif %}>
-                                            {% if row.is_submitted %}Submitted{% elif row.ready %}Submit{% else %}Incomplete{% endif %}
-                                        </button>
-                                    </form>
-                                </td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                </div>
-                {% endif %}
-                {% endif %}
                 {% endif %}
 
                 </div>
                 <div class="layout-primary">
                 {% if active_tab == 'score' %}
-                {% if has_class_assignment or (selected_score_subject and selected_score_class) %}
+                {% if has_class_assignment or selected_score_subject or selected_score_class %}
                 <div class="card">
                     <h2><i class="fas fa-book"></i> Subject Score Entry</h2>
                     <p><strong>Current Term:</strong> {{ current_term }}</p>
@@ -620,7 +470,7 @@
                 </div>
                 {% endif %}
 
-                {% if has_class_assignment %}
+                {% if rank_class_options %}
                 <div class="card">
                     <h2><i class="fas fa-trophy"></i> Subject Ranking</h2>
                     <p class="note">
@@ -712,117 +562,24 @@
                 {% endif %}
                 {% endif %}
 
-                {% if active_tab in ['overview', 'score'] and has_class_assignment %}
+                {% if active_tab in ['overview', 'score'] %}
+                {% if active_tab == 'overview' %}
                 <div class="card">
-                    <h2><i class="fas fa-user-graduate"></i> Recent Students</h2>
-                    <p><strong>Current Term:</strong> {{ current_term }}</p>
-                    {% set viewed_count = 0 %}
-                    {% set pending_view_count = 0 %}
-                    {% for student_id, student in recent_students %}
-                        {% if student_id in viewed_student_ids %}
-                            {% set viewed_count = viewed_count + 1 %}
-                        {% else %}
-                            {% set pending_view_count = pending_view_count + 1 %}
-                        {% endif %}
-                    {% endfor %}
-                    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:10px;">
-                        <button type="button" id="view-filter-all" class="btn btn-secondary btn-xs">
-                            All ({{ recent_students|length }})
-                        </button>
-                        <button type="button" id="view-filter-pending" class="btn btn-warning btn-xs">
-                            Not Viewed ({{ pending_view_count }})
-                        </button>
-                        <span class="chip chip-info">Viewed: {{ viewed_count }}</span>
+                    <h2><i class="fas fa-compass"></i> Classroom Actions</h2>
+                    <p class="note">Use dedicated pages for classroom work and messages.</p>
+                    <div class="toolbar">
+                        <a href="{{ url_for('teacher_class_list') }}" class="btn btn-primary btn-sm">
+                            <i class="fas fa-list"></i> Class List
+                        </a>
+                        <a href="{{ url_for('teacher_messages') }}" class="btn btn-secondary btn-sm">
+                            <i class="fas fa-bell"></i> Messages
+                            {% if unread_teacher_messages %}
+                            <span class="chip chip-warning" style="margin-left:6px;">{{ unread_teacher_messages }}</span>
+                            {% endif %}
+                        </a>
                     </div>
-                    <table id="recent-students-table">
-                        <thead>
-                            <tr>
-                                <th>Student ID</th>
-                                <th>Name</th>
-                                <th>Class</th>
-                                <th>Term</th>
-                                <th>Stream</th>
-                                <th>Action</th>
-                            </tr>
-                        </thead>
-                        <tbody id="recent-students-tbody">
-                            {% for student_id, student in recent_students %}
-                                <tr class="student-row" data-viewed="{{ '1' if student_id in viewed_student_ids else '0' }}">
-                                    <td>{{ student_id }}</td>
-                                    <td>
-                                        {{ student.firstname }}
-                                        {% if student.scope_complete %}
-                                            <span class="chip chip-success ml-8">Completed</span>
-                                        {% else %}
-                                            <span class="chip chip-warning ml-8">Pending</span>
-                                        {% endif %}
-                                        {% if student.is_class_owner and locked_subjects_by_class is defined and locked_subjects_by_class.get(student.classname) %}
-                                            <span class="chip chip-warning ml-8" title="Some subjects are locked until subject teachers submit.">
-                                                <i class="fas fa-lock"></i> {{ locked_subjects_by_class.get(student.classname)|length }} Locked
-                                            </span>
-                                        {% endif %}
-                                        {% if student_id in viewed_student_ids %}
-                                            <span class="chip chip-info ml-8">Viewed</span>
-                                        {% endif %}
-                                    </td>
-                                    <td>{{ student.classname }}</td>
-                                    <td>{{ student.term }}</td>
-                                    <td>{{ student.stream }}</td>
-                                    <td>
-                                        {% if student.is_class_owner and student_id in stream_managed_students %}
-                                        <a href="{{ url_for('teacher_allocate_stream', student_id=student_id) }}" class="btn {% if student_id in pending_stream_students %}btn-warning{% else %}btn-secondary{% endif %} btn-xs">{% if student_id in pending_stream_students %}Allocate{% else %}Change Stream{% endif %}</a>
-                                        {% endif %}
-                                        {% if student.is_class_owner %}
-                                        <a href="{{ url_for('teacher_enter_scores', student_id=student_id) }}" class="btn btn-primary btn-xs">Scores</a>
-                                        {% elif student.matched_subjects %}
-                                            {% for subject in student.matched_subjects %}
-                                            <a href="{{ url_for('teacher_enter_subject_scores', student_id=student_id, subject=subject) }}" class="btn btn-primary btn-xs">{{ subject }}</a>
-                                            {% endfor %}
-                                        {% else %}
-                                        <span class="chip chip-muted">No assigned subject</span>
-                                        {% endif %}
-                                    </td>
-                                </tr>
-                            {% else %}
-                                <tr>
-                                    <td colspan="6" class="text-center">No students yet. Add students to get started.</td>
-                                </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
                 </div>
                 {% endif %}
-
-                {% if (not has_class_assignment) and active_tab in ['overview', 'score'] %}
-                <div class="card">
-                    <h2><i class="fas fa-bell"></i> Missing Score Alerts</h2>
-                    {% if teacher_missing_score_alerts %}
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Scope</th>
-                                <th>Class</th>
-                                <th>Subject</th>
-                                <th>Pending Students</th>
-                                <th>Details</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for alert in teacher_missing_score_alerts %}
-                            <tr class="student-row">
-                                <td>{{ 'Class Owner' if alert.scope == 'class_owner' else 'Subject Teacher' }}</td>
-                                <td>{{ alert.classname }}</td>
-                                <td>{{ alert.subject or '-' }}</td>
-                                <td>{{ alert.pending_students }}</td>
-                                <td>{{ alert.message }}</td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
-                    {% else %}
-                    <p class="success-note">No missing score alerts right now.</p>
-                    {% endif %}
-                </div>
                 {% if subject_submit_rows %}
                 <div class="card">
                     <h2><i class="fas fa-share-square"></i> Submit Subject Scores To Class Teacher</h2>
@@ -1001,91 +758,8 @@
         </div>
     </div>
     {% endif %}
-    <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260303c') }}"></script>
-    <script id="teacher-subject-assignment-map" type="application/json">{{ subject_assignment_form_map|tojson|safe }}</script>
-    <script>
-        (function () {
-            const classSel = document.getElementById('teacher-student-msg-class');
-            const subjSel = document.getElementById('teacher-student-msg-subject');
-            if (!classSel || !subjSel) return;
-            const mapNode = document.getElementById('teacher-subject-assignment-map');
-            const classMap = mapNode ? JSON.parse(mapNode.textContent || '{}') : {};
-            function renderSubjects() {
-                const cls = classSel.value || '';
-                const subjects = Array.isArray(classMap[cls]) ? classMap[cls] : [];
-                subjSel.innerHTML = '';
-                subjects.forEach(function (subject) {
-                    const opt = document.createElement('option');
-                    opt.value = subject;
-                    opt.textContent = subject;
-                    subjSel.appendChild(opt);
-                });
-            }
-            classSel.addEventListener('change', renderSubjects);
-            renderSubjects();
-        })();
-    </script>
-    <script>
-        (function () {
-            const allBtn = document.getElementById('view-filter-all');
-            const pendingBtn = document.getElementById('view-filter-pending');
-            const tbody = document.getElementById('recent-students-tbody');
-            if (!allBtn || !pendingBtn || !tbody) return;
-
-            const rows = Array.from(tbody.querySelectorAll('tr[data-viewed]'));
-            function applyFilter(mode) {
-                rows.forEach((row) => {
-                    const viewed = row.getAttribute('data-viewed') === '1';
-                    const show = (mode === 'all') || (mode === 'pending' && !viewed);
-                    row.style.display = show ? '' : 'none';
-                });
-                if (mode === 'pending') {
-                    pendingBtn.classList.remove('btn-secondary');
-                    pendingBtn.classList.add('btn-warning');
-                    allBtn.classList.remove('btn-primary');
-                    allBtn.classList.add('btn-secondary');
-                } else {
-                    allBtn.classList.remove('btn-secondary');
-                    allBtn.classList.add('btn-primary');
-                    pendingBtn.classList.remove('btn-primary');
-                    pendingBtn.classList.add('btn-warning');
-                }
-            }
-
-            allBtn.addEventListener('click', function () { applyFilter('all'); });
-            pendingBtn.addEventListener('click', function () { applyFilter('pending'); });
-            applyFilter('all');
-        })();
-    </script>
-    {% if unread_teacher_messages %}
-    <script>
-        (function () {
-            if (!('Notification' in window)) return;
-            const unread = Number(document.body.getAttribute('data-unread-teacher-messages') || '0');
-            if (!Number.isFinite(unread) || unread <= 0) return;
-            const accountMarker = document.body.getAttribute('data-teacher-account') || 'teacher';
-            const key = 'teacherUnreadNotifyShown:' + accountMarker;
-            const marker = String(unread);
-            if (localStorage.getItem(key) === marker) return;
-            if (Notification.permission === 'default') {
-                Notification.requestPermission().then(function (perm) {
-                    if (perm === 'granted') {
-                        new Notification('School Notifications', {
-                            body: 'You have ' + unread + ' unread teacher message(s).'
-                        });
-                        localStorage.setItem(key, marker);
-                    }
-                });
-            } else if (Notification.permission === 'granted') {
-                new Notification('School Notifications', {
-                    body: 'You have ' + unread + ' unread teacher message(s).'
-                });
-                localStorage.setItem(key, marker);
-            }
-        })();
-    </script>
-    {% endif %}
-    {% include 'shared/_ai_assistant_widget.html' %}
+    <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260306e') }}"></script>
 </body>
 </html>
+
 
