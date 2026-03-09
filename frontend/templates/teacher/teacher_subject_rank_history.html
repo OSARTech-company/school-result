@@ -1,3 +1,4 @@
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -7,6 +8,10 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260308f') }}">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .rank-table-wrap { width: 100%; overflow-x: auto; }
+        .trend-chart-wrap { width: 100%; max-width: 760px; margin-top: 14px; }
+    </style>
 </head>
 <body>
 <div class="app-shell topbar-layout">
@@ -73,28 +78,30 @@
     <div class="card">
         <h2>{{ summary.subject or '-' }} - {{ summary.classname or '-' }}</h2>
         <p class="muted">Ranked Students: {{ summary.ranked_students }}</p>
-        <table>
-            <thead>
-                <tr>
-                    <th>Position</th>
-                    <th>Student Name</th>
-                    <th>Student ID</th>
-                    <th>Subject Score</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for row in rank_rows %}
-                <tr>
-                    <td>{{ row.position }}</td>
-                    <td>{{ row.firstname or '-' }}</td>
-                    <td>{{ row.student_id }}</td>
-                    <td>{{ row.mark }}</td>
-                </tr>
-                {% else %}
-                <tr><td colspan="4">No published ranking data found for selected filters.</td></tr>
-                {% endfor %}
-            </tbody>
-        </table>
+        <div class="rank-table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Position</th>
+                        <th>Student Name</th>
+                        <th>Student ID</th>
+                        <th>Subject Score</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rank_rows %}
+                    <tr>
+                        <td>{{ row.position }}</td>
+                        <td>{{ row.firstname or '-' }}</td>
+                        <td>{{ row.student_id }}</td>
+                        <td>{{ row.mark }}</td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="4">No published ranking data found for selected filters.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
     </div>
 
     <div class="card">
@@ -113,7 +120,7 @@
             </select>
             <button class="btn btn-secondary" type="submit">Load Trend</button>
         </form>
-        <div style="max-width: 760px; margin-top: 14px;">
+        <div class="trend-chart-wrap">
             <canvas id="subjectTrendChart"></canvas>
         </div>
     </div>

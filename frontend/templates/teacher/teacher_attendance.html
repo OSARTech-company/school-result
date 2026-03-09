@@ -113,46 +113,48 @@
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <input type="hidden" name="classname" value="{{ selected_class }}">
                         <input type="hidden" name="attendance_date" value="{{ selected_date }}">
-                        <table class="attendance-table">
-                            <thead>
-                                <tr>
-                                    <th style="width: 9%;">S/N</th>
-                                    <th style="width: 22%;">Student ID</th>
-                                    <th style="width: 24%;">Name</th>
-                                    <th style="width: 16%;">Status</th>
-                                    <th style="width: 29%;">Note (optional)</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for sid, student in student_rows %}
-                                {% set row = attendance_map.get(sid, {}) %}
-                                {% set row_status = row.get('status', '') %}
-                                <tr>
-                                    <td>{{ loop.index }}</td>
-                                    <td>{{ sid }}</td>
-                                    <td>
-                                        {{ student.firstname }}
-                                        {% if row_status %}
-                                            <span class="pill pill-{{ row_status }} ml-8">{{ row_status|title }}</span>
-                                        {% endif %}
-                                    </td>
-                                    <td>
-                                        <select name="status_{{ sid }}" class="status-field" required>
-                                            <option value="">Select</option>
-                                            {% for key, label in status_options %}
-                                            <option value="{{ key }}" {% if row_status == key %}selected{% endif %}>{{ label }}</option>
-                                            {% endfor %}
-                                        </select>
-                                    </td>
-                                    <td>
-                                        <input type="text" name="note_{{ sid }}" maxlength="250" placeholder="Optional note" value="{{ row.get('note', '') }}">
-                                    </td>
-                                </tr>
-                                {% else %}
-                                <tr><td colspan="5" class="text-center">No students found for this class and term.</td></tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
+                        <div class="table-wrap">
+                            <table class="attendance-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 9%;">S/N</th>
+                                        <th style="width: 22%;">Student ID</th>
+                                        <th style="width: 24%;">Name</th>
+                                        <th style="width: 16%;">Status</th>
+                                        <th style="width: 29%;">Note (optional)</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for sid, student in student_rows %}
+                                    {% set row = attendance_map.get(sid, {}) %}
+                                    {% set row_status = row.get('status', '') %}
+                                    <tr>
+                                        <td>{{ loop.index }}</td>
+                                        <td>{{ sid }}</td>
+                                        <td>
+                                            {{ student.firstname }}
+                                            {% if row_status %}
+                                                <span class="pill pill-{{ row_status }} ml-8">{{ row_status|title }}</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            <select name="status_{{ sid }}" class="status-field" required>
+                                                <option value="">Select</option>
+                                                {% for key, label in status_options %}
+                                                <option value="{{ key }}" {% if row_status == key %}selected{% endif %}>{{ label }}</option>
+                                                {% endfor %}
+                                            </select>
+                                        </td>
+                                        <td>
+                                            <input type="text" name="note_{{ sid }}" maxlength="250" placeholder="Optional note" value="{{ row.get('note', '') }}">
+                                        </td>
+                                    </tr>
+                                    {% else %}
+                                    <tr><td colspan="5" class="text-center">No students found for this class and term.</td></tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
                         <div class="mt-12">
                             <button type="submit" id="saveAttendanceBtn" class="btn btn-primary"><i class="fas fa-save"></i> Save Attendance</button>
                         </div>

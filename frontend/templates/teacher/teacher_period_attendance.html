@@ -1,3 +1,4 @@
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -40,29 +41,31 @@
             <input type="hidden" name="subject" value="{{ selected_subject }}">
             <input type="hidden" name="period_label" value="{{ selected_period }}">
             <input type="hidden" name="attendance_date" value="{{ selected_date }}">
-            <table>
-                <thead><tr><th>ID</th><th>Name</th><th>Status</th><th>Note</th></tr></thead>
-                <tbody>
-                {% for sid, student in student_rows %}
-                    {% set row = attendance_map.get(sid, {}) %}
-                    <tr>
-                        <td>{{ sid }}</td>
-                        <td>{{ student.firstname }}</td>
-                        <td>
-                            <select name="status_{{ sid }}">
-                                <option value="">Select</option>
-                                {% for key, label in status_options %}
-                                <option value="{{ key }}" {% if row.get('status') == key %}selected{% endif %}>{{ label }}</option>
-                                {% endfor %}
-                            </select>
-                        </td>
-                        <td><input type="text" name="note_{{ sid }}" value="{{ row.get('note','') }}"></td>
-                    </tr>
-                {% else %}
-                    <tr><td colspan="4">No students found.</td></tr>
-                {% endfor %}
-                </tbody>
-            </table>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr><th>ID</th><th>Name</th><th>Status</th><th>Note</th></tr></thead>
+                    <tbody>
+                    {% for sid, student in student_rows %}
+                        {% set row = attendance_map.get(sid, {}) %}
+                        <tr>
+                            <td>{{ sid }}</td>
+                            <td>{{ student.firstname }}</td>
+                            <td>
+                                <select name="status_{{ sid }}">
+                                    <option value="">Select</option>
+                                    {% for key, label in status_options %}
+                                    <option value="{{ key }}" {% if row.get('status') == key %}selected{% endif %}>{{ label }}</option>
+                                    {% endfor %}
+                                </select>
+                            </td>
+                            <td><input type="text" name="note_{{ sid }}" value="{{ row.get('note','') }}"></td>
+                        </tr>
+                    {% else %}
+                        <tr><td colspan="4">No students found.</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
             <div class="mt-12"><button class="btn btn-primary" type="submit">Save Period Attendance</button></div>
         </form>
     </div>

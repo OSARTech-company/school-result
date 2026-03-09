@@ -181,7 +181,8 @@ app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=SESSION_TIMEOUT_MIN
 
 LOGIN_MAX_ATTEMPTS = 4
 LOGIN_LOCK_MINUTES = 15
-STARTUP_SCHEMA_VERSION = '2026-02-26.1'
+STARTUP_SCHEMA_VERSION = '2026-03-09.2'
+EXPECTED_ALEMBIC_HEAD = '006_parent_session_and_index_hardening'
 _DB_POOL = None
 _SCHOOL_LOGO_CACHE = {}
 _SCHOOL_LOGO_CACHE_TTL = 600
@@ -2932,6 +2933,30 @@ def require_roles(*allowed_roles, redirect_endpoint='login', message='You are no
         return _wrapped
     return _decorator
 
+ROLE_ROUTE_NAMESPACE_RULES = {
+    '/super-admin': {'super_admin'},
+    '/school-admin': {'school_admin'},
+    '/teacher': {'teacher'},
+    '/student': {'student'},
+    '/parent': {'parent'},
+}
+
+ROLE_SESSION_BINDING_ROLES = {'super_admin', 'school_admin', 'teacher', 'student'}
+
+def _role_home_endpoint(role):
+    role_name = (role or '').strip().lower()
+    if role_name == 'super_admin':
+        return 'super_admin_dashboard'
+    if role_name == 'school_admin':
+        return 'school_admin_dashboard'
+    if role_name == 'teacher':
+        return 'teacher_dashboard'
+    if role_name == 'student':
+        return 'student_dashboard'
+    if role_name == 'parent':
+        return 'parent_dashboard'
+    return 'login'
+
 def _env_int(name, default):
     try:
         return int(os.environ.get(name, default))
@@ -2941,10 +2966,12 @@ def _env_int(name, default):
 RATE_LIMIT_ENABLED = os.environ.get('RATE_LIMIT_ENABLED', '1').strip().lower() in ('1', 'true', 'yes')
 RATE_LIMIT_LOGIN_PER_MIN = max(1, _env_int('RATE_LIMIT_LOGIN_PER_MIN', 25))
 RATE_LIMIT_LOGIN_USER_PER_MIN = max(1, _env_int('RATE_LIMIT_LOGIN_USER_PER_MIN', 12))
+RATE_LIMIT_LOGIN_USER_GLOBAL_PER_5MIN = max(1, _env_int('RATE_LIMIT_LOGIN_USER_GLOBAL_PER_5MIN', 40))
 RATE_LIMIT_PARENT_PORTAL_PER_MIN = max(1, _env_int('RATE_LIMIT_PARENT_PORTAL_PER_MIN', 20))
 RATE_LIMIT_CHECK_RESULT_PER_MIN = max(1, _env_int('RATE_LIMIT_CHECK_RESULT_PER_MIN', 25))
 RATE_LIMIT_MUTATION_PER_MIN = max(1, _env_int('RATE_LIMIT_MUTATION_PER_MIN', 40))
 RATE_LIMIT_REPORT_ISSUE_PER_MIN = max(1, _env_int('RATE_LIMIT_REPORT_ISSUE_PER_MIN', 10))
+AUTH_BINDING_CHECK_INTERVAL_SECONDS = max(15, _env_int('AUTH_BINDING_CHECK_INTERVAL_SECONDS', 90))
 _RATE_LIMIT_EVENTS = {}
 _RATE_LIMIT_LOCK = threading.Lock()
 _ASSISTANT_PAGE_GUIDANCE_CACHE = {'mtime': None, 'map': {}}
@@ -4776,12 +4803,14 @@ def init_db():
     except Exception as exc:
         logging.warning("Could not enforce case-insensitive username uniqueness: %s", exc)
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)')
+    db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_users_school_role ON users(school_id, role)')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_students_school ON students(school_id)')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_students_school_archived ON students(school_id, is_archived)')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_students_student_id_lower ON students(LOWER(student_id))')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_students_class ON students(school_id, classname)')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_students_school_class_term ON students(school_id, classname, term)')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_students_school_term ON students(school_id, term)')
+    safe_exec_ignore('CREATE INDEX IF NOT EXISTS idx_students_parent_phone_lower ON students(LOWER(parent_phone))')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_teachers_school ON teachers(school_id)')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_teachers_school_archived ON teachers(school_id, is_archived)')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_teachers_school_user ON teachers(school_id, user_id)')
@@ -4793,6 +4822,8 @@ def init_db():
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_result_views_lookup_year ON result_views(school_id, term, academic_year, student_id)')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_login_attempts_lookup ON login_attempts(endpoint, username, ip_address)')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_login_attempts_locked_until ON login_attempts(locked_until)')
+    db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_reports_status_timestamp ON reports(status, timestamp)')
+    db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_reports_user_timestamp ON reports(user_id, timestamp)')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_login_audit_school_created ON login_audit_logs(school_id, created_at DESC)')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_login_audit_username_created ON login_audit_logs(username, created_at DESC)')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_timetable_school_class_day ON class_timetables(school_id, classname, day_of_week)')
@@ -4986,6 +5017,33 @@ def init_db():
     conn.commit()
     conn.close()
 
+def get_alembic_db_version():
+    """Return current Alembic DB revision, or empty string when unavailable."""
+    try:
+        with db_connection() as conn:
+            c = conn.cursor()
+            db_execute(c, "SELECT to_regclass('public.alembic_version')")
+            row = c.fetchone()
+            if not row or not row[0]:
+                return ''
+            db_execute(c, 'SELECT version_num FROM alembic_version LIMIT 1')
+            vrow = c.fetchone()
+            return str((vrow or [''])[0] or '').strip()
+    except Exception:
+        return ''
+
+def check_alembic_head_status(expected_head=EXPECTED_ALEMBIC_HEAD):
+    """Check whether DB Alembic version matches the expected app head."""
+    expected = (expected_head or '').strip()
+    current = get_alembic_db_version()
+    if not current:
+        return False, 'alembic_version table missing or unreadable'
+    if not expected:
+        return True, f'current={current}'
+    if current == expected:
+        return True, f'current={current}'
+    return False, f'current={current}, expected={expected}'
+
 def verify_required_db_guards():
     """Verify critical multi-school constraints/indexes are present."""
     strict = os.environ.get('DB_GUARDS_STRICT', '0').strip().lower() in ('1', 'true', 'yes')
@@ -4995,6 +5053,9 @@ def verify_required_db_guards():
         'uq_teacher_subject_assignment',
         'uq_class_term_assignment',
         'uq_result_publications',
+        'idx_users_school_role',
+        'idx_students_school_term',
+        'idx_reports_status_timestamp',
     }
     with db_connection() as conn:
         c = conn.cursor()
@@ -5092,6 +5153,15 @@ if RUN_STARTUP_DDL:
     init_db()
 else:
     logging.info("RUN_STARTUP_DDL disabled. Skipping init_db() at startup.")
+
+try:
+    alembic_ok, alembic_detail = check_alembic_head_status()
+    if alembic_ok:
+        logging.info("Alembic head status OK: %s", alembic_detail)
+    else:
+        logging.warning("Alembic head status mismatch: %s. Run `python migrate.py`.", alembic_detail)
+except Exception as exc:
+    logging.warning("Alembic head check failed: %s", exc)
 
 
 # Create super admin user (bootstrap-only, disabled for normal runtime startup).
@@ -7165,7 +7235,7 @@ def create_school_onboarding_request(
     source_ip='',
     user_agent='',
 ):
-    """Create one school onboarding request and return request reference."""
+    """Create one school onboarding request and return request metadata."""
     if not ensure_school_onboarding_schema():
         raise ValueError('Onboarding service is unavailable. Please try again.')
 
@@ -7274,12 +7344,28 @@ def create_school_onboarding_request(
                 now,
             ),
         )
+    send_result = {
+        'request_id': request_id,
+        'sent': 0,
+        'errors': [],
+        'masked_email': _mask_email_address(clean_school_email),
+        'expires_at': '',
+    }
     try:
-        issue_school_onboarding_email_verification_code(request_id, ttl_minutes=30, force_new=True)
-    except Exception:
+        send_result = issue_school_onboarding_email_verification_code(request_id, ttl_minutes=30, force_new=True)
+    except Exception as exc:
         # Keep the request stored; user can use resend flow if mail service is unavailable.
-        pass
-    return request_id
+        send_result = {
+            'request_id': request_id,
+            'sent': 0,
+            'errors': [str(exc)],
+            'masked_email': _mask_email_address(clean_school_email),
+            'expires_at': '',
+        }
+    return {
+        'request_id': request_id,
+        'verification_send_result': send_result,
+    }
 
 
 def issue_school_onboarding_email_verification_code(request_id, ttl_minutes=30, force_new=True):
@@ -18136,7 +18222,7 @@ def school_access_request():
                 proof_document_path = ''
                 try:
                     proof_document_path = save_school_onboarding_proof_document(request.files.get('proof_document'))
-                    request_id = create_school_onboarding_request(
+                    submission = create_school_onboarding_request(
                         school_name=school_name,
                         location=location,
                         phone=phone,
@@ -18151,15 +18237,28 @@ def school_access_request():
                         source_ip=get_client_ip(),
                         user_agent=(request.headers.get('User-Agent', '') or '').strip(),
                     )
-                    verification_note = (
-                        f'Verify school email with the code sent to {_mask_email_address(school_email)} '
-                        'to move this request to super-admin review queue.'
-                    )
-                    flash(
-                        f'Request submitted successfully. Reference: {request_id}. '
-                        f'{verification_note}',
-                        'success',
-                    )
+                    request_id = (submission or {}).get('request_id', '')
+                    verify_send = (submission or {}).get('verification_send_result') or {}
+                    masked_target = verify_send.get('masked_email') or _mask_email_address(school_email)
+                    if int(verify_send.get('sent', 0) or 0) > 0:
+                        verification_note = (
+                            f'Verify school email with the code sent to {masked_target} '
+                            'to move this request to super-admin review queue.'
+                        )
+                        flash(
+                            f'Request submitted successfully. Reference: {request_id}. '
+                            f'{verification_note}',
+                            'success',
+                        )
+                    else:
+                        err_text = '; '.join([str(e).strip() for e in (verify_send.get('errors') or []) if str(e).strip()])
+                        flash(
+                            f'Request submitted successfully. Reference: {request_id}. '
+                            'Verification email could not be delivered right now. '
+                            'Use "Resend Code" after SMTP is configured.'
+                            + (f' Detail: {err_text}' if err_text else ''),
+                            'warning',
+                        )
                     try:
                         notify_payload = {
                             'request_id': request_id,
@@ -18449,6 +18548,176 @@ def enforce_session_idle_timeout():
     session['last_activity_at'] = now.isoformat()
     return None
 
+@app.before_request
+def enforce_role_namespace_and_session_binding():
+    """Central access hardening for role route namespaces + session/user binding."""
+    endpoint = (request.endpoint or '').strip()
+    path = (request.path or '').strip()
+
+    if (
+        endpoint in {
+            'static',
+            'home',
+            'login',
+            'logout',
+            'menu',
+            'help',
+            'terms_privacy',
+            'school_access_request',
+            'super_admin_two_factor',
+            'manifest',
+            'service_worker',
+        }
+        or path.startswith('/static/')
+        or path in {'/manifest.webmanifest', '/sw.js'}
+    ):
+        return None
+
+    role = _current_role()
+
+    # Block cross-role namespace access early (e.g. teacher opening /school-admin/...).
+    for prefix, allowed_roles in ROLE_ROUTE_NAMESPACE_RULES.items():
+        if not (path == prefix or path.startswith(prefix + '/')):
+            continue
+        if not role:
+            flash('Please login to continue.', 'error')
+            return redirect(url_for('login'))
+        if role not in allowed_roles:
+            flash('Access denied for your role.', 'error')
+            return redirect(url_for('login'))
+        break
+
+    if role == 'parent':
+        parent_phone = normalize_parent_phone(session.get('parent_phone', ''))
+        student_keys_raw = session.get('parent_student_keys') or []
+        student_keys = {
+            str(k).strip()
+            for k in student_keys_raw
+            if isinstance(k, str) and '::' in str(k)
+        }
+        if not parent_phone or not student_keys:
+            session.clear()
+            flash('Parent session is invalid. Please login again.', 'error')
+            return redirect(url_for('login'))
+
+        now_ts = time.time()
+        try:
+            last_checked = float(session.get('_auth_binding_checked_at', 0) or 0)
+        except Exception:
+            last_checked = 0
+        if (now_ts - last_checked) < AUTH_BINDING_CHECK_INTERVAL_SECONDS:
+            return None
+
+        allowed_keys = _parent_allowed_student_keys()
+        if not allowed_keys:
+            session.clear()
+            flash('Parent access links are no longer valid. Please login again.', 'error')
+            return redirect(url_for('login'))
+
+        normalized_keys = sorted(allowed_keys, key=lambda v: v.lower())
+        session['parent_student_keys'] = normalized_keys
+        first_school = (normalized_keys[0].split('::', 1)[0] if normalized_keys and '::' in normalized_keys[0] else '').strip()
+        if first_school:
+            session['school_id'] = first_school
+        session['_auth_binding_checked_at'] = now_ts
+        return None
+
+    if role not in ROLE_SESSION_BINDING_ROLES:
+        return None
+
+    user_id = (session.get('user_id') or '').strip().lower()
+    if not user_id:
+        session.clear()
+        flash('Session is invalid. Please login again.', 'error')
+        return redirect(url_for('login'))
+
+    # Keep DB overhead bounded by checking at a short interval.
+    now_ts = time.time()
+    try:
+        last_checked = float(session.get('_auth_binding_checked_at', 0) or 0)
+    except Exception:
+        last_checked = 0
+    if (now_ts - last_checked) < AUTH_BINDING_CHECK_INTERVAL_SECONDS:
+        return None
+
+    user_row = get_user(user_id)
+    if not user_row:
+        session.clear()
+        flash('Account not found. Please login again.', 'error')
+        return redirect(url_for('login'))
+
+    user_role = ((user_row.get('role') or '').strip().lower() or 'student')
+    if user_role != role:
+        session.clear()
+        flash('Session role mismatch detected. Please login again.', 'error')
+        return redirect(url_for('login'))
+
+    if role != 'super_admin':
+        session_school_id = (session.get('school_id') or '').strip()
+        account_school_id = (user_row.get('school_id') or '').strip()
+        if (not session_school_id) or (not account_school_id) or session_school_id != account_school_id:
+            session.clear()
+            flash('Session school mismatch detected. Please login again.', 'error')
+            return redirect(url_for('login'))
+
+    session['_auth_binding_checked_at'] = now_ts
+    return None
+
+def _collect_request_school_ids():
+    keys = {'school_id', 'target_school_id', 'reporter_school_id', 'selected_school_id'}
+    values = set()
+    for key in keys:
+        raw = (request.form.get(key, '') or '').strip()
+        if raw:
+            values.add(raw)
+        raw_q = (request.args.get(key, '') or '').strip()
+        if raw_q:
+            values.add(raw_q)
+    try:
+        payload = request.get_json(silent=True)
+    except Exception:
+        payload = None
+    if isinstance(payload, dict):
+        for key in keys:
+            value = payload.get(key)
+            if isinstance(value, (str, int)):
+                clean = str(value).strip()
+                if clean:
+                    values.add(clean)
+    return values
+
+@app.before_request
+def enforce_school_mutation_scope():
+    """
+    Central tenant-scope guard for mutating requests.
+    If request payload carries school_id-like fields, they must match session school_id.
+    """
+    if (request.method or '').upper() not in {'POST', 'PUT', 'PATCH', 'DELETE'}:
+        return None
+    endpoint = (request.endpoint or '').strip()
+    path = (request.path or '').strip()
+    if endpoint in {'login', 'logout', 'school_access_request', 'super_admin_two_factor', 'manifest', 'service_worker'}:
+        return None
+    if path.startswith('/static/'):
+        return None
+
+    role = _current_role()
+    if role in {'', 'super_admin'}:
+        return None
+
+    session_school_id = (session.get('school_id') or '').strip()
+    # Internal role mutations should always be school-scoped for non-super admins.
+    if (path.startswith('/school-admin/') or path.startswith('/teacher/') or path.startswith('/student/') or path.startswith('/parent/')) and not session_school_id:
+        session.clear()
+        flash('Session school context is missing. Please login again.', 'error')
+        return redirect(url_for('login'))
+
+    req_school_ids = _collect_request_school_ids()
+    if req_school_ids and session_school_id and any(sid != session_school_id for sid in req_school_ids):
+        flash('Tenant scope violation detected. Action blocked.', 'error')
+        return redirect(url_for('login'))
+    return None
+
 def _teacher_has_class_or_subject_access(school_id, teacher_id, classname, subject='', term='', academic_year=''):
     cls = canonicalize_classname(classname or '')
     subj = normalize_subject_name(subject or '')
@@ -18538,6 +18807,14 @@ def apply_pwa_and_cache_headers(response):
         response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
         response.headers['Pragma'] = 'no-cache'
         response.headers['Expires'] = '0'
+    # Security baseline headers (kept compatible with existing templates and inline scripts).
+    response.headers.setdefault('X-Content-Type-Options', 'nosniff')
+    response.headers.setdefault('X-Frame-Options', 'SAMEORIGIN')
+    response.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
+    response.headers.setdefault('Permissions-Policy', 'geolocation=(), microphone=(), camera=()')
+    response.headers.setdefault('Cross-Origin-Opener-Policy', 'same-origin')
+    if app.config.get('SESSION_COOKIE_SECURE'):
+        response.headers.setdefault('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
     return response
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -18563,6 +18840,14 @@ def login():
             )
             if not user_allowed:
                 flash(f'Too many login attempts for this account. Try again in about {retry_after} second(s).', 'error')
+                return render_template('shared/login.html', terms_read=terms_read)
+            global_user_allowed, global_retry_after = _rate_limit_consume(
+                key=f'login_user_global:{username}',
+                limit=RATE_LIMIT_LOGIN_USER_GLOBAL_PER_5MIN,
+                window_seconds=300,
+            )
+            if not global_user_allowed:
+                flash(f'Account temporarily throttled due to repeated login attempts. Try again in about {global_retry_after} second(s).', 'error')
                 return render_template('shared/login.html', terms_read=terms_read)
         blocked, wait_minutes = is_login_blocked('login', username, client_ip)
         if blocked:
@@ -21064,6 +21349,12 @@ def school_admin_upload_principal_signature():
         flash(err, 'error')
         return redirect(url_for('school_admin_dashboard'))
     set_principal_signature(school_id, signature_data)
+    record_admin_action_audit(
+        school_id,
+        'upload_school_signature',
+        target_scope='school_signature',
+        payload={'leadership_title': normalize_school_leadership_title((school or {}).get('leadership_title', 'principal'))},
+    )
     flash(f'{leadership_label} signature saved successfully.', 'success')
     return redirect(url_for('school_admin_dashboard'))
 
@@ -21497,6 +21788,23 @@ def school_admin_settings():
                 ),
             )
             flash('Term/year changed: student working term moved forward, scores reset for new term, and teacher class assignments copied to the new term/year.', 'info')
+
+        record_admin_action_audit(
+            school_id,
+            'update_school_settings',
+            target_scope='school_settings',
+            payload={
+                'academic_year': new_year,
+                'current_term': new_term,
+                'calendar_term': calendar_target_term,
+                'calendar_year': calendar_target_year,
+                'changed_term_or_year': bool(changed_term_or_year),
+                'rollover_affected_rows': int(rollover_affected_rows or 0),
+                'leadership_title': leadership_title,
+                'max_tests': max_tests,
+                'test_score_max': test_score_max,
+            },
+        )
 
         if open_date and close_date:
             days_open = calculate_open_days_excluding_weekend(open_date, close_date, break_start, break_end)
@@ -24370,6 +24678,12 @@ def school_admin_toggle_operations():
     school_id = session.get('school_id')
     enabled = request.form.get('teacher_operations_enabled', '1').strip() == '1'
     set_teacher_operations_enabled(school_id, enabled)
+    record_admin_action_audit(
+        school_id,
+        'toggle_teacher_operations',
+        target_scope='teacher_operations',
+        payload={'teacher_operations_enabled': 1 if enabled else 0},
+    )
     state = 'ON' if enabled else 'OFF'
     flash(f'Teacher operations set to {state}.', 'success')
     return redirect(url_for('school_admin_dashboard'))
@@ -24393,6 +24707,12 @@ def school_admin_remove_teacher_assignment():
 
     try:
         remove_teacher_from_class(school_id, teacher_id, classname, term, academic_year)
+        record_admin_action_audit(
+            school_id,
+            'remove_teacher_class_assignment',
+            target_scope=f'{classname}:{teacher_id}',
+            payload={'term': term, 'academic_year': academic_year},
+        )
         flash(f'Removed assignment: {teacher_id} from {classname} ({term}).', 'success')
     except Exception as exc:
         flash(f'Error removing assignment: {str(exc)}', 'error')
@@ -24417,6 +24737,12 @@ def school_admin_remove_subject_teacher_assignment():
         return redirect(fallback_redirect)
     try:
         remove_teacher_subject_assignment(school_id, teacher_id, classname, subject, term, academic_year)
+        record_admin_action_audit(
+            school_id,
+            'remove_teacher_subject_assignment',
+            target_scope=f'{classname}:{subject}:{teacher_id}',
+            payload={'term': term, 'academic_year': academic_year},
+        )
         flash(f'Removed subject assignment: {subject} ({classname})', 'success')
     except Exception as exc:
         flash(f'Error removing subject assignment: {str(exc)}', 'error')
@@ -25889,6 +26215,12 @@ def teacher_publish_results():
         return redirect(url_for('teacher_attendance', classname=classname))
 
     submit_result_approval_request(school_id, classname, current_term, current_year, teacher_id)
+    record_admin_action_audit(
+        school_id,
+        'teacher_submit_results_for_approval',
+        target_scope=classname,
+        payload={'term': current_term, 'academic_year': current_year, 'teacher_id': teacher_id},
+    )
     flash(f'Results submitted for admin approval: {classname} ({current_term}).', 'success')
     return redirect(url_for('teacher_dashboard'))
 
@@ -25940,6 +26272,12 @@ def teacher_submit_to_class_teacher():
     if not mark_subject_score_submitted(school_id, teacher_id, classname, current_term, current_year):
         flash('Failed to save submission status. Ensure database schema is up to date.', 'error')
         return redirect(url_for('teacher_dashboard'))
+    record_admin_action_audit(
+        school_id,
+        'teacher_submit_subject_scores',
+        target_scope=classname,
+        payload={'term': current_term, 'academic_year': current_year, 'teacher_id': teacher_id},
+    )
     flash(f'Subject scores submitted to class teacher for {classname} ({current_term}).', 'success')
     return redirect(url_for('teacher_dashboard'))
 
@@ -30601,6 +30939,9 @@ def run_db_health_check(apply_fixes=False, include_startup_ddl=False):
     except Exception as exc:
         add_check('db_connection', False, f'Connection failed: {exc}')
         apply_fixes = False
+
+    alembic_ok, alembic_detail = check_alembic_head_status()
+    add_check('alembic_head_status', alembic_ok, alembic_detail)
 
     if apply_fixes:
         try:

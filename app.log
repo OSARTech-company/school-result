@@ -33127,3 +33127,331 @@ LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
 2026-03-09 07:17:48,107 - INFO - [startup] Student Score build: 2026-03-09 07:17:42 | debug=True | port=5000
 2026-03-09 07:17:48,226 - WARNING -  * Debugger is active!
 2026-03-09 07:17:48,235 - INFO -  * Debugger PIN: 541-365-780
+2026-03-09 16:43:41,190 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-09 16:43:41,624 - INFO -  * Restarting with stat
+2026-03-09 16:43:43,057 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-09 16:43:43,058 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-09 16:43:43,058 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-09 16:43:43,125 - INFO - [startup] Student Score build: 2026-03-09 16:43:40 | debug=True | port=5000
+2026-03-09 16:43:43,164 - WARNING -  * Debugger is active!
+2026-03-09 16:43:43,166 - INFO -  * Debugger PIN: 541-365-780
+2026-03-09 17:11:51,811 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-09 17:11:52,013 - INFO -  * Restarting with stat
+2026-03-09 17:11:53,809 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-09 17:11:53,809 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-09 17:11:53,810 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-09 17:11:53,902 - INFO - [startup] Student Score build: 2026-03-09 17:11:50 | debug=True | port=5000
+2026-03-09 17:11:53,955 - WARNING -  * Debugger is active!
+2026-03-09 17:11:53,959 - INFO -  * Debugger PIN: 541-365-780
+2026-03-09 17:12:20,726 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-09 17:12:21,085 - INFO -  * Restarting with stat
+2026-03-09 17:12:23,254 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-09 17:12:23,254 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-09 17:12:23,254 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-09 17:12:23,334 - INFO - [startup] Student Score build: 2026-03-09 17:12:20 | debug=True | port=5000
+2026-03-09 17:12:23,374 - WARNING -  * Debugger is active!
+2026-03-09 17:12:23,379 - INFO -  * Debugger PIN: 541-365-780
+2026-03-09 17:13:26,170 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-09 17:13:26,435 - INFO -  * Restarting with stat
+2026-03-09 17:13:28,567 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-09 17:13:28,568 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-09 17:13:28,568 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-09 17:13:28,682 - INFO - [startup] Student Score build: 2026-03-09 17:13:25 | debug=True | port=5000
+2026-03-09 17:13:28,738 - WARNING -  * Debugger is active!
+2026-03-09 17:13:28,744 - INFO -  * Debugger PIN: 541-365-780
+2026-03-09 17:13:37,370 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-09 17:13:37,654 - INFO -  * Restarting with stat
+2026-03-09 17:13:39,839 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-09 17:13:39,839 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-09 17:13:39,839 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-09 17:13:39,948 - INFO - [startup] Student Score build: 2026-03-09 17:13:37 | debug=True | port=5000
+2026-03-09 17:13:40,007 - WARNING -  * Debugger is active!
+2026-03-09 17:13:40,012 - INFO -  * Debugger PIN: 541-365-780
+2026-03-09 17:13:51,915 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-09 17:13:52,192 - INFO -  * Restarting with stat
+2026-03-09 17:13:54,353 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-09 17:13:54,354 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-09 17:13:54,354 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-09 17:13:54,467 - INFO - [startup] Student Score build: 2026-03-09 17:13:51 | debug=True | port=5000
+2026-03-09 17:13:54,524 - WARNING -  * Debugger is active!
+2026-03-09 17:13:54,530 - INFO -  * Debugger PIN: 541-365-780
+2026-03-09 17:14:05,365 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-09 17:14:05,612 - INFO -  * Restarting with stat
+2026-03-09 17:14:07,822 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-09 17:14:07,822 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-09 17:14:08,097 - WARNING - Alembic head status mismatch: current=004_archive_and_term_edit_locks, expected=005_access_security_hardening. Run `python migrate.py`.
+2026-03-09 17:14:08,097 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-09 17:14:08,191 - INFO - [startup] Student Score build: 2026-03-09 17:14:04 | debug=True | port=5000
+2026-03-09 17:14:08,234 - WARNING -  * Debugger is active!
+2026-03-09 17:14:08,239 - INFO -  * Debugger PIN: 541-365-780
+2026-03-09 17:14:22,283 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-09 17:14:22,539 - INFO -  * Restarting with stat
+2026-03-09 17:14:24,661 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-09 17:14:24,662 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-09 17:14:24,940 - WARNING - Alembic head status mismatch: current=004_archive_and_term_edit_locks, expected=005_access_security_hardening. Run `python migrate.py`.
+2026-03-09 17:14:24,940 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-09 17:14:25,036 - INFO - [startup] Student Score build: 2026-03-09 17:14:21 | debug=True | port=5000
+2026-03-09 17:14:25,078 - WARNING -  * Debugger is active!
+2026-03-09 17:14:25,083 - INFO -  * Debugger PIN: 541-365-780
+2026-03-09 17:15:51,296 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-09 17:15:51,579 - INFO -  * Restarting with stat
+2026-03-09 17:15:53,701 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-09 17:15:53,701 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-09 17:15:53,983 - WARNING - Alembic head status mismatch: current=004_archive_and_term_edit_locks, expected=005_access_security_hardening. Run `python migrate.py`.
+2026-03-09 17:15:53,983 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-09 17:15:54,090 - INFO - [startup] Student Score build: 2026-03-09 17:15:50 | debug=True | port=5000
+2026-03-09 17:15:54,133 - WARNING -  * Debugger is active!
+2026-03-09 17:15:54,138 - INFO -  * Debugger PIN: 541-365-780
+2026-03-09 17:16:12,396 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-09 17:16:12,652 - INFO -  * Restarting with stat
+2026-03-09 17:16:14,801 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-09 17:16:14,801 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-09 17:16:15,172 - WARNING - Alembic head status mismatch: current=004_archive_and_term_edit_locks, expected=005_access_security_hardening. Run `python migrate.py`.
+2026-03-09 17:16:15,172 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-09 17:16:15,295 - INFO - [startup] Student Score build: 2026-03-09 17:16:11 | debug=True | port=5000
+2026-03-09 17:16:15,343 - WARNING -  * Debugger is active!
+2026-03-09 17:16:15,348 - INFO -  * Debugger PIN: 541-365-780
+2026-03-09 17:30:39,775 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-09 17:30:40,078 - INFO -  * Restarting with stat
+2026-03-09 17:30:42,737 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-09 17:30:42,738 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-09 17:30:43,134 - WARNING - Alembic head status mismatch: current=004_archive_and_term_edit_locks, expected=006_parent_session_and_index_hardening. Run `python migrate.py`.
+2026-03-09 17:30:43,135 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-09 17:30:43,267 - INFO - [startup] Student Score build: 2026-03-09 17:30:39 | debug=True | port=5000
+2026-03-09 17:30:43,321 - WARNING -  * Debugger is active!
+2026-03-09 17:30:43,326 - INFO -  * Debugger PIN: 541-365-780
+2026-03-09 17:31:03,283 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-09 17:31:03,605 - INFO -  * Restarting with stat
+2026-03-09 17:31:05,795 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-09 17:31:05,796 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-09 17:31:06,192 - WARNING - Alembic head status mismatch: current=004_archive_and_term_edit_locks, expected=006_parent_session_and_index_hardening. Run `python migrate.py`.
+2026-03-09 17:31:06,192 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-09 17:31:06,316 - INFO - [startup] Student Score build: 2026-03-09 17:31:02 | debug=True | port=5000
+2026-03-09 17:31:06,373 - WARNING -  * Debugger is active!
+2026-03-09 17:31:06,378 - INFO -  * Debugger PIN: 541-365-780
+2026-03-09 17:31:19,022 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-09 17:31:19,453 - INFO -  * Restarting with stat
+2026-03-09 17:31:21,858 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-09 17:31:21,858 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-09 17:31:22,115 - WARNING - Alembic head status mismatch: current=004_archive_and_term_edit_locks, expected=006_parent_session_and_index_hardening. Run `python migrate.py`.
+2026-03-09 17:31:22,116 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-09 17:31:22,221 - INFO - [startup] Student Score build: 2026-03-09 17:31:18 | debug=True | port=5000
+2026-03-09 17:31:22,271 - WARNING -  * Debugger is active!
+2026-03-09 17:31:22,276 - INFO -  * Debugger PIN: 541-365-780
+2026-03-09 17:31:31,787 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-09 17:31:32,058 - INFO -  * Restarting with stat
+2026-03-09 17:31:34,668 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-09 17:31:34,668 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-09 17:31:35,086 - WARNING - Alembic head status mismatch: current=004_archive_and_term_edit_locks, expected=006_parent_session_and_index_hardening. Run `python migrate.py`.
+2026-03-09 17:31:35,086 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-09 17:31:35,199 - INFO - [startup] Student Score build: 2026-03-09 17:31:31 | debug=True | port=5000
+2026-03-09 17:31:35,251 - WARNING -  * Debugger is active!
+2026-03-09 17:31:35,256 - INFO -  * Debugger PIN: 541-365-780
+2026-03-09 17:32:18,083 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\migrations\\versions\\006_parent_session_and_index_hardening.py', reloading
+2026-03-09 17:32:18,280 - INFO -  * Restarting with stat
+2026-03-09 17:32:20,414 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-09 17:32:20,414 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-09 17:32:20,678 - WARNING - Alembic head status mismatch: current=004_archive_and_term_edit_locks, expected=006_parent_session_and_index_hardening. Run `python migrate.py`.
+2026-03-09 17:32:20,678 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-09 17:32:20,785 - INFO - [startup] Student Score build: 2026-03-09 17:31:31 | debug=True | port=5000
+2026-03-09 17:32:20,837 - WARNING -  * Debugger is active!
+2026-03-09 17:32:20,842 - INFO -  * Debugger PIN: 541-365-780
+2026-03-09 17:36:10,010 - INFO - 127.0.0.1 - - [09/Mar/2026 17:36:10] "[32mGET /teacher/notifications HTTP/1.1[0m" 302 -
+2026-03-09 17:36:10,357 - INFO - 127.0.0.1 - - [09/Mar/2026 17:36:10] "GET /login HTTP/1.1" 200 -
+2026-03-09 17:36:12,828 - INFO - 127.0.0.1 - - [09/Mar/2026 17:36:12] "[36mGET /sw.js HTTP/1.1[0m" 304 -
+2026-03-09 17:36:16,865 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-09 17:36:16,875 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-09 17:36:16,948 - INFO - 127.0.0.1 - - [09/Mar/2026 17:36:16] "[32mPOST /login HTTP/1.1[0m" 302 -
+2026-03-09 17:36:17,036 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-09 17:36:18,309 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-09 17:36:18,712 - INFO - 127.0.0.1 - - [09/Mar/2026 17:36:18] "GET /teacher HTTP/1.1" 200 -
+2026-03-09 17:36:19,942 - INFO - 127.0.0.1 - - [09/Mar/2026 17:36:19] "[32mGET /school-logo/3?v=2026-03-07+22:22:25.986765 HTTP/1.1[0m" 302 -
+2026-03-09 17:36:20,626 - INFO - 127.0.0.1 - - [09/Mar/2026 17:36:20] "[36mGET /sw.js HTTP/1.1[0m" 304 -
+2026-03-09 17:36:22,143 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-09 17:36:22,249 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-09 17:36:22,343 - INFO - 127.0.0.1 - - [09/Mar/2026 17:36:22] "GET /teacher/notifications HTTP/1.1" 200 -
+2026-03-09 17:36:24,119 - INFO - 127.0.0.1 - - [09/Mar/2026 17:36:24] "[36mGET /sw.js HTTP/1.1[0m" 304 -
+2026-03-09 17:36:31,975 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-09 17:36:32,120 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-09 17:36:32,223 - INFO - 127.0.0.1 - - [09/Mar/2026 17:36:32] "GET /teacher?tab=score&score_class=SS2 HTTP/1.1" 200 -
+2026-03-09 17:36:33,979 - INFO - 127.0.0.1 - - [09/Mar/2026 17:36:33] "[36mGET /sw.js HTTP/1.1[0m" 304 -
+2026-03-09 17:36:48,169 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-09 17:36:48,312 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-09 17:36:48,416 - INFO - 127.0.0.1 - - [09/Mar/2026 17:36:48] "GET /teacher HTTP/1.1" 200 -
+2026-03-09 17:36:50,176 - INFO - 127.0.0.1 - - [09/Mar/2026 17:36:50] "[36mGET /sw.js HTTP/1.1[0m" 304 -
+2026-03-09 17:37:00,718 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-09 17:37:00,861 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-09 17:37:00,962 - INFO - 127.0.0.1 - - [09/Mar/2026 17:37:00] "GET /teacher?tab=score HTTP/1.1" 200 -
+2026-03-09 17:37:02,718 - INFO - 127.0.0.1 - - [09/Mar/2026 17:37:02] "[36mGET /sw.js HTTP/1.1[0m" 304 -
+2026-03-09 17:37:12,255 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-09 17:37:12,400 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-09 17:37:12,500 - INFO - 127.0.0.1 - - [09/Mar/2026 17:37:12] "GET /teacher HTTP/1.1" 200 -
+2026-03-09 17:37:14,280 - INFO - 127.0.0.1 - - [09/Mar/2026 17:37:14] "[36mGET /sw.js HTTP/1.1[0m" 304 -
+2026-03-09 17:37:16,922 - INFO - 127.0.0.1 - - [09/Mar/2026 17:37:16] "[32mPOST /logout HTTP/1.1[0m" 302 -
+2026-03-09 17:37:16,937 - INFO - 127.0.0.1 - - [09/Mar/2026 17:37:16] "GET / HTTP/1.1" 200 -
+2026-03-09 17:37:18,642 - INFO - 127.0.0.1 - - [09/Mar/2026 17:37:18] "[36mGET /sw.js HTTP/1.1[0m" 304 -
+2026-03-09 17:37:23,061 - INFO - 127.0.0.1 - - [09/Mar/2026 17:37:23] "POST /login HTTP/1.1" 200 -
+2026-03-09 17:37:24,785 - INFO - 127.0.0.1 - - [09/Mar/2026 17:37:24] "[36mGET /sw.js HTTP/1.1[0m" 304 -
+2026-03-09 17:37:34,715 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-09 17:37:34,719 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-09 17:37:34,767 - INFO - 127.0.0.1 - - [09/Mar/2026 17:37:34] "[32mPOST /login HTTP/1.1[0m" 302 -
+2026-03-09 17:37:34,825 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-09 17:37:34,960 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-09 17:37:35,059 - INFO - 127.0.0.1 - - [09/Mar/2026 17:37:35] "GET /teacher HTTP/1.1" 200 -
+2026-03-09 17:37:37,079 - INFO - 127.0.0.1 - - [09/Mar/2026 17:37:37] "[36mGET /sw.js HTTP/1.1[0m" 304 -
+2026-03-09 17:37:53,110 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-09 17:37:53,159 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-09 17:37:53,237 - INFO - 127.0.0.1 - - [09/Mar/2026 17:37:53] "GET /teacher/notifications HTTP/1.1" 200 -
+2026-03-09 17:37:55,002 - INFO - 127.0.0.1 - - [09/Mar/2026 17:37:55] "[36mGET /sw.js HTTP/1.1[0m" 304 -
+2026-03-09 17:39:00,676 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-09 17:39:00,957 - INFO -  * Restarting with stat
+2026-03-09 17:39:03,109 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-09 17:39:03,109 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-09 17:39:03,494 - WARNING - Alembic head status mismatch: current=004_archive_and_term_edit_locks, expected=006_parent_session_and_index_hardening. Run `python migrate.py`.
+2026-03-09 17:39:03,494 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-09 17:39:03,618 - INFO - [startup] Student Score build: 2026-03-09 17:38:59 | debug=True | port=5000
+2026-03-09 17:39:03,658 - WARNING -  * Debugger is active!
+2026-03-09 17:39:03,661 - INFO -  * Debugger PIN: 541-365-780
+2026-03-09 17:39:15,595 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-09 17:39:15,879 - INFO -  * Restarting with stat
+2026-03-09 17:39:18,237 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-09 17:39:18,237 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-09 17:39:18,540 - WARNING - Alembic head status mismatch: current=004_archive_and_term_edit_locks, expected=006_parent_session_and_index_hardening. Run `python migrate.py`.
+2026-03-09 17:39:18,540 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-09 17:39:18,663 - INFO - [startup] Student Score build: 2026-03-09 17:39:15 | debug=True | port=5000
+2026-03-09 17:39:18,708 - WARNING -  * Debugger is active!
+2026-03-09 17:39:18,713 - INFO -  * Debugger PIN: 541-365-780
+2026-03-09 17:39:30,605 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-09 17:39:30,874 - INFO -  * Restarting with stat
+2026-03-09 17:39:32,957 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-09 17:39:32,957 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-09 17:39:33,236 - WARNING - Alembic head status mismatch: current=004_archive_and_term_edit_locks, expected=006_parent_session_and_index_hardening. Run `python migrate.py`.
+2026-03-09 17:39:33,236 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-09 17:39:33,345 - INFO - [startup] Student Score build: 2026-03-09 17:39:30 | debug=True | port=5000
+2026-03-09 17:39:33,387 - WARNING -  * Debugger is active!
+2026-03-09 17:39:33,393 - INFO -  * Debugger PIN: 541-365-780
+2026-03-09 17:39:49,544 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-09 17:39:49,822 - INFO -  * Restarting with stat
+2026-03-09 17:39:51,826 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-09 17:39:51,827 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-09 17:39:52,110 - WARNING - Alembic head status mismatch: current=004_archive_and_term_edit_locks, expected=006_parent_session_and_index_hardening. Run `python migrate.py`.
+2026-03-09 17:39:52,110 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-09 17:39:52,215 - INFO - [startup] Student Score build: 2026-03-09 17:39:48 | debug=True | port=5000
+2026-03-09 17:39:52,260 - WARNING -  * Debugger is active!
+2026-03-09 17:39:52,265 - INFO -  * Debugger PIN: 541-365-780
+2026-03-09 17:40:12,746 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-09 17:40:13,009 - INFO -  * Restarting with stat
+2026-03-09 17:40:15,256 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-09 17:40:15,256 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-09 17:40:15,560 - WARNING - Alembic head status mismatch: current=004_archive_and_term_edit_locks, expected=006_parent_session_and_index_hardening. Run `python migrate.py`.
+2026-03-09 17:40:15,561 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-09 17:40:15,717 - INFO - [startup] Student Score build: 2026-03-09 17:40:12 | debug=True | port=5000
+2026-03-09 17:40:15,764 - WARNING -  * Debugger is active!
+2026-03-09 17:40:15,770 - INFO -  * Debugger PIN: 541-365-780
+2026-03-09 17:41:12,681 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\test_security_audit_pack.py', reloading
+2026-03-09 17:41:12,955 - INFO -  * Restarting with stat
+2026-03-09 17:41:15,060 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-09 17:41:15,060 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-09 17:41:15,367 - WARNING - Alembic head status mismatch: current=004_archive_and_term_edit_locks, expected=006_parent_session_and_index_hardening. Run `python migrate.py`.
+2026-03-09 17:41:15,367 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-09 17:41:15,487 - INFO - [startup] Student Score build: 2026-03-09 17:40:12 | debug=True | port=5000
+2026-03-09 17:41:15,533 - WARNING -  * Debugger is active!
+2026-03-09 17:41:15,537 - INFO -  * Debugger PIN: 541-365-780
+2026-03-09 17:42:32,564 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\test_security_audit_pack.py', reloading
+2026-03-09 17:42:32,829 - INFO -  * Restarting with stat
+2026-03-09 17:42:34,941 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-09 17:42:34,941 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-09 17:42:35,267 - WARNING - Alembic head status mismatch: current=004_archive_and_term_edit_locks, expected=006_parent_session_and_index_hardening. Run `python migrate.py`.
+2026-03-09 17:42:35,267 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-09 17:42:35,358 - INFO - [startup] Student Score build: 2026-03-09 17:40:12 | debug=True | port=5000
+2026-03-09 17:42:35,400 - WARNING -  * Debugger is active!
+2026-03-09 17:42:35,404 - INFO -  * Debugger PIN: 541-365-780
+2026-03-09 19:20:40,745 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-09 19:20:41,202 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-09 19:20:41,444 - INFO - 127.0.0.1 - - [09/Mar/2026 19:20:41] "GET /teacher HTTP/1.1" 200 -
+2026-03-09 19:20:42,172 - INFO - 127.0.0.1 - - [09/Mar/2026 19:20:42] "[32mGET /school-logo/3?v=2026-03-07+22:22:25.986765 HTTP/1.1[0m" 302 -
+2026-03-09 19:20:43,436 - INFO - 127.0.0.1 - - [09/Mar/2026 19:20:43] "[36mGET /sw.js HTTP/1.1[0m" 304 -
+2026-03-09 19:47:25,983 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-09 19:47:26,954 - INFO -  * Restarting with stat
+2026-03-09 19:47:31,740 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-09 19:47:31,740 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-09 19:47:32,551 - WARNING - Alembic head status mismatch: current=004_archive_and_term_edit_locks, expected=006_parent_session_and_index_hardening. Run `python migrate.py`.
+2026-03-09 19:47:32,552 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-09 19:47:32,692 - INFO - [startup] Student Score build: 2026-03-09 19:47:25 | debug=True | port=5000
+2026-03-09 19:47:32,851 - WARNING -  * Debugger is active!
+2026-03-09 19:47:32,858 - INFO -  * Debugger PIN: 541-365-780
+2026-03-09 19:48:01,748 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-09 19:48:02,136 - INFO -  * Restarting with stat
+2026-03-09 19:48:05,034 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-09 19:48:05,034 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-09 19:48:05,316 - WARNING - Alembic head status mismatch: current=004_archive_and_term_edit_locks, expected=006_parent_session_and_index_hardening. Run `python migrate.py`.
+2026-03-09 19:48:05,316 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-09 19:48:05,442 - INFO - [startup] Student Score build: 2026-03-09 19:48:01 | debug=True | port=5000
+2026-03-09 19:48:05,495 - WARNING -  * Debugger is active!
+2026-03-09 19:48:05,500 - INFO -  * Debugger PIN: 541-365-780
