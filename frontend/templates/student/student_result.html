@@ -1031,8 +1031,9 @@
         </div>
         {% endif %}
 
+        {% set leadership_label = 'Head Teacher' if school and school.leadership_title == 'head_teacher' else 'Principal' %}
         <div class="teacher-comment">
-            <div class="comment-title">Principal's Comment</div>
+            <div class="comment-title">{{ leadership_label }}'s Comment</div>
             <div class="comment-body">
                 {% if (student.principal_comment or '')|trim %}
                     {{ (student.principal_comment or '')|trim }}
@@ -1061,11 +1062,11 @@
 
             <div class="signature-box">
                 {% if principal_signature %}
-                <img src="{{ principal_signature }}" alt="Principal Signature" class="signature-image">
+                <img src="{{ principal_signature }}" alt="{{ leadership_label }} Signature" class="signature-image">
                 {% endif %}
                 <div class="signature-line"></div>
                 <div class="signature-name">{{ principal_name or '' }}</div>
-                <div class="signature-title">(Principal)</div>
+                <div class="signature-title">({{ leadership_label }})</div>
             </div>
 
             <div class="signature-box">

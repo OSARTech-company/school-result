@@ -33035,3 +33035,95 @@ LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
 2026-03-09 04:03:18,924 - INFO - 127.0.0.1 - - [09/Mar/2026 04:03:18] "GET /teacher HTTP/1.1" 200 -
 2026-03-09 04:03:19,986 - INFO - 127.0.0.1 - - [09/Mar/2026 04:03:19] "[32mGET /school-logo/3?v=2026-03-07+22:22:25.986765 HTTP/1.1[0m" 302 -
 2026-03-09 04:03:21,223 - INFO - 127.0.0.1 - - [09/Mar/2026 04:03:21] "[36mGET /sw.js HTTP/1.1[0m" 304 -
+2026-03-09 04:03:58,530 - INFO - 127.0.0.1 - - [09/Mar/2026 04:03:58] "[32mPOST /teacher/update-profile HTTP/1.1[0m" 302 -
+2026-03-09 04:03:58,844 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-09 04:03:59,038 - ERROR - Database Error: column "profile_image" does not exist
+LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
+                                                             ^
+
+2026-03-09 04:03:59,164 - INFO - 127.0.0.1 - - [09/Mar/2026 04:03:59] "GET /teacher HTTP/1.1" 200 -
+2026-03-09 04:04:00,531 - INFO - 127.0.0.1 - - [09/Mar/2026 04:04:00] "[32mGET /school-logo/3?v=2026-03-07+22:22:25.986765 HTTP/1.1[0m" 302 -
+2026-03-09 04:04:01,038 - INFO - 127.0.0.1 - - [09/Mar/2026 04:04:01] "[36mGET /sw.js HTTP/1.1[0m" 304 -
+2026-03-09 07:12:36,738 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-09 07:12:37,390 - INFO -  * Restarting with stat
+2026-03-09 07:12:42,743 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-09 07:12:42,744 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-09 07:12:42,744 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-09 07:12:42,892 - INFO - [startup] Student Score build: 2026-03-09 07:12:35 | debug=True | port=5000
+2026-03-09 07:12:43,277 - WARNING -  * Debugger is active!
+2026-03-09 07:12:43,283 - INFO -  * Debugger PIN: 541-365-780
+2026-03-09 07:12:45,615 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-09 07:12:46,088 - INFO -  * Restarting with stat
+2026-03-09 07:12:49,762 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-09 07:12:49,763 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-09 07:12:49,763 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-09 07:12:49,942 - INFO - [startup] Student Score build: 2026-03-09 07:12:45 | debug=True | port=5000
+2026-03-09 07:12:50,038 - WARNING -  * Debugger is active!
+2026-03-09 07:12:50,047 - INFO -  * Debugger PIN: 541-365-780
+2026-03-09 07:13:02,180 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-09 07:13:02,556 - INFO -  * Restarting with stat
+2026-03-09 07:13:05,731 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-09 07:13:05,731 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-09 07:13:05,731 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-09 07:13:05,901 - INFO - [startup] Student Score build: 2026-03-09 07:13:00 | debug=True | port=5000
+2026-03-09 07:13:05,977 - WARNING -  * Debugger is active!
+2026-03-09 07:13:05,984 - INFO -  * Debugger PIN: 541-365-780
+2026-03-09 07:13:16,788 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-09 07:13:17,060 - INFO -  * Restarting with stat
+2026-03-09 07:13:19,461 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-09 07:13:19,461 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-09 07:13:19,461 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-09 07:13:19,568 - INFO - [startup] Student Score build: 2026-03-09 07:13:15 | debug=True | port=5000
+2026-03-09 07:13:19,636 - WARNING -  * Debugger is active!
+2026-03-09 07:13:19,643 - INFO -  * Debugger PIN: 541-365-780
+2026-03-09 07:13:30,425 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-09 07:13:31,008 - INFO -  * Restarting with stat
+2026-03-09 07:13:33,468 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-09 07:13:33,468 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-09 07:13:33,469 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-09 07:13:33,597 - INFO - [startup] Student Score build: 2026-03-09 07:13:30 | debug=True | port=5000
+2026-03-09 07:13:33,664 - WARNING -  * Debugger is active!
+2026-03-09 07:13:33,670 - INFO -  * Debugger PIN: 541-365-780
+2026-03-09 07:13:46,849 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-09 07:13:47,270 - INFO -  * Restarting with stat
+2026-03-09 07:13:49,811 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-09 07:13:49,811 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-09 07:13:49,812 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-09 07:13:49,918 - INFO - [startup] Student Score build: 2026-03-09 07:13:46 | debug=True | port=5000
+2026-03-09 07:13:49,984 - WARNING -  * Debugger is active!
+2026-03-09 07:13:49,991 - INFO -  * Debugger PIN: 541-365-780
+2026-03-09 07:13:58,563 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-09 07:13:58,796 - INFO -  * Restarting with stat
+2026-03-09 07:14:01,289 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-09 07:14:01,289 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-09 07:14:01,289 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-09 07:14:01,420 - INFO - [startup] Student Score build: 2026-03-09 07:13:57 | debug=True | port=5000
+2026-03-09 07:14:01,492 - WARNING -  * Debugger is active!
+2026-03-09 07:14:01,499 - INFO -  * Debugger PIN: 541-365-780
+2026-03-09 07:14:10,143 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-09 07:14:10,352 - INFO -  * Restarting with stat
+2026-03-09 07:14:12,662 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-09 07:14:12,662 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-09 07:14:12,662 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-09 07:14:12,794 - INFO - [startup] Student Score build: 2026-03-09 07:14:09 | debug=True | port=5000
+2026-03-09 07:14:12,871 - WARNING -  * Debugger is active!
+2026-03-09 07:14:12,878 - INFO -  * Debugger PIN: 541-365-780
+2026-03-09 07:17:23,775 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-09 07:17:24,029 - INFO -  * Restarting with stat
+2026-03-09 07:17:26,521 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-09 07:17:26,521 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-09 07:17:26,521 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-09 07:17:26,628 - INFO - [startup] Student Score build: 2026-03-09 07:17:22 | debug=True | port=5000
+2026-03-09 07:17:26,695 - WARNING -  * Debugger is active!
+2026-03-09 07:17:26,702 - INFO -  * Debugger PIN: 541-365-780
+2026-03-09 07:17:43,058 - INFO -  * Detected change in 'c:\\Aka\\School_Result\\student_scor.py', reloading
+2026-03-09 07:17:43,640 - INFO -  * Restarting with stat
+2026-03-09 07:17:47,897 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-09 07:17:47,897 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-09 07:17:47,897 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-09 07:17:48,107 - INFO - [startup] Student Score build: 2026-03-09 07:17:42 | debug=True | port=5000
+2026-03-09 07:17:48,226 - WARNING -  * Debugger is active!
+2026-03-09 07:17:48,235 - INFO -  * Debugger PIN: 541-365-780

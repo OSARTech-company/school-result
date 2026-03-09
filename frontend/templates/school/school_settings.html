@@ -53,6 +53,16 @@
                     <label for="school_name">School Name:</label>
                     <input type="text" id="school_name" name="school_name" value="{{ school.school_name if school else '' }}" required>
                 </div>
+
+                <div class="form-group">
+                    <label for="leadership_title">School Leadership Title:</label>
+                    {% set leadership_title_value = (school.leadership_title if school and school.leadership_title else 'principal') %}
+                    <select id="leadership_title" name="leadership_title">
+                        <option value="principal" {% if leadership_title_value != 'head_teacher' %}selected{% endif %}>Principal</option>
+                        <option value="head_teacher" {% if leadership_title_value == 'head_teacher' %}selected{% endif %}>Head Teacher</option>
+                    </select>
+                    <small style="color:#5a6c7d; display:block; margin-top:6px;">This updates result comment and signature labels across your school portal.</small>
+                </div>
                 
                 <div class="form-group">
                     <label for="school_logo">School Logo URL:</label>

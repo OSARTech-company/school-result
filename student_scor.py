@@ -455,7 +455,7 @@ APP_ASSISTANT_INDIRECT_ALIASES = {
         (('promotion audit', 'promote log', 'promotion history'), 'promotion audit promote students'),
         (('term calendar', 'school calendar', 'event calendar', 'program schedule'), 'term programs reminders export ics'),
         (('result complaint', 'result issue', 'score complaint'), 'result disputes correction issue'),
-        (('signature upload', 'principal sign', 'principal signature'), 'upload principal signature publish results'),
+        (('signature upload', 'principal sign', 'principal signature', 'head teacher sign', 'head teacher signature'), 'upload principal signature publish results'),
         (('bulk import', 'bulk export', 'csv import', 'data migration'), 'bulk tools import export csv backup restore'),
         (('score history', 'mark history', 'change log score'), 'score audit revert score'),
         (('lock edit', 'unlock term', 'relock term'), 'unlock term edit relock term publish results'),
@@ -648,10 +648,10 @@ APP_ASSISTANT_ROLE_KB = {
         },
         {
             'topic': 'principal_signature',
-            'title': 'Principal signature',
-            'summary': 'Principal signature upload is required for workflows that rely on signed/published result artifacts.',
-            'steps': ['Open dashboard signature section.', 'Upload valid principal signature image.', 'Verify signature appears in relevant outputs.'],
-            'keywords': ['principal signature', 'upload signature', '/school-admin/upload-principal-signature'],
+            'title': 'School leadership signature',
+            'summary': 'Leadership signature upload is required for workflows that rely on signed/published result artifacts.',
+            'steps': ['Open dashboard signature section.', 'Upload valid leadership signature image.', 'Verify signature appears in relevant outputs.'],
+            'keywords': ['principal signature', 'head teacher signature', 'upload signature', '/school-admin/upload-principal-signature'],
         },
     ],
     'teacher': [
@@ -910,10 +910,10 @@ APP_ASSISTANT_MICRO_FAQ = {
             'next_question': 'Do you want pre-publish checklist steps?',
         },
         {
-            'aliases': ['principal signature', 'upload principal signature', 'signature upload', 'principal sign', 'school signature'],
-            'where': 'Open School Admin Dashboard and go to the Principal Signature upload section.',
-            'use': 'Principal Signature is used on signed/published result outputs and approval-related documents.',
-            'steps': ['Open dashboard principal signature card/section.', 'Choose image file and upload.', 'Verify preview appears before publishing results.'],
+            'aliases': ['principal signature', 'head teacher signature', 'upload principal signature', 'upload head teacher signature', 'signature upload', 'principal sign', 'school signature'],
+            'where': 'Open School Admin Dashboard and go to the leadership signature upload section.',
+            'use': 'Leadership Signature is used on signed/published result outputs and approval-related documents.',
+            'steps': ['Open dashboard signature card/section.', 'Choose image file and upload.', 'Verify preview appears before publishing results.'],
             'next_question': 'Do you want the recommended signature image size/format?',
         },
         {
@@ -3993,6 +3993,7 @@ def init_db():
                         plan_features_json TEXT DEFAULT '{}',
                         access_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         access_updated_by TEXT DEFAULT '',
+                        leadership_title TEXT DEFAULT 'principal',
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )""")
     safe_exec_ignore('ALTER TABLE schools ADD COLUMN operations_enabled INTEGER DEFAULT 1')
@@ -4035,6 +4036,7 @@ def init_db():
     safe_exec_ignore("ALTER TABLE schools ADD COLUMN plan_features_json TEXT DEFAULT '{}'")
     safe_exec_ignore("ALTER TABLE schools ADD COLUMN access_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
     safe_exec_ignore("ALTER TABLE schools ADD COLUMN access_updated_by TEXT DEFAULT ''")
+    safe_exec_ignore("ALTER TABLE schools ADD COLUMN leadership_title TEXT DEFAULT 'principal'")
 
     # School term calendar (per school + academic year + term)
     db_execute(c, """CREATE TABLE IF NOT EXISTS school_term_calendars (
@@ -8097,6 +8099,7 @@ def verify_payment_webhook_signature(raw_body, provided_signature):
 SCHOOL_ACCESS_STATUSES = {'trial_free', 'active_paid', 'pending_payment', 'suspended'}
 SCHOOL_ACCESS_ACTIVE_STATUSES = {'trial_free', 'active_paid'}
 SCHOOL_BILLING_STATUSES = {'pending', 'part_paid', 'paid', 'overdue', 'waived'}
+SCHOOL_LEADERSHIP_TITLES = {'principal', 'head_teacher'}
 
 
 def normalize_school_access_status(value, default='trial_free'):
@@ -8105,6 +8108,21 @@ def normalize_school_access_status(value, default='trial_free'):
     if fallback not in SCHOOL_ACCESS_STATUSES:
         fallback = 'trial_free'
     return raw if raw in SCHOOL_ACCESS_STATUSES else fallback
+
+
+def normalize_school_leadership_title(value, default='principal'):
+    raw = (value or '').strip().lower()
+    fallback = (default or 'principal').strip().lower()
+    if fallback not in SCHOOL_LEADERSHIP_TITLES:
+        fallback = 'principal'
+    return raw if raw in SCHOOL_LEADERSHIP_TITLES else fallback
+
+
+def get_school_leadership_label(value, default='Principal'):
+    leadership_title = normalize_school_leadership_title(value)
+    if leadership_title == 'head_teacher':
+        return 'Head Teacher'
+    return default or 'Principal'
 
 
 def ensure_school_access_schema():
@@ -8128,6 +8146,7 @@ def ensure_school_access_schema():
             db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS plan_features_json TEXT DEFAULT '{}'")
             db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS access_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
             db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS access_updated_by TEXT DEFAULT ''")
+            db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS leadership_title TEXT DEFAULT 'principal'")
         return True
     except Exception as exc:
         logging.warning("Failed to ensure schools access schema: %s", exc)
@@ -8406,6 +8425,7 @@ def _school_row_to_dict(row):
         'motto': row['motto'] if 'motto' in row.keys() else '',
         'updated_at': row['updated_at'] if 'updated_at' in row.keys() else None,
         'principal_signature_image': row['principal_signature_image'] if 'principal_signature_image' in row.keys() else '',
+        'leadership_title': normalize_school_leadership_title(row['leadership_title'] if 'leadership_title' in row.keys() else 'principal'),
         'school_logo': normalize_school_logo_url(row['school_logo']),
         'academic_year': row['academic_year'],
         'current_term': row['current_term'],
@@ -8448,6 +8468,7 @@ def _school_row_to_dict(row):
         'access_updated_at': row['access_updated_at'] if 'access_updated_at' in row.keys() else None,
         'access_updated_by': (row['access_updated_by'] if 'access_updated_by' in row.keys() else '') or '',
     }
+    data['leadership_label'] = get_school_leadership_label(data.get('leadership_title'))
     data['access_state'] = build_school_access_state(data)
     return data
 
@@ -8506,6 +8527,8 @@ def get_all_schools():
                 'motto': row['motto'] if 'motto' in row.keys() else '',
                 'updated_at': row['updated_at'] if 'updated_at' in row.keys() else None,
                 'principal_signature_image': row['principal_signature_image'] if 'principal_signature_image' in row.keys() else '',
+                'leadership_title': normalize_school_leadership_title(row['leadership_title'] if 'leadership_title' in row.keys() else 'principal'),
+                'leadership_label': get_school_leadership_label(row['leadership_title'] if 'leadership_title' in row.keys() else 'principal'),
                 'school_logo': normalize_school_logo_url(row['school_logo']),
                 'academic_year': row['academic_year'],
                 'current_term': row['current_term'],
@@ -8611,6 +8634,7 @@ def update_school_settings_with_cursor(c, school_id, settings):
     db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS theme_secondary_color TEXT DEFAULT '#2A5298'")
     db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS theme_accent_color TEXT DEFAULT '#1F7A8C'")
     db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS parent_timetable_show_teacher INTEGER DEFAULT 1")
+    db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS leadership_title TEXT DEFAULT 'principal'")
 
     db_execute(
                c,
@@ -8621,7 +8645,7 @@ def update_school_settings_with_cursor(c, school_id, settings):
                 "grade_a_min = ?, grade_b_min = ?, grade_c_min = ?, grade_d_min = ?, pass_mark = ?, "
                 "show_positions = ?, ss_ranking_mode = ?, class_arm_ranking_mode = ?, "
                 "combine_third_term_results = ?, ss1_stream_mode = ?, parent_timetable_show_teacher = ?, "
-                "theme_primary_color = ?, theme_secondary_color = ?, theme_accent_color = ? "
+                "theme_primary_color = ?, theme_secondary_color = ?, theme_accent_color = ?, leadership_title = ? "
                 "WHERE school_id = ?"),
                (settings.get('school_name'), settings.get('location', ''), settings.get('school_logo'),
                 settings.get('academic_year'), settings.get('current_term'),
@@ -8640,6 +8664,7 @@ def update_school_settings_with_cursor(c, school_id, settings):
                 normalize_hex_color(settings.get('theme_primary_color', ''), '#1E3C72'),
                 normalize_hex_color(settings.get('theme_secondary_color', ''), '#2A5298'),
                 normalize_hex_color(settings.get('theme_accent_color', ''), '#1F7A8C'),
+                normalize_school_leadership_title(settings.get('leadership_title', 'principal')),
                 school_id))
 
 def update_school_settings(school_id, settings):
@@ -11697,6 +11722,8 @@ def _build_rich_result_pdf_reportlab(report):
     principal_name = (report.get('principal_name') or '').strip()
     teacher_signature_ref = (report.get('teacher_signature') or '').strip()
     principal_signature_ref = (report.get('principal_signature') or '').strip()
+    leadership_title = normalize_school_leadership_title(report.get('leadership_title', 'principal'))
+    leadership_label = get_school_leadership_label(leadership_title)
     generated_on = (report.get('generated_on') or '').strip()
     subject_rows = report.get('subject_rows') or []
     show_positions = bool(report.get('show_positions', True))
@@ -11809,10 +11836,10 @@ def _build_rich_result_pdf_reportlab(report):
 
     signature_table = Table(
         [
-            ["Teacher Signature", "Principal Signature"],
+            ["Teacher Signature", f"{leadership_label} Signature"],
             [_signature_cell(teacher_signature_ref), _signature_cell(principal_signature_ref)],
             [teacher_name or "-", principal_name or "-"],
-            ["(Term Class Teacher)", "(Principal)"],
+            ["(Term Class Teacher)", f"({leadership_label})"],
         ],
         colWidths=[86 * mm, 86 * mm],
     )
@@ -15972,7 +15999,7 @@ def restore_school_backup_payload(school_id, payload, mode='merge'):
                        exam_theory_max = ?, grade_a_min = ?, grade_b_min = ?, grade_c_min = ?, grade_d_min = ?,
                        pass_mark = ?, show_positions = ?, ss_ranking_mode = ?, class_arm_ranking_mode = ?,
                        combine_third_term_results = ?, ss1_stream_mode = ?, theme_primary_color = ?, theme_secondary_color = ?,
-                       theme_accent_color = ?, phone = ?, email = ?, principal_name = ?, motto = ?, updated_at = CURRENT_TIMESTAMP
+                       theme_accent_color = ?, phone = ?, email = ?, principal_name = ?, motto = ?, leadership_title = ?, updated_at = CURRENT_TIMESTAMP
                    WHERE school_id = ?""",
                 (
                     school_data.get('school_name', ''),
@@ -16003,6 +16030,7 @@ def restore_school_backup_payload(school_id, payload, mode='merge'):
                     school_data.get('email', ''),
                     school_data.get('principal_name', ''),
                     school_data.get('motto', ''),
+                    normalize_school_leadership_title(school_data.get('leadership_title', 'principal')),
                     school_id,
                 ),
             )
@@ -21024,17 +21052,19 @@ def school_admin_upload_principal_signature():
     if session.get('role') != 'school_admin':
         return redirect(url_for('login'))
     school_id = session.get('school_id')
+    school = get_school(school_id) or {}
+    leadership_label = get_school_leadership_label((school or {}).get('leadership_title', 'principal'))
     admin_password = request.form.get('admin_password', '')
     admin_user = get_user(session.get('user_id'))
     if not admin_user or not check_password(admin_user.get('password_hash', ''), admin_password):
-        flash('Invalid school admin password. Principal signature not saved.', 'error')
+        flash(f'Invalid school admin password. {leadership_label} signature not saved.', 'error')
         return redirect(url_for('school_admin_dashboard'))
     signature_data, err = parse_uploaded_signature(request.files.get('principal_signature'))
     if err:
         flash(err, 'error')
         return redirect(url_for('school_admin_dashboard'))
     set_principal_signature(school_id, signature_data)
-    flash('Principal signature saved successfully.', 'success')
+    flash(f'{leadership_label} signature saved successfully.', 'success')
     return redirect(url_for('school_admin_dashboard'))
 
 @app.route('/school-admin/class-subjects', methods=['GET', 'POST'])
@@ -21178,6 +21208,10 @@ def school_admin_settings():
         ss_ranking_mode = request.form.get('ss_ranking_mode', 'together').strip().lower()
         class_arm_ranking_mode = request.form.get('class_arm_ranking_mode', 'separate').strip().lower()
         ss1_stream_mode = request.form.get('ss1_stream_mode', 'separate').strip().lower()
+        leadership_title = normalize_school_leadership_title(
+            request.form.get('leadership_title', current_school.get('leadership_title', 'principal')),
+            default=(current_school.get('leadership_title', 'principal') or 'principal'),
+        )
         parent_timetable_show_teacher = 1 if (request.form.get('parent_timetable_show_teacher', '1') or '1').strip() == '1' else 0
         show_positions = 1 if request.form.get('show_positions', '1').strip() == '1' else 0
         combine_third_raw = (request.form.get('combine_third_term_results', '0') or '0').strip()
@@ -21362,6 +21396,7 @@ def school_admin_settings():
             'theme_primary_color': normalize_hex_color(request.form.get('theme_primary_color', ''), '#1E3C72'),
             'theme_secondary_color': normalize_hex_color(request.form.get('theme_secondary_color', ''), '#2A5298'),
             'theme_accent_color': normalize_hex_color(request.form.get('theme_accent_color', ''), '#1F7A8C'),
+            'leadership_title': leadership_title,
         }
         assessment_updates = []
         for level in ('primary', 'jss', 'ss'):
@@ -25768,7 +25803,8 @@ def teacher_publish_results():
         flash('Upload your class teacher signature before submitting this class result.', 'error')
         return redirect(url_for('teacher_dashboard'))
     if not ((school or {}).get('principal_signature_image') or '').strip():
-        flash('Principal signature is required before approval. Ask school admin to upload it with admin password.', 'error')
+        leadership_label = get_school_leadership_label((school or {}).get('leadership_title', 'principal'))
+        flash(f'{leadership_label} signature is required before approval. Ask school admin to upload it with admin password.', 'error')
         return redirect(url_for('teacher_dashboard'))
     if is_result_published(school_id, classname, current_term, current_year):
         flash(f'{classname} ({current_term}) is already published. Republish is not allowed.', 'error')
@@ -28844,6 +28880,7 @@ def download_result_pdf():
         'principal_name': signoff.get('principal_name', ''),
         'teacher_signature': signoff.get('teacher_signature', ''),
         'principal_signature': signoff.get('principal_signature', ''),
+        'leadership_title': normalize_school_leadership_title((school or {}).get('leadership_title', 'principal')),
         'generated_on': datetime.now().strftime('%Y-%m-%d %H:%M'),
         'subject_rows': subject_rows,
         'show_positions': show_positions,

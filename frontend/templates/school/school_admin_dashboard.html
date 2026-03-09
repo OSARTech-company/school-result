@@ -293,7 +293,8 @@
               </div>
 
               <div class="card">
-                <h2><i class="fas fa-signature"></i> Principal Signature</h2>
+                {% set leadership_label = 'Head Teacher' if school and school.leadership_title == 'head_teacher' else 'Principal' %}
+                <h2><i class="fas fa-signature"></i> {{ leadership_label }} Signature</h2>
                 <p>
                   Status:
                   <strong class="{{ 'op-on' if has_principal_signature else 'op-off' }}">
@@ -301,19 +302,19 @@
                   </strong>
                 </p>
                 <p class="note mt-10">
-                  Result publishing requires principal signature. Uploading signature requires your school admin password.
+                  Result publishing requires {{ leadership_label|lower }} signature. Uploading signature requires your school admin password.
                 </p>
                 <form action="{{ url_for('school_admin_upload_principal_signature') }}" method="POST" enctype="multipart/form-data" class="mt-10">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
                   <div class="form-group">
-                    <label for="principal_signature">Principal Signature Image (PNG/JPG/WEBP, max 2MB)</label>
+                    <label for="principal_signature">{{ leadership_label }} Signature Image (PNG/JPG/WEBP, max 2MB)</label>
                     <input type="file" id="principal_signature" name="principal_signature" accept=".png,.jpg,.jpeg,.webp,image/*" required />
                   </div>
                   <div class="form-group">
                     <label for="admin_password">School Admin Password</label>
                     <input type="password" id="admin_password" name="admin_password" autocomplete="current-password" required />
                   </div>
-                  <button type="submit" class="btn btn-primary">Save Principal Signature</button>
+                  <button type="submit" class="btn btn-primary">Save {{ leadership_label }} Signature</button>
                 </form>
               </div>
 
