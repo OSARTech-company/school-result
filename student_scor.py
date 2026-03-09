@@ -18196,10 +18196,19 @@ def school_access_request():
                         force_new=True,
                     )
                     tracked_request = get_school_onboarding_request(request_id)
-                    flash(
-                        f'New verification code sent to {send_result.get("masked_email") or "school email"}.',
-                        'success',
-                    )
+                    if int(send_result.get('sent', 0) or 0) > 0:
+                        flash(
+                            f'New verification code sent to {send_result.get("masked_email") or "school email"}. '
+                            'Check Inbox/Spam/Promotions.',
+                            'success',
+                        )
+                    else:
+                        err_text = '; '.join([str(e).strip() for e in (send_result.get('errors') or []) if str(e).strip()])
+                        flash(
+                            'Verification email could not be delivered right now.'
+                            + (f' Detail: {err_text}' if err_text else ''),
+                            'warning',
+                        )
                 except Exception as exc:
                     flash(f'Could not resend verification code: {str(exc)}', 'error')
         else:
