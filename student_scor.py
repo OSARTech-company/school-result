@@ -183,7 +183,7 @@ app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=SESSION_TIMEOUT_MIN
 LOGIN_MAX_ATTEMPTS = 4
 LOGIN_LOCK_MINUTES = 15
 STARTUP_SCHEMA_VERSION = '2026-03-09.2'
-EXPECTED_ALEMBIC_HEAD = '006_parent_session_and_index_hardening'
+EXPECTED_ALEMBIC_HEAD = '007_profile_image_audit_reason'
 _DB_POOL = None
 _SCHOOL_LOGO_CACHE = {}
 _SCHOOL_LOGO_CACHE_TTL = 600
@@ -5280,50 +5280,60 @@ if os.environ.get('RESET_STUDENT_PASSWORDS_ON_STARTUP', '').strip().lower() in (
 
 def get_user(username):
     """Fetch one user by username."""
-    with db_connection() as conn:
-        c = conn.cursor()
-        # Case-insensitive lookup with index support (idx_users_username_lower).
+    uname = (username or '').strip()
+    if not uname:
+        return None
+
+    primary_query = (
+        'SELECT username, password_hash, role, school_id, terms_accepted, password_changed_at '
+        'FROM users WHERE LOWER(username) = LOWER(?) LIMIT 1'
+    )
+    fallback_query = (
+        'SELECT username, password_hash, role, school_id, terms_accepted '
+        'FROM users WHERE LOWER(username) = LOWER(?) LIMIT 1'
+    )
+
+    def _row_to_user(row, has_password_changed_at=True):
+        if not row:
+            return None
+        return {
+            'username': row[0],
+            'password_hash': row[1],
+            'role': row[2] or 'student',
+            'school_id': row[3],
+            'terms_accepted': int(row[4] or 0),
+            'password_changed_at': (row[5] if has_password_changed_at and len(row) > 5 else None),
+        }
+
+    def _query_user_once(conn_obj):
+        c = conn_obj.cursor()
         try:
-            db_execute(
-                c,
-                'SELECT username, password_hash, role, school_id, terms_accepted, password_changed_at '
-                'FROM users WHERE LOWER(username) = LOWER(?) LIMIT 1',
-                (username,),
-            )
-            row = c.fetchone()
-            if not row:
-                return None
-            return {
-                'username': row[0],
-                'password_hash': row[1],
-                'role': row[2] or 'student',
-                'school_id': row[3],
-                'terms_accepted': int(row[4] or 0),
-                'password_changed_at': row[5] if len(row) > 5 else None,
-            }
+            db_execute(c, primary_query, (uname,))
+            return _row_to_user(c.fetchone(), has_password_changed_at=True)
         except Exception:
             # Backward compatibility for DBs that have not yet added users.password_changed_at.
             try:
-                conn.rollback()
+                conn_obj.rollback()
             except Exception:
                 pass
-            db_execute(
-                c,
-                'SELECT username, password_hash, role, school_id, terms_accepted '
-                'FROM users WHERE LOWER(username) = LOWER(?) LIMIT 1',
-                (username,),
-            )
-            row = c.fetchone()
-            if not row:
-                return None
-            return {
-                'username': row[0],
-                'password_hash': row[1],
-                'role': row[2] or 'student',
-                'school_id': row[3],
-                'terms_accepted': int(row[4] or 0),
-                'password_changed_at': None,
-            }
+            db_execute(c, fallback_query, (uname,))
+            return _row_to_user(c.fetchone(), has_password_changed_at=False)
+
+    try:
+        with db_connection() as conn:
+            return _query_user_once(conn)
+    except Exception as exc:
+        # Transient transport faults (SSL drop/closed cursor) should not crash request middleware.
+        if not _is_transient_db_transport_error(exc):
+            logging.warning("get_user failed for %s: %s", uname, exc)
+            return None
+        logging.warning("get_user transient DB error for %s, retrying once: %s", uname, exc)
+        try:
+            with db_connection() as conn_retry:
+                return _query_user_once(conn_retry)
+        except Exception as exc2:
+            logging.warning("get_user retry failed for %s: %s", uname, exc2)
+            return None
 
 def is_default_student_password(password_hash):
     """Return True if a student hash still matches configured default password."""

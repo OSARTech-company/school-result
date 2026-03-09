@@ -33455,3 +33455,11 @@ LINE 1: ...stname, lastname, phone, gender, signature_image, profile_im...
 2026-03-09 19:48:05,442 - INFO - [startup] Student Score build: 2026-03-09 19:48:01 | debug=True | port=5000
 2026-03-09 19:48:05,495 - WARNING -  * Debugger is active!
 2026-03-09 19:48:05,500 - INFO -  * Debugger PIN: 541-365-780
+2026-03-10 00:26:08,770 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-10 00:26:08,771 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-10 00:26:10,273 - WARNING - Alembic head status mismatch: current=004_archive_and_term_edit_locks, expected=006_parent_session_and_index_hardening. Run `python migrate.py`.
+2026-03-10 00:26:10,274 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
+2026-03-10 00:29:39,266 - INFO - DB startup config: RUN_STARTUP_DDL=False, RUN_STARTUP_BOOTSTRAP=False, DATABASE_URL=postgresql://postgres:***@localhost:5432/schoolreultdb
+2026-03-10 00:29:39,266 - INFO - RUN_STARTUP_DDL disabled. Skipping init_db() at startup.
+2026-03-10 00:29:39,731 - INFO - Alembic head status OK: current=007_profile_image_audit_reason
+2026-03-10 00:29:39,732 - INFO - RUN_STARTUP_BOOTSTRAP is disabled. Skipping super admin bootstrap at startup.
