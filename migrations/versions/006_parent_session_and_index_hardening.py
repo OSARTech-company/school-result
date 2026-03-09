@@ -1,6 +1,6 @@
 """Parent session support and index hardening.
 
-Revision ID: 006_parent_session_and_index_hardening
+Revision ID: 006_parent_session_idx_hardening
 Revises: 005_access_security_hardening
 Create Date: 2026-03-09 00:30:00.000000
 
@@ -9,7 +9,7 @@ from alembic import op
 
 
 # revision identifiers, used by Alembic.
-revision = '006_parent_session_and_index_hardening'
+revision = '006_parent_session_idx_hardening'
 down_revision = '005_access_security_hardening'
 branch_labels = None
 depends_on = None
