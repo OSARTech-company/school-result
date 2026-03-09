@@ -31,6 +31,7 @@ import mimetypes
 import time
 import urllib.request
 import threading
+import socket
 from collections import deque
 import traceback
 
@@ -7699,6 +7700,7 @@ def send_plain_email_message(subject, body_text, recipients):
     smtp_pass = (os.environ.get('SMTP_PASS', '') or '').strip()
     smtp_from = (os.environ.get('SMTP_FROM', smtp_user or 'noreply@localhost') or '').strip()
     smtp_use_tls = (os.environ.get('SMTP_USE_TLS', '1') or '1').strip().lower() in ('1', 'true', 'yes')
+    smtp_force_ipv4 = (os.environ.get('SMTP_FORCE_IPV4', '0') or '0').strip().lower() in ('1', 'true', 'yes')
 
     try:
         smtp_port = int(smtp_port_raw)
@@ -7708,21 +7710,54 @@ def send_plain_email_message(subject, body_text, recipients):
     if not smtp_host:
         return {'sent': 0, 'errors': ['SMTP_HOST is not configured.'], 'recipients': clean_recipients}
 
-    try:
-        msg = EmailMessage()
-        msg['Subject'] = (subject or 'Notification').strip()[:200]
-        msg['From'] = smtp_from
-        msg['To'] = ', '.join(clean_recipients)
-        msg.set_content((body_text or '').strip() or 'No content.')
+    msg = EmailMessage()
+    msg['Subject'] = (subject or 'Notification').strip()[:200]
+    msg['From'] = smtp_from
+    msg['To'] = ', '.join(clean_recipients)
+    msg.set_content((body_text or '').strip() or 'No content.')
 
-        with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as client:
-            if smtp_use_tls:
-                client.starttls()
-            if smtp_user and smtp_pass:
-                client.login(smtp_user, smtp_pass)
-            client.send_message(msg)
+    def _send_once(force_ipv4=False):
+        # Some hosts fail on IPv6 routing to SMTP providers; allow AF_INET-only retry.
+        if not force_ipv4:
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as client:
+                if smtp_use_tls:
+                    client.starttls()
+                if smtp_user and smtp_pass:
+                    client.login(smtp_user, smtp_pass)
+                client.send_message(msg)
+            return
+
+        original_getaddrinfo = socket.getaddrinfo
+
+        def _ipv4_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+            if host == smtp_host:
+                return original_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
+            return original_getaddrinfo(host, port, family, type, proto, flags)
+
+        lock = globals().setdefault('_SMTP_IPV4_PATCH_LOCK', threading.Lock())
+        with lock:
+            socket.getaddrinfo = _ipv4_getaddrinfo
+            try:
+                with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as client:
+                    if smtp_use_tls:
+                        client.starttls()
+                    if smtp_user and smtp_pass:
+                        client.login(smtp_user, smtp_pass)
+                    client.send_message(msg)
+            finally:
+                socket.getaddrinfo = original_getaddrinfo
+
+    try:
+        _send_once(force_ipv4=smtp_force_ipv4)
         return {'sent': len(clean_recipients), 'errors': [], 'recipients': clean_recipients}
     except Exception as exc:
+        # Automatic IPv4 retry when primary failure indicates missing route.
+        if (not smtp_force_ipv4) and ('Network is unreachable' in str(exc)):
+            try:
+                _send_once(force_ipv4=True)
+                return {'sent': len(clean_recipients), 'errors': [], 'recipients': clean_recipients}
+            except Exception as exc2:
+                return {'sent': 0, 'errors': [f'Email send failed: {exc}; IPv4 retry failed: {exc2}'], 'recipients': clean_recipients}
         return {'sent': 0, 'errors': [f'Email send failed: {exc}'], 'recipients': clean_recipients}
 
 
