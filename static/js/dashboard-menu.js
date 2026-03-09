@@ -7,6 +7,7 @@
 
   const body = document.body;
   const mobileWidth = 600;
+  const isMobileViewport = () => window.innerWidth <= mobileWidth;
 
   const linkNodes = Array.from(sidebar.querySelectorAll(".side-link"));
   linkNodes.forEach((link) => {
@@ -45,6 +46,20 @@
     summary.setAttribute("aria-expanded", group.open ? "true" : "false");
     group.addEventListener("toggle", () => {
       summary.setAttribute("aria-expanded", group.open ? "true" : "false");
+    });
+  });
+
+  // Mobile accordion mode for grouped nav sections that opt in.
+  const accordionGroups = Array.from(sidebar.querySelectorAll("details.side-group[data-accordion-mobile='1']"));
+  accordionGroups.forEach((group) => {
+    group.addEventListener("toggle", () => {
+      if (!group.open || !isMobileViewport()) return;
+      const bucket = group.getAttribute("data-accordion-group") || "__default__";
+      accordionGroups.forEach((other) => {
+        if (other === group || !other.open) return;
+        const otherBucket = other.getAttribute("data-accordion-group") || "__default__";
+        if (otherBucket === bucket) other.open = false;
+      });
     });
   });
 

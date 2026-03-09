@@ -74,6 +74,55 @@
         }).catch(function () {});
     }
 
+    function buildPageContext(root) {
+        var parts = [];
+        try {
+            var path = String(window.location.pathname || '/').trim();
+            if (path) parts.push('path: ' + path);
+
+            var heading = document.querySelector('.header h1, .header h2, .stack-head h1, .stack-head h2');
+            if (heading && heading.textContent) {
+                parts.push('page: ' + String(heading.textContent || '').trim().slice(0, 90));
+            }
+
+            var activeLink = document.querySelector('.side-link.active span');
+            if (activeLink && activeLink.textContent) {
+                parts.push('active menu: ' + String(activeLink.textContent || '').trim().slice(0, 60));
+            }
+
+            var role = String((root && root.getAttribute('data-role')) || '').trim().toLowerCase();
+            if (role === 'parent') {
+                var selectedChild = '';
+                var params = new URLSearchParams(window.location.search || '');
+                var key = String(params.get('student_key') || '').trim();
+                var studentGroups = Array.prototype.slice.call(document.querySelectorAll('details.side-group[data-student-key]'));
+                if (key) {
+                    studentGroups.some(function (node) {
+                        var nodeKey = String((node.getAttribute('data-student-key') || '')).trim();
+                        if (nodeKey !== key) return false;
+                        var label = node.querySelector('summary.side-group-toggle span');
+                        selectedChild = String((label && label.textContent) || '').trim();
+                        return !!selectedChild;
+                    });
+                }
+                if (!selectedChild) {
+                    var openGroupLabel = document.querySelector('details.side-group[data-student-key][open] summary.side-group-toggle span');
+                    if (openGroupLabel && openGroupLabel.textContent) {
+                        selectedChild = String(openGroupLabel.textContent || '').trim();
+                    }
+                }
+                if (selectedChild) {
+                    parts.push('selected child: ' + selectedChild.slice(0, 90));
+                } else if (studentGroups.length) {
+                    parts.push('linked children: ' + String(studentGroups.length));
+                }
+            }
+        } catch (_err) {
+            // Ignore context parsing errors.
+        }
+        return parts.join(' | ').slice(0, 260);
+    }
+
     function renderFeedbackControls(csrfToken, hostNode, questionText, answerText) {
         if (!hostNode) return;
         var wrap = document.createElement('div');
@@ -226,6 +275,8 @@
             var payload = new URLSearchParams();
             payload.set('question', text);
             payload.set('page', window.location.pathname || '/');
+            var pageContext = buildPageContext(root);
+            if (pageContext) payload.set('page_context', pageContext);
             payload.set('history', JSON.stringify(history));
             if (modeSelect && modeSelect.value) payload.set('response_mode', modeSelect.value);
             if (csrfToken) payload.set('csrf_token', csrfToken);

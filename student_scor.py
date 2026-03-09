@@ -2088,7 +2088,7 @@ def _assistant_page_example_hint(page_guidance):
         return f'On this page ({title}), use the visible action buttons in order and save after each change.'
     return ''
 
-def _assistant_build_response(role, question, teacher_scope=None, source_page='', conversation_history=None, response_mode='standard'):
+def _assistant_build_response(role, question, teacher_scope=None, source_page='', page_context='', conversation_history=None, response_mode='standard'):
     role = (role or '').strip().lower()
     q = (question or '').strip()
     q_low = q.lower()
@@ -2096,6 +2096,15 @@ def _assistant_build_response(role, question, teacher_scope=None, source_page=''
     if mode not in APP_ASSISTANT_RESPONSE_MODES:
         mode = 'standard'
     q_norm = _assistant_normalize_text(q_low)
+    page_context_text = str(page_context or '').strip()
+    page_context_norm = _assistant_normalize_text(page_context_text) if page_context_text else ''
+    if page_context_norm and (
+        len(q_norm.split()) <= 8
+        or _assistant_is_contextual_page_question(q_norm)
+        or _assistant_is_page_help_question(q_norm)
+        or _assistant_is_purpose_question(q_norm)
+    ):
+        q_norm = (q_norm + ' ' + page_context_norm).strip()
     history_rows = []
     for row in (conversation_history or []):
         if isinstance(row, dict):
@@ -22871,7 +22880,7 @@ def teacher_period_attendance():
 @app.route('/parent/dispute', methods=['GET', 'POST'])
 def parent_submit_dispute():
     if session.get('role') != 'parent':
-        return redirect(url_for('parent_portal'))
+        return redirect(url_for('login'))
     ensure_extended_features_schema()
     allowed = _parent_allowed_student_keys()
     student_key = (request.values.get('student_key', '') or '').strip()
@@ -27747,58 +27756,20 @@ def _parent_allowed_student_keys():
 
 
 @app.route('/parent-portal', methods=['GET', 'POST'])
-@require_rate_limit('parent_portal', RATE_LIMIT_PARENT_PORTAL_PER_MIN, 60, redirect_endpoint='parent_portal', methods=('POST',))
 def parent_portal():
-    if request.method == 'GET' and session.get('role') == 'parent':
+    # Backward-compatible endpoint: parent login is now unified on /login.
+    if session.get('role') == 'parent':
         return redirect(url_for('parent_dashboard'))
     if request.method == 'POST':
-        parent_phone = normalize_parent_phone(request.form.get('parent_phone', ''))
-        parent_password = (request.form.get('password', '') or '').strip()
-        client_ip = get_client_ip()
-        if not parent_phone or not parent_password:
-            flash('Enter parent phone and password.', 'error')
-            return redirect(url_for('parent_portal'))
-        blocked, wait_minutes = is_login_blocked('parent_portal', parent_phone, client_ip)
-        if blocked:
-            flash(f'Too many failed login attempts. Try again in about {wait_minutes} minute(s).', 'error')
-            return redirect(url_for('parent_portal'))
-        candidates = get_parent_students_by_phone(parent_phone)
-        matched = []
-        for row in candidates:
-            password_hash = (row.get('parent_password_hash') or '').strip()
-            if not password_hash:
-                continue
-            if check_password(password_hash, parent_password):
-                matched.append(row)
-        if not matched:
-            register_failed_login('parent_portal', parent_phone, client_ip)
-            record_login_audit(parent_phone, 'parent', None, 'parent_portal', False, 'invalid_credentials')
-            flash('Invalid parent phone or password.', 'error')
-            return redirect(url_for('parent_portal'))
-        clear_failed_login('parent_portal', parent_phone, client_ip)
-        session.clear()
-        session.permanent = True
-        session['role'] = 'parent'
-        session['parent_phone'] = parent_phone
-        session['post_login_welcome_name'] = (matched[0].get('parent_name') or parent_phone).strip()
-        session['parent_student_keys'] = sorted(
-            {f"{row.get('school_id', '')}::{row.get('student_id', '')}" for row in matched},
-            key=lambda v: v.lower(),
-        )
-        if not has_parent_seen_first_login_tutorial(parent_phone):
-            session['show_first_login_tutorial'] = True
-            session['first_login_tutorial_role'] = 'parent'
-        record_login_audit(parent_phone, 'parent', (matched[0].get('school_id', '') if matched else ''), 'parent_portal', True, '')
-        flash('Security warning: change your parent password now to a private password only you know.', 'error')
-        return redirect(url_for('parent_dashboard'))
-    return render_template('parent/parent_portal.html')
+        flash('Parent login now uses the main login page. Enter parent phone in the username field.', 'success')
+    return redirect(url_for('login'))
 
 
 @app.route('/parent/change-password', methods=['POST'])
 @require_roles('parent', redirect_endpoint='login')
 def parent_change_password():
     if session.get('role') != 'parent':
-        return redirect(url_for('parent_portal'))
+        return redirect(url_for('login'))
     old_password = (request.form.get('current_password', '') or '').strip()
     new_password = (request.form.get('new_password', '') or '').strip()
     confirm_password = (request.form.get('confirm_password', '') or '').strip()
@@ -27817,7 +27788,7 @@ def parent_change_password():
     has_parent_multi_cols = students_has_parent_multi_access_columns()
     if not allowed_keys:
         flash('Parent session expired. Please login again.', 'error')
-        return redirect(url_for('parent_portal'))
+        return redirect(url_for('login'))
 
     matched_keys = []
     for key in sorted(allowed_keys):
@@ -27874,11 +27845,11 @@ def parent_change_password():
 @require_roles('parent', redirect_endpoint='login')
 def parent_dashboard():
     if session.get('role') != 'parent':
-        return redirect(url_for('parent_portal'))
+        return redirect(url_for('login'))
     allowed_keys = _parent_allowed_student_keys()
     if not allowed_keys:
         flash('Parent session expired. Please login again.', 'error')
-        return redirect(url_for('parent_portal'))
+        return redirect(url_for('login'))
     key_pairs = []
     student_ids_by_school = {}
     for key in sorted(allowed_keys):
@@ -27994,11 +27965,25 @@ def parent_dashboard():
         first_school = schools_by_id.get(first_school_id, {}) if first_school_id else {}
         parent_theme_accent = normalize_hex_color(first_school.get('theme_accent_color', ''), '#1F7A8C')
     parent_term_events = []
+    seen_event_keys = set()
+    seen_school_ids = set()
     for child in children:
-        sid = child.get('school_id', '')
+        sid = (child.get('school_id', '') or '').strip()
+        if not sid or sid in seen_school_ids:
+            continue
+        seen_school_ids.add(sid)
         school_events = parent_term_events_by_school.get(sid, [])
         school_name = child.get('school_name', sid)
         for item in school_events:
+            event_key = (
+                sid.lower(),
+                (item.get('label', '') or '').strip().lower(),
+                (item.get('date', '') or '').strip(),
+                (item.get('status', '') or '').strip().lower(),
+            )
+            if event_key in seen_event_keys:
+                continue
+            seen_event_keys.add(event_key)
             parent_term_events.append({
                 'school_name': school_name,
                 'label': item.get('label', ''),
@@ -28026,7 +28011,7 @@ def parent_dashboard():
 @app.route('/parent/messages/mark-read', methods=['POST'])
 def parent_mark_message_read():
     if session.get('role') != 'parent':
-        return redirect(url_for('parent_portal'))
+        return redirect(url_for('login'))
     school_id = (request.form.get('school_id', '') or '').strip()
     message_id_raw = (request.form.get('message_id', '') or '').strip()
     parent_phone = session.get('parent_phone', '')
@@ -28071,7 +28056,7 @@ def parent_mark_message_read():
 @app.route('/parent/messages/mark-all-read', methods=['POST'])
 def parent_mark_all_messages_read():
     if session.get('role') != 'parent':
-        return redirect(url_for('parent_portal'))
+        return redirect(url_for('login'))
     allowed_keys = _parent_allowed_student_keys()
     children = []
     for key in sorted(allowed_keys):
@@ -28101,11 +28086,11 @@ def parent_mark_all_messages_read():
 @app.route('/parent/messages')
 def parent_messages():
     if session.get('role') != 'parent':
-        return redirect(url_for('parent_portal'))
+        return redirect(url_for('login'))
     allowed_keys = _parent_allowed_student_keys()
     if not allowed_keys:
         flash('Parent session expired. Please login again.', 'error')
-        return redirect(url_for('parent_portal'))
+        return redirect(url_for('login'))
 
     key_pairs = []
     student_ids_by_school = {}
@@ -28170,11 +28155,11 @@ def parent_messages():
 @app.route('/parent/attendance')
 def parent_period_attendance():
     if session.get('role') != 'parent':
-        return redirect(url_for('parent_portal'))
+        return redirect(url_for('login'))
     allowed_keys = _parent_allowed_student_keys()
     if not allowed_keys:
         flash('Parent session expired. Please login again.', 'error')
-        return redirect(url_for('parent_portal'))
+        return redirect(url_for('login'))
 
     key_pairs = []
     student_ids_by_school = {}
@@ -28386,11 +28371,11 @@ def parent_period_attendance():
 @app.route('/parent/timetable')
 def parent_timetable():
     if session.get('role') != 'parent':
-        return redirect(url_for('parent_portal'))
+        return redirect(url_for('login'))
     allowed_keys = _parent_allowed_student_keys()
     if not allowed_keys:
         flash('Parent session expired. Please login again.', 'error')
-        return redirect(url_for('parent_portal'))
+        return redirect(url_for('login'))
 
     key_pairs = []
     student_ids_by_school = {}
@@ -28539,7 +28524,7 @@ def parent_timetable():
 @app.route('/parent/student-result')
 def parent_view_result():
     if session.get('role') != 'parent':
-        return redirect(url_for('parent_portal'))
+        return redirect(url_for('login'))
     student_key = (request.args.get('student_key', '') or '').strip()
     allowed = _parent_allowed_student_keys()
     if not student_key or student_key not in allowed or '::' not in student_key:
@@ -29034,7 +29019,7 @@ def teacher_student_result():
 def parent_compare_results():
     try:
         if session.get('role') != 'parent':
-            return redirect(url_for('parent_portal'))
+            return redirect(url_for('login'))
         student_key = (request.args.get('student_key', '') or '').strip()
         allowed = _parent_allowed_student_keys()
         if not student_key or student_key not in allowed or '::' not in student_key:
@@ -30125,11 +30110,13 @@ def assistant_guide():
 
     teacher_scope = _assistant_get_teacher_scope() if role == 'teacher' else None
     source_page = (request.form.get('page', '') or '').strip()
+    page_context = (request.form.get('page_context', '') or '').strip()[:260]
     payload = _assistant_build_response(
         role,
         question,
         teacher_scope=teacher_scope,
         source_page=source_page,
+        page_context=page_context,
         conversation_history=merged_history,
         response_mode=response_mode,
     )
@@ -30156,9 +30143,12 @@ def assistant_guide():
     llm_available = bool((os.environ.get('OPENAI_API_KEY', '') or '').strip())
     should_try_llm = llm_available and not payload.get('action_blocked')
     if should_try_llm:
+        llm_prompt_question = question
+        if page_context:
+            llm_prompt_question = f"{question}\n\nPage context: {page_context}"
         llm_payload = _assistant_call_openai(
             role,
-            question,
+            llm_prompt_question,
             payload.get('links') or [],
             knowledge_context=payload.get('knowledge_context', ''),
             response_mode=response_mode,

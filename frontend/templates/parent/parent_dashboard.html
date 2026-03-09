@@ -9,11 +9,37 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" integrity="sha384-3B6NwesSXE7YJlcLI9RpRqGf2p/EgVH8BgoKTaUrmKNDkHPStTQ3EyoYjCGXaOTS" crossorigin="anonymous" referrerpolicy="no-referrer">
     <style>
         .container { max-width: 1100px; }
-        .parent-message-card { border: 1px solid #dbe4ef; border-radius: 10px; padding: 12px; background: #f8fbff; margin-bottom: 10px; }
-        .parent-message-card.is-unread { border-left: 4px solid #0F4C81; background: #eef6ff; }
-        .parent-message-card h4 { margin: 0 0 6px; font-size: 1rem; color: #1e3a5f; }
-        .parent-message-meta { color: #5b6475; font-size: 0.86rem; margin-bottom: 6px; }
-        .parent-message-actions { margin-top: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        .parent-notif-actions { margin-top: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        .parent-empty-state {
+            text-align: center;
+            padding: 28px 18px;
+            border: 1px solid #dbe4ef;
+            background: #f8fbff;
+        }
+        .parent-empty-state .empty-icon {
+            width: 70px;
+            height: 70px;
+            margin: 0 auto 10px;
+            border-radius: 50%;
+            display: grid;
+            place-items: center;
+            font-size: 1.8rem;
+            color: #0f4c81;
+            background: #e7f2ff;
+        }
+        .parent-empty-state .empty-title {
+            margin: 6px 0;
+            color: #1e3a5f;
+            font-size: 1.15rem;
+            font-weight: 700;
+        }
+        .parent-empty-state .empty-actions {
+            margin-top: 12px;
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
         .welcome-modal-overlay {
             position: fixed;
             inset: 0;
@@ -36,76 +62,13 @@
 </head>
 <body style="--accent: {{ parent_theme_accent if parent_theme_accent else '#1F7A8C' }};" data-parent-account="{{ parent_phone|default('parent', true)|e }}" data-unread-parent-messages="{{ unread_parent_messages|default(0, true)|int }}">
     <div class="app-shell topbar-layout">
-        <div class="side-taskbar">
-            <div class="side-brand">
-                <img src="{{ url_for('static', filename='img/osartech-logo.png') }}" alt="Osartech Logo" class="brand-logo">
-                <span>Parent</span>
-            </div>
-            {% if school_access_state %}
-            {% set access_status = (school_access_state.effective_status or school_access_state.status or '') %}
-            {% set access_class = 'is-active' if access_status in ['trial_free', 'active_paid'] else ('is-warning' if access_status == 'pending_payment' else 'is-blocked') %}
-            <div class="side-access-status">
-                <span class="label">Access</span>
-                <span class="status {{ access_class }}">{{ access_status|replace('_', ' ')|title }}</span>
-            </div>
-            {% endif %}
-            <div class="side-links">
-                <a href="{{ url_for('parent_dashboard') }}" class="side-link active">
-                    <i class="fas fa-home"></i>
-                    <span>Dashboard</span>
-                </a>
-                <a href="{{ url_for('parent_messages') }}" class="side-link">
-                    <i class="fas fa-bell"></i>
-                    <span>Messages</span>
-                    {% if unread_parent_messages %}
-                    <span class="notif-badge">{{ unread_parent_messages }}</span>
-                    {% endif %}
-                </a>
-                <a href="{{ url_for('parent_period_attendance') }}" class="side-link">
-                    <i class="fas fa-calendar-check"></i>
-                    <span>Attendance</span>
-                </a>
-                <a href="{{ url_for('parent_timetable') }}" class="side-link">
-                    <i class="fas fa-table"></i>
-                    <span>Timetable</span>
-                </a>
-                {% for child in children %}
-                <a href="{{ url_for('parent_view_result', student_key=child.key) }}" class="side-link">
-                    <i class="fas fa-user-graduate"></i>
-                    <span>{{ child.firstname }} Results</span>
-                </a>
-                <a href="{{ url_for('parent_compare_results', student_key=child.key) }}" class="side-link">
-                    <i class="fas fa-chart-line"></i>
-                    <span>{{ child.firstname }} Compare</span>
-                </a>
-                <a href="{{ url_for('parent_submit_dispute', student_key=child.key) }}" class="side-link">
-                    <i class="fas fa-balance-scale"></i>
-                    <span>{{ child.firstname }} Dispute</span>
-                </a>
-                {% endfor %}
-                <a href="#parent-password-card" class="side-link">
-                    <i class="fas fa-key"></i>
-                    <span>Change Password</span>
-                </a>
-                <a href="{{ url_for('help', role='parent') }}" class="side-link">
-                    <i class="fas fa-question-circle"></i>
-                    <span>Help</span>
-                </a>
-                <form method="post" action="{{ url_for('logout') }}">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <button type="submit" class="side-link side-link-logout">
-                        <i class="fas fa-sign-out-alt"></i>
-                        <span>Logout</span>
-                    </button>
-                </form>
-            </div>
-        </div>
-        
+        {% set active_page = 'dashboard' %}
+        {% include 'parent/_parent_sidebar.html' %}
         <div class="main-content">
             <div class="container">
                 <div class="header">
                     <div class="stack-head">
-                        <h2 class="no-margin"><i class="fas fa-users"></i> Osartech</h2>
+                        <h2 class="no-margin"><i class="fas fa-users"></i> Parent Dashboard</h2>
                     </div>
                     <div class="muted mt-10">Phone: {{ parent_phone }}</div>
                     {% if school_access_state %}
@@ -137,6 +100,12 @@
                     <h3 class="no-margin"><i class="fas fa-bell"></i> School Notifications</h3>
                     <p class="muted mt-10">Open your dedicated messages page to keep this dashboard light.</p>
                     <p class="muted">Unread notifications: <strong>{{ unread_parent_messages or 0 }}</strong></p>
+                    <div class="parent-notif-actions">
+                        <button type="button" class="btn btn-secondary btn-xs" id="enableParentBrowserNotif">
+                            <i class="fas fa-desktop"></i> Enable Browser Alerts
+                        </button>
+                        <span class="muted" id="parentBrowserNotifState" aria-live="polite"></span>
+                    </div>
                     <a href="{{ url_for('parent_messages') }}" class="btn btn-primary mt-10">
                         <i class="fas fa-external-link-alt"></i> Open Messages
                     </a>
@@ -234,7 +203,24 @@
                     {% endfor %}
                 </div>
                 {% else %}
-                <div class="card">No linked students found for this parent account.</div>
+                <div class="card parent-empty-state">
+                    <div class="empty-icon"><i class="fas fa-user-slash"></i></div>
+                    <div class="empty-title">No Linked Students Yet</div>
+                    <p class="muted">This parent account is active, but no student has been linked to it yet.</p>
+                    <ol style="text-align:left; max-width:560px; margin:10px auto 0;">
+                        <li>Contact your school admin/class teacher to link your phone number to your child record.</li>
+                        <li>Confirm your child student ID and class arm are correct in school records.</li>
+                        <li>After linking, refresh this page to see results, attendance, timetable, and disputes.</li>
+                    </ol>
+                    <div class="empty-actions">
+                        <a href="{{ url_for('help', role='parent') }}" class="btn btn-primary">
+                            <i class="fas fa-question-circle"></i> Open Help
+                        </a>
+                        <a href="{{ url_for('report_issue') }}" class="btn btn-secondary">
+                            <i class="fas fa-bug"></i> Report Linking Issue
+                        </a>
+                    </div>
+                </div>
                 {% endif %}
                 </div>
                 </div>
@@ -258,7 +244,7 @@
         </div>
     </div>
     {% endif %}
-    <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260306e') }}"></script>
+    <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260309a') }}"></script>
     {% if unread_parent_messages %}
     <script>
         (function () {
@@ -269,16 +255,7 @@
             const key = 'parentUnreadNotifyShown:' + accountMarker;
             const marker = String(unread);
             if (localStorage.getItem(key) === marker) return;
-            if (Notification.permission === 'default') {
-                Notification.requestPermission().then(function (perm) {
-                    if (perm === 'granted') {
-                        new Notification('School Notifications', {
-                            body: 'You have ' + unread + ' unread message(s).'
-                        });
-                        localStorage.setItem(key, marker);
-                    }
-                });
-            } else if (Notification.permission === 'granted') {
+            if (Notification.permission === 'granted') {
                 new Notification('School Notifications', {
                     body: 'You have ' + unread + ' unread message(s).'
                 });
@@ -287,6 +264,41 @@
         })();
     </script>
     {% endif %}
+    <script>
+        (function () {
+            const stateEl = document.getElementById('parentBrowserNotifState');
+            const btn = document.getElementById('enableParentBrowserNotif');
+            if (!stateEl || !btn) return;
+            if (!('Notification' in window)) {
+                stateEl.textContent = 'Browser alerts are not supported on this device.';
+                btn.disabled = true;
+                return;
+            }
+
+            function updateState() {
+                if (Notification.permission === 'granted') {
+                    stateEl.textContent = 'Browser alerts enabled.';
+                    btn.disabled = true;
+                    return;
+                }
+                if (Notification.permission === 'denied') {
+                    stateEl.textContent = 'Browser alerts blocked. Enable them in browser settings.';
+                    btn.disabled = true;
+                    return;
+                }
+                stateEl.textContent = 'Click to allow browser alerts for new school notifications.';
+                btn.disabled = false;
+            }
+
+            btn.addEventListener('click', function () {
+                Notification.requestPermission().then(function () {
+                    updateState();
+                });
+            });
+
+            updateState();
+        })();
+    </script>
     <script>
         (function () {
             const canvases = Array.from(document.querySelectorAll('.child-trend-chart'));
@@ -332,7 +344,6 @@
             document.head.appendChild(chartScript);
         })();
     </script>
-    {% include 'shared/_ai_assistant_widget.html' %}
 </body>
 </html>
 

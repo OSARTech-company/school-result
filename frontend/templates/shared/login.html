@@ -4,259 +4,130 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Osartech Multi-School Result System</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260309a') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         :root {
-            --bg: #eef3f8;
-            --surface: #ffffff;
-            --surface-soft: #f7fbff;
-            --text: #0f2236;
-            --muted: #5c6f82;
-            --line: #cfdae7;
-            --brand: #0f4f8a;
-            --brand-2: #0f766e;
-            --accent: #b45309;
-            --danger: #b42318;
-            --radius-lg: 24px;
-            --radius: 14px;
-            --shadow: 0 20px 45px rgba(17, 42, 70, 0.14);
+            --auth-bg: #f3f6fa;
+            --auth-card: #ffffff;
+            --auth-line: #d8e0ea;
+            --auth-text: #0f172a;
+            --auth-muted: #5b6475;
+            --auth-brand: #0f4c81;
+            --auth-brand-2: #1f7a8c;
+            --auth-danger: #b42318;
+            --auth-warn-line: #f0c7a0;
+            --auth-warn-bg: #fff6eb;
+            --auth-warn-text: #6f4300;
         }
 
         * { box-sizing: border-box; }
-        html, body { margin: 0; padding: 0; }
+
         body {
+            margin: 0;
+            min-height: 100vh;
             font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-            min-height: 100vh;
-            color: var(--text);
+            color: var(--auth-text);
             background:
-                radial-gradient(circle at 4% 8%, rgba(15, 79, 138, 0.14), transparent 28%),
-                radial-gradient(circle at 95% 2%, rgba(15, 118, 110, 0.12), transparent 24%),
-                linear-gradient(180deg, #f7fbff 0%, #edf3f9 100%);
-        }
-
-        .layout {
-            min-height: 100vh;
-            display: grid;
-            grid-template-columns: 1fr;
-            transition: grid-template-columns .34s ease;
-        }
-
-        .left-pane {
-            position: relative;
-            padding: 26px 34px 30px;
+                radial-gradient(circle at 8% 10%, rgba(31, 122, 140, 0.08), transparent 34%),
+                radial-gradient(circle at 90% 2%, rgba(15, 76, 129, 0.08), transparent 30%),
+                var(--auth-bg);
             display: flex;
-            flex-direction: column;
-            gap: 18px;
-        }
-
-        .right-pane {
-            display: none;
-            border-left: 1px solid var(--line);
-            background: linear-gradient(180deg, #f8fbff 0%, #f0f6fd 100%);
             align-items: center;
             justify-content: center;
-            padding: 26px;
+            padding: 24px 14px;
         }
 
-        .topbar {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 10px;
-            position: sticky;
-            top: 0;
-            z-index: 3;
-            backdrop-filter: blur(8px);
-            padding: 2px 0;
+        .container {
+            width: min(1040px, 100%);
+            margin: 0;
+            padding: 0;
         }
 
-        .brand {
-            display: flex;
-            align-items: center;
+        .auth-shell {
+            display: grid;
+            grid-template-columns: minmax(280px, 0.95fr) minmax(360px, 1.05fr);
+            border-radius: 16px;
+            overflow: hidden;
+            border: 1px solid var(--auth-line);
+            background: var(--auth-card);
+            box-shadow: 0 18px 34px rgba(15, 23, 42, 0.1);
+        }
+
+        .auth-info {
+            padding: clamp(20px, 3vw, 32px);
+            background: linear-gradient(165deg, #0f4c81 0%, #1f7a8c 100%);
+            color: #eff6ff;
+            display: grid;
+            align-content: center;
             gap: 12px;
-            font-weight: 800;
-            letter-spacing: .2px;
-            color: #163858;
         }
 
-        .brand-mark {
-            width: 38px;
-            height: 38px;
-            border-radius: 12px;
-            background: linear-gradient(135deg, var(--brand) 0%, var(--brand-2) 100%);
+        .auth-brand {
             display: inline-flex;
             align-items: center;
-            justify-content: center;
-            overflow: hidden;
-            border: 1px solid rgba(15, 23, 42, 0.08);
-        }
-
-        .brand-mark img {
-            width: 100%;
-            height: 100%;
-            object-fit: contain;
-            padding: 4px;
-            background: #fff;
-        }
-
-        .btn {
-            border: 1px solid transparent;
-            background: var(--brand);
-            color: #fff;
-            border-radius: 11px;
-            padding: 10px 18px;
-            font-weight: 700;
-            text-decoration: none;
-            cursor: pointer;
-            box-shadow: 0 8px 18px rgba(15, 79, 138, 0.26);
-        }
-
-        .btn:hover { filter: brightness(1.02); }
-
-        .hero {
-            background: rgba(255, 255, 255, 0.82);
-            border: 1px solid #d7e2ee;
-            border-radius: var(--radius-lg);
-            box-shadow: var(--shadow);
-            padding: 28px 30px;
-            display: grid;
-            gap: 16px;
-            animation: fadeUp .45s ease;
-        }
-
-        .hero h1 {
-            margin: 0;
-            font-size: clamp(1.85rem, 2.9vw, 3rem);
-            line-height: 1.14;
-            color: #122f4b;
-        }
-
-        .hero p {
-            margin: 0;
-            color: var(--muted);
-            line-height: 1.65;
-            max-width: 78ch;
-        }
-
-        .metrics {
-            display: grid;
-            grid-template-columns: repeat(3, minmax(120px, 1fr));
-            gap: 12px;
-        }
-
-        .metric {
-            border: 1px solid #d6e2ef;
-            border-radius: 12px;
-            background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
-            padding: 12px;
-        }
-
-        .metric .k {
-            margin: 0;
-            font-size: 1.15rem;
-            font-weight: 800;
-            color: #133657;
-        }
-
-        .metric .v {
-            margin: 4px 0 0;
-            font-size: .85rem;
-            color: var(--muted);
-        }
-
-        .sections {
-            display: grid;
-            grid-template-columns: 1.25fr .95fr;
-            gap: 14px;
-        }
-
-        .panel {
-            background: var(--surface);
-            border: 1px solid var(--line);
-            border-radius: 16px;
-            padding: 18px;
-        }
-
-        .panel h2 {
-            margin: 0 0 12px;
-            font-size: 1.03rem;
-            color: #153654;
-        }
-
-        .feature-grid {
-            display: grid;
             gap: 10px;
+            font-weight: 800;
+            letter-spacing: 0.02em;
+            font-size: 1.05rem;
         }
 
-        .feature-item {
-            border: 1px solid #dbe6f2;
-            border-radius: 12px;
-            background: #fbfdff;
-            padding: 11px 12px;
+        .auth-brand .logo {
+            width: 42px;
+            height: 42px;
+            object-fit: contain;
+            border-radius: 9px;
+            background: #fff;
+            border: 1px solid rgba(255, 255, 255, 0.55);
+            padding: 5px;
         }
 
-        .feature-item h3 {
+        .auth-info h1 {
+            margin: 6px 0 0;
+            line-height: 1.2;
+            font-size: clamp(1.35rem, 2.15vw, 1.85rem);
+        }
+
+        .auth-info p {
             margin: 0;
-            font-size: .94rem;
-            color: #153756;
-        }
-
-        .feature-item p {
-            margin: 5px 0 0;
-            font-size: .87rem;
-            color: var(--muted);
+            color: rgba(239, 246, 255, 0.88);
+            font-size: 0.95rem;
             line-height: 1.5;
         }
 
-        .timeline {
+        .auth-info ul {
+            margin: 4px 0 0;
+            padding-left: 18px;
             display: grid;
-            gap: 8px;
+            gap: 6px;
+            font-size: 0.9rem;
         }
 
-        .timeline-item {
-            display: grid;
-            grid-template-columns: 82px 1fr;
-            gap: 9px;
-            align-items: start;
-            font-size: .88rem;
+        .auth-card {
+            background: #fff;
+            padding: clamp(18px, 3vw, 32px);
         }
 
-        .timeline-item .time {
-            color: #0f4f8a;
-            font-weight: 700;
+        .auth-title {
+            margin: 0 0 10px;
+            font-size: clamp(1.25rem, 2.6vw, 1.55rem);
+            line-height: 1.25;
+            color: var(--auth-text);
         }
 
-        .timeline-item .txt {
-            color: #415b75;
-            line-height: 1.45;
-        }
-
-        .login-card {
-            width: 100%;
-            max-width: 460px;
-            background: var(--surface);
-            border: 1px solid #d7e3ef;
-            border-radius: 18px;
-            box-shadow: 0 18px 45px rgba(17, 40, 66, 0.15);
-            padding: 24px;
-            animation: fadeUp .38s ease;
-        }
-
-        .login-card h2 {
-            margin: 0;
-            color: #163656;
-        }
-
-        .login-card .sub {
-            margin: 7px 0 16px;
-            color: var(--muted);
-            font-size: .93rem;
+        .auth-subtitle {
+            margin: 0 0 16px;
+            color: var(--auth-muted);
+            font-size: 0.95rem;
+            line-height: 1.5;
         }
 
         .alert {
-            border-radius: 10px;
-            padding: 10px 12px;
+            padding: 12px;
             margin-bottom: 12px;
-            font-size: .9rem;
+            border-radius: 8px;
+            word-break: break-word;
             border: 1px solid #d5e5f7;
             background: #f4f9ff;
             color: #21486a;
@@ -265,22 +136,22 @@
         .alert.error {
             border-color: #f4c6c6;
             background: #fff4f4;
-            color: var(--danger);
+            color: var(--auth-danger);
         }
 
         .access-state-card {
             border-radius: 10px;
             padding: 10px 12px;
             margin-bottom: 12px;
-            border: 1px solid #f0c7a0;
-            background: #fff6eb;
-            color: #6f4300;
+            border: 1px solid var(--auth-warn-line);
+            background: var(--auth-warn-bg);
+            color: var(--auth-warn-text);
         }
 
         .access-state-card.blocked {
             border-color: #f4c6c6;
             background: #fff4f4;
-            color: var(--danger);
+            color: var(--auth-danger);
         }
 
         .access-state-card h3 {
@@ -294,203 +165,167 @@
             line-height: 1.45;
         }
 
-        .field { margin-bottom: 13px; }
+        .form-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 8px;
+        }
 
-        .field label {
+        .form-grid label {
             display: block;
-            margin-bottom: 6px;
+            margin-bottom: 2px;
             font-weight: 700;
             font-size: .9rem;
             color: #2a4661;
         }
 
-        .field input {
+        .input {
             width: 100%;
-            border: 1px solid #c3d4e7;
-            border-radius: 10px;
             padding: 11px 12px;
-            font-size: 1rem;
-            outline: none;
+            border: 1px solid #ced4da;
+            border-radius: 8px;
+            margin-top: 6px;
+            margin-bottom: 10px;
+            font-size: 16px;
+            line-height: 1.25;
             background: #fff;
         }
 
-        .field input:focus {
-            border-color: #8eb7df;
-            box-shadow: 0 0 0 3px rgba(38, 115, 191, 0.14);
+        .input:focus {
+            border-color: var(--auth-brand);
+            box-shadow: 0 0 0 3px rgba(31, 122, 140, 0.15);
+            outline: none;
         }
 
         .terms {
             display: flex;
             align-items: flex-start;
             gap: 8px;
-            margin: 3px 0 14px;
+            margin: 4px 0 14px;
             font-size: .9rem;
             color: #3d556d;
         }
 
+        .terms input {
+            margin-top: 3px;
+        }
+
         .terms a {
-            color: var(--brand);
+            color: var(--auth-brand);
             font-weight: 700;
             text-decoration: none;
         }
 
-        .submit-btn {
-            width: 100%;
-            border: 0;
-            border-radius: 10px;
-            padding: 11px 12px;
-            font-size: .97rem;
-            font-weight: 800;
-            background: linear-gradient(135deg, #105594 0%, #0f766e 100%);
+        .terms a:hover {
+            text-decoration: underline;
+        }
+
+        .auth-actions {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 6px;
+        }
+
+        .btn-main {
+            background: linear-gradient(140deg, var(--auth-brand) 0%, var(--auth-brand-2) 100%);
             color: #fff;
+            border: none;
+            border-radius: 8px;
+            padding: 11px 16px;
             cursor: pointer;
+            font-weight: 700;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
         }
 
-        .hint {
-            margin-top: 10px;
-            font-size: .82rem;
+        .btn-main:hover {
+            filter: brightness(1.03);
+            transform: translateY(-1px);
+        }
+
+        .btn-alt {
+            background: #fff;
+            color: var(--auth-brand);
+            border: 1px solid #b7c7dc;
+            border-radius: 8px;
+            padding: 11px 16px;
+            font-weight: 700;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .auth-hint {
+            margin: 12px 0 0;
+            font-size: .86rem;
             color: #61768d;
-            text-align: center;
         }
 
-        .split-open .layout {
-            grid-template-columns: minmax(460px, 1.15fr) minmax(340px, .85fr);
+        .auth-hint a {
+            color: var(--auth-brand);
+            font-weight: 700;
+            text-decoration: none;
         }
 
-        .split-open .right-pane { display: flex; }
-
-        .split-open .hero {
-            padding: 22px 24px;
+        .auth-hint a:hover {
+            text-decoration: underline;
         }
 
-        .split-open .hero h1 {
-            font-size: clamp(1.45rem, 2.1vw, 2.2rem);
-        }
-
-        .split-open .sections {
-            grid-template-columns: 1fr;
-        }
-
-        .split-open .metrics .metric:nth-child(3) {
-            display: none;
-        }
-
-        @keyframes fadeUp {
-            from { opacity: 0; transform: translateY(8px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        @media (max-width: 1040px) {
-            .sections { grid-template-columns: 1fr; }
-        }
-
-        @media (max-width: 960px) {
-            .split-open .layout { grid-template-columns: 1fr; }
-            .split-open .right-pane {
-                border-left: 0;
-                border-top: 1px solid var(--line);
+        @media (max-width: 860px) {
+            body {
+                align-items: flex-start;
+                padding: 14px 10px;
             }
-            .left-pane {
-                padding: 18px 18px 22px;
+
+            .auth-shell {
+                grid-template-columns: 1fr;
             }
-            .hero {
-                padding: 20px;
-            }
-            .metrics {
-                grid-template-columns: 1fr 1fr;
+
+            .auth-info {
+                border-bottom: 1px solid rgba(255, 255, 255, 0.2);
             }
         }
 
         @media (max-width: 560px) {
-            .metrics { grid-template-columns: 1fr; }
-            .timeline-item { grid-template-columns: 1fr; gap: 2px; }
-            .timeline-item .time { font-size: .83rem; }
-            .topbar { position: static; }
+            .auth-actions {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .auth-actions .btn-main,
+            .auth-actions .btn-alt {
+                width: 100%;
+            }
         }
     </style>
 </head>
-{% set split_open = (request.path == url_for('login')) %}
-<body class="{% if split_open %}split-open{% endif %}" id="pageBody">
-    <main class="layout">
-        <section class="left-pane">
-            <header class="topbar">
-                <div class="brand">
-                    <span class="brand-mark">
-                        <img src="{{ url_for('static', filename='img/osartech-logo.png') }}" alt="Osartech Logo">
-                    </span>
-                    <span>Osartech Result Network</span>
+<body>
+    <div class="container">
+        <div class="auth-shell">
+            <aside class="auth-info">
+                <div class="auth-brand">
+                    <img class="logo" src="{{ url_for('static', filename='img/osartech-logo.png') }}" alt="Osartech">
+                    <span>OSARTECH</span>
                 </div>
-                <button type="button" class="btn" id="openLoginBtn">Login</button>
-            </header>
+                <h1>Multi-School Access Portal</h1>
+                <p>Secure sign-in for super admin, school admin, teacher, student, and parent accounts.</p>
+                <ul>
+                    <li>Role-based dashboards and workflow access</li>
+                    <li>Per-school data isolation and audit visibility</li>
+                    <li>Unified result, timetable, and communication system</li>
+                </ul>
+            </aside>
 
-            <section class="hero">
-                <h1>Unified result, attendance, and teacher workflow for multiple schools.</h1>
-                <p>
-                    Run many schools from one secure platform with per-school access control, class and subject workflows, controlled publication, and clean result access for students and parents.
-                </p>
-                <div class="metrics">
-                    <article class="metric">
-                        <p class="k">Multi-School</p>
-                        <p class="v">One platform, many schools</p>
-                    </article>
-                    <article class="metric">
-                        <p class="k">School Isolated</p>
-                        <p class="v">Data separated by school</p>
-                    </article>
-                    <article class="metric">
-                        <p class="k">Audit Ready</p>
-                        <p class="v">Every score change tracked</p>
-                    </article>
-                </div>
-            </section>
-
-            <section class="sections">
-                <article class="panel">
-                    <h2>Multi-School Highlights</h2>
-                    <div class="feature-grid">
-                        <div class="feature-item">
-                            <h3>Per-School Access Control</h3>
-                            <p>Each account is scoped to its own school while super admin can manage across schools.</p>
-                        </div>
-                        <div class="feature-item">
-                            <h3>Class and Subject Assignment</h3>
-                            <p>Assign teachers by class, by subject, or both with clear role boundaries.</p>
-                        </div>
-                        <div class="feature-item">
-                            <h3>Secure Score Lifecycle</h3>
-                            <p>Submission, review, correction reason capture, and publication checkpoints for clean records.</p>
-                        </div>
-                    </div>
-                </article>
-
-                <article class="panel">
-                    <h2>School Workflow Timeline</h2>
-                    <div class="timeline">
-                        <div class="timeline-item">
-                            <span class="time">Week 1-2</span>
-                            <span class="txt">Per-school class/subject setup and teacher assignment finalization.</span>
-                        </div>
-                        <div class="timeline-item">
-                            <span class="time">Week 3-10</span>
-                            <span class="txt">Subject teachers enter continuous assessment and exam scores.</span>
-                        </div>
-                        <div class="timeline-item">
-                            <span class="time">Week 11</span>
-                            <span class="txt">Class teacher validation and school admin publication checks.</span>
-                        </div>
-                        <div class="timeline-item">
-                            <span class="time">Week 12</span>
-                            <span class="txt">Results released to students and parents with full audit visibility.</span>
-                        </div>
-                    </div>
-                </article>
-            </section>
-        </section>
-
-        <aside class="right-pane" id="loginPanel">
-            <section class="login-card">
-                <h2>Sign In</h2>
-                <p class="sub">Use your assigned username and password, or parent phone and password.</p>
+            <section class="auth-card">
+                <h2 class="auth-title"><i class="fas fa-user-shield"></i> Sign In</h2>
+                <p class="auth-subtitle">Use your assigned username and password, or parent phone and password.</p>
 
                 {% with messages = get_flashed_messages(with_categories=true) %}
                     {% if messages %}
@@ -499,6 +334,7 @@
                         {% endfor %}
                     {% endif %}
                 {% endwith %}
+
                 {% if blocked_access_state %}
                 {% set blocked_status = (blocked_access_state.effective_status or blocked_access_state.status or 'restricted') %}
                 <div class="access-state-card {% if blocked_status in ['suspended', 'pending_payment'] %}blocked{% endif %}">
@@ -509,41 +345,29 @@
 
                 <form method="post" action="{{ url_for('login') }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <div class="field">
+                    <div class="form-grid">
                         <label for="username">Username / Parent Phone</label>
-                        <input type="text" id="username" name="username" autocomplete="username" required>
-                    </div>
-                    <div class="field">
+                        <input class="input" type="text" id="username" name="username" autocomplete="username" required>
                         <label for="password">Password</label>
-                        <input type="password" id="password" name="password" autocomplete="current-password" required>
+                        <input class="input" type="password" id="password" name="password" autocomplete="current-password" required>
                     </div>
+
                     <div class="terms">
                         <input type="checkbox" id="agree_terms" name="agree_terms" {% if terms_read %}checked{% endif %}>
                         <label for="agree_terms">
                             I agree to the <a href="{{ url_for('terms_privacy') }}" target="_blank" rel="noopener">Terms & Privacy Policy</a>.
                         </label>
                     </div>
-                    <button type="submit" class="submit-btn">Sign In</button>
-                </form>
-                <p class="hint">Need help? Contact your school administrator for account support.</p>
-                <p class="hint">New school? <a href="{{ url_for('school_access_request') }}">Request School Access</a></p>
-            </section>
-        </aside>
-    </main>
 
-    <script>
-        (function () {
-            var body = document.getElementById('pageBody');
-            var openBtn = document.getElementById('openLoginBtn');
-            if (!body || !openBtn) return;
-            openBtn.addEventListener('click', function () {
-                body.classList.add('split-open');
-                var usernameInput = document.getElementById('username');
-                if (usernameInput) {
-                    window.setTimeout(function () { usernameInput.focus(); }, 100);
-                }
-            });
-        })();
-    </script>
+                    <div class="auth-actions">
+                        <button type="submit" class="btn-main"><i class="fas fa-sign-in-alt"></i> Sign In</button>
+                    </div>
+                </form>
+
+                <p class="auth-hint">Need help? Contact your school administrator for account support.</p>
+                <p class="auth-hint">New school? <a href="{{ url_for('school_access_request') }}">Request School Access</a></p>
+            </section>
+        </div>
+    </div>
 </body>
 </html>

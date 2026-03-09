@@ -23,36 +23,68 @@
             <span class="notif-badge">{{ unread_parent_messages }}</span>
             {% endif %}
         </a>
-        <a href="{{ url_for('parent_period_attendance') }}" class="side-link{% if active_page == 'attendance' %} active{% endif %}">
-            <i class="fas fa-calendar-check"></i>
-            <span>Attendance</span>
-        </a>
-        <a href="{{ url_for('parent_timetable') }}" class="side-link{% if active_page == 'timetable' %} active{% endif %}">
-            <i class="fas fa-table"></i>
-            <span>Timetable</span>
-        </a>
+
+        {% set selected_student_key = '' %}
+        {% if student_key is defined and student_key %}
+            {% set selected_student_key = student_key %}
+        {% elif selected_key is defined and selected_key %}
+            {% set selected_student_key = selected_key %}
+        {% elif request.args.get('student_key') %}
+            {% set selected_student_key = request.args.get('student_key') %}
+        {% endif %}
+
+        <div class="side-group-toggle" aria-hidden="true">
+            <span>{% if (children or [])|length == 1 %}Child{% else %}Children{% endif %}</span>
+            <span class="notif-badge">{{ (children or [])|length }}</span>
+        </div>
+
         {% for child in (children or []) %}
-        <a href="{{ url_for('parent_view_result', student_key=child.key) }}" class="side-link">
-            <i class="fas fa-user-graduate"></i>
-            <span>{{ child.firstname }} Results</span>
-        </a>
-        <a href="{{ url_for('parent_compare_results', student_key=child.key) }}" class="side-link">
-            <i class="fas fa-chart-line"></i>
-            <span>{{ child.firstname }} Compare</span>
-        </a>
-        <a href="{{ url_for('parent_submit_dispute', student_key=child.key) }}" class="side-link">
-            <i class="fas fa-balance-scale"></i>
-            <span>{{ child.firstname }} Dispute</span>
-        </a>
+        {% set child_is_active = (selected_student_key == child.key) %}
+        <details class="side-group" data-student-key="{{ child.key|e }}" data-accordion-mobile="1" data-accordion-group="parent-children" {% if child_is_active %}open{% endif %}>
+            <summary class="side-group-toggle">
+                <span>{{ child.firstname }} ({{ child.student_id }})</span><i class="fas fa-chevron-down"></i>
+            </summary>
+            <div class="side-group-links">
+                <a href="{{ url_for('parent_view_result', student_key=child.key) }}" class="side-link{% if request.endpoint == 'parent_view_result' and child_is_active %} active{% endif %}">
+                    <i class="fas fa-user-graduate"></i>
+                    <span>Results</span>
+                </a>
+                <a href="{{ url_for('parent_compare_results', student_key=child.key) }}" class="side-link{% if active_page == 'compare' and child_is_active %} active{% endif %}">
+                    <i class="fas fa-chart-line"></i>
+                    <span>Compare Terms</span>
+                </a>
+                <a href="{{ url_for('parent_submit_dispute', student_key=child.key) }}" class="side-link{% if request.endpoint == 'parent_submit_dispute' and child_is_active %} active{% endif %}">
+                    <i class="fas fa-balance-scale"></i>
+                    <span>Report Dispute</span>
+                </a>
+                <a href="{{ url_for('parent_period_attendance', student_key=child.key) }}" class="side-link{% if request.endpoint == 'parent_period_attendance' and child_is_active %} active{% endif %}">
+                    <i class="fas fa-calendar-check"></i>
+                    <span>Attendance</span>
+                </a>
+                <a href="{{ url_for('parent_timetable', student_key=child.key) }}" class="side-link{% if request.endpoint == 'parent_timetable' and child_is_active %} active{% endif %}">
+                    <i class="fas fa-table"></i>
+                    <span>Timetable</span>
+                </a>
+            </div>
+        </details>
         {% endfor %}
-        <a href="#parent-password-card" class="side-link">
-            <i class="fas fa-key"></i>
-            <span>Change Password</span>
-        </a>
-        <a href="{{ url_for('help', role='parent') }}" class="side-link">
-            <i class="fas fa-question-circle"></i>
-            <span>Help</span>
-        </a>
+
+        <details class="side-group" {% if request.endpoint in ['help', 'parent_change_password'] %}open{% endif %}>
+            <summary class="side-group-toggle">
+                <span>Support</span><i class="fas fa-chevron-down"></i>
+            </summary>
+            <div class="side-group-links">
+                <a href="{{ url_for('parent_dashboard') }}#parent-password-card" class="side-link">
+                    <i class="fas fa-key"></i>
+                    <span>Change Password</span>
+                </a>
+                <a href="{{ url_for('help', role='parent') }}" class="side-link{% if request.endpoint == 'help' %} active{% endif %}">
+                    <i class="fas fa-question-circle"></i>
+                    <span>Help</span>
+                </a>
+            </div>
+        </details>
+
         <form method="post" action="{{ url_for('logout') }}">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="side-link side-link-logout">
