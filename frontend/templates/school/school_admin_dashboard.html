@@ -230,6 +230,21 @@
             </div>
           </div>
 
+          <div class="card">
+            <div class="section-title-bar">
+              <h2><i class="fas fa-sitemap"></i> Admin Tools</h2>
+              <p>Review requests and keep data quality on track.</p>
+            </div>
+            <div class="quick-actions">
+              <a href="{{ url_for('school_admin_attendance_integrity') }}" class="quick-link"><i class="fas fa-user-check"></i> Attendance Integrity</a>
+              <a href="{{ url_for('school_admin_timetable_coverage') }}" class="quick-link"><i class="fas fa-table"></i> Timetable Coverage</a>
+              <a href="{{ url_for('school_admin_reports') }}" class="quick-link"><i class="fas fa-file-export"></i> Reports Export</a>
+              <a href="{{ url_for('school_admin_student_reset_requests') }}" class="quick-link"><i class="fas fa-key"></i> Reset Requests</a>
+              <a href="{{ url_for('school_admin_subject_requests') }}" class="quick-link"><i class="fas fa-list-check"></i> Subject Requests</a>
+              <a href="{{ url_for('school_admin_disputes') }}" class="quick-link"><i class="fas fa-comment-dots"></i> Dispute Threads</a>
+            </div>
+          </div>
+
           <div class="layout-main">
             <div class="layout-side">
               <div class="section-title-bar">

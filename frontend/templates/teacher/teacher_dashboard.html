@@ -103,6 +103,19 @@
         }
         .welcome-modal-card h3 { margin: 0 0 10px; color: #0f172a; }
         .welcome-modal-card ol { margin: 8px 0 14px 18px; color: #334155; }
+        .arm-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 12px;
+            border-radius: 999px;
+            border: 1px solid #dbe4ef;
+            background: #f8fbff;
+            color: #1e3a5f;
+            font-weight: 700;
+            margin-top: 8px;
+        }
+        .arm-toggle select { border-radius: 8px; padding: 4px 8px; }
     </style>
 </head>
 <body style="--brand: {{ school.theme_primary_color if school and school.theme_primary_color else '#0F4C81' }}; --brand-2: {{ school.theme_secondary_color if school and school.theme_secondary_color else '#1F7A8C' }}; --accent: {{ school.theme_accent_color if school and school.theme_accent_color else '#1F7A8C' }};">
@@ -174,6 +187,22 @@
                     <div class="school-logo-fallback"><i class="fas fa-school" aria-hidden="true"></i><span>{{ school_initial }}</span></div>
                     {% endif %}
                 </div>
+
+                {% set arm_mode_value = (request.args.get('arm_mode') or (school.class_arm_ranking_mode if school else 'separate')) %}
+                <form method="GET" action="{{ url_for('teacher_dashboard') }}" class="arm-toggle">
+                    <i class="fas fa-layer-group" aria-hidden="true"></i>
+                    <span>Class Arm View:</span>
+                    <input type="hidden" name="tab" value="{{ active_tab }}">
+                    {% if request.args.get('score_class') %}<input type="hidden" name="score_class" value="{{ request.args.get('score_class') }}">{% endif %}
+                    {% if request.args.get('score_subject') %}<input type="hidden" name="score_subject" value="{{ request.args.get('score_subject') }}">{% endif %}
+                    {% if request.args.get('rank_class') %}<input type="hidden" name="rank_class" value="{{ request.args.get('rank_class') }}">{% endif %}
+                    {% if request.args.get('rank_subject') %}<input type="hidden" name="rank_subject" value="{{ request.args.get('rank_subject') }}">{% endif %}
+                    {% if request.args.get('rank_arm_mode') %}<input type="hidden" name="rank_arm_mode" value="{{ request.args.get('rank_arm_mode') }}">{% endif %}
+                    <select name="arm_mode" onchange="this.form.submit()">
+                        <option value="separate" {% if arm_mode_value == 'separate' %}selected{% endif %}>Separate Arms</option>
+                        <option value="together" {% if arm_mode_value == 'together' %}selected{% endif %}>Combine Arms</option>
+                    </select>
+                </form>
         
                 {% with messages = get_flashed_messages(with_categories=true) %}
                     {% if messages %}

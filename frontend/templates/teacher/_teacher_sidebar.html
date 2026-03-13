@@ -95,6 +95,10 @@
                     <i class="fas fa-list-ol"></i>
                     <span>Subject Ranks</span>
                 </a>
+                <a href="{{ url_for('teacher_subject_handover') }}" class="side-link{% if active_page == 'subject_handover' %} active{% endif %}">
+                    <i class="fas fa-clipboard-check"></i>
+                    <span>Subject Handover</span>
+                </a>
                 <a href="{{ url_for('teacher_upload_csv') }}" class="side-link{% if active_page == 'upload_csv' %} active{% endif %}">
                     <i class="fas fa-file-csv"></i>
                     <span>Upload CSV</span>

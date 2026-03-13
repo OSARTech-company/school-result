@@ -44,6 +44,14 @@
                     <i class="fas fa-triangle-exclamation"></i>
                     <span>Error Logs</span>
                 </a>
+                <a href="{{ url_for('super_admin_system_settings') }}" class="side-link">
+                    <i class="fas fa-sliders-h"></i>
+                    <span>System Settings</span>
+                </a>
+                <a href="{{ url_for('super_admin_webhook_setup') }}" class="side-link">
+                    <i class="fas fa-plug"></i>
+                    <span>Webhook Setup</span>
+                </a>
                 <form method="post" action="{{ url_for('logout') }}">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" class="side-link side-link-logout">

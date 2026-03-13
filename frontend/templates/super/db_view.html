@@ -36,6 +36,9 @@
             <strong>Database Viewer (Super Admin)</strong>
             <a href="{{ url_for('super_admin_dashboard') }}">Back</a>
         </div>
+        <div class="flash error">
+            Dev only: DB Viewer is disabled in production. Avoid sharing screenshots containing sensitive data.
+        </div>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}

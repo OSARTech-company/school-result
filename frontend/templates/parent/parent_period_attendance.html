@@ -102,29 +102,7 @@
                             {% endif %}
                         </div>
                     </div>
-                    <div class="mt-12">
-                        <strong>Subject Teacher Comments:</strong>
-                        {% if subject_teacher_comments %}
-                        <table class="mt-10">
-                            <thead>
-                                <tr>
-                                    <th>Subject</th>
-                                    <th>Comment</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for row in subject_teacher_comments %}
-                                <tr>
-                                    <td>{{ row.subject }}</td>
-                                    <td>{{ row.comment }}</td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                        {% else %}
-                        <p class="muted mt-10">No subject teacher comments found for selected term/year.</p>
-                        {% endif %}
-                    </div>
+                    <p class="muted mt-12">Subject teacher comments are available on the Subject Comments page.</p>
                 </div>
 
                 <div class="card">

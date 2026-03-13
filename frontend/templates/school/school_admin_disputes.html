@@ -61,6 +61,7 @@
                         </select>
                         <input name="resolution_note" placeholder="Resolution note" value="{{ row.resolution_note }}">
                         <button class="btn btn-primary" type="submit">Save</button>
+                        <a class="btn btn-secondary" href="{{ url_for('school_admin_dispute_thread', dispute_id=row.id) }}">Thread</a>
                         {% if row.student_id %}
                         <a class="btn btn-secondary" href="{{ url_for('school_admin_correct_result', student_id=row.student_id, term=row.term) }}">Correct Result</a>
                         {% endif %}

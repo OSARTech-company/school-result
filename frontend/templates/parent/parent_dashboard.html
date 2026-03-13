@@ -40,6 +40,25 @@
             justify-content: center;
             flex-wrap: wrap;
         }
+        .parent-quick-actions {
+            display: grid;
+            gap: 10px;
+            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+        }
+        .parent-quick-link {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 10px 12px;
+            border-radius: 10px;
+            border: 1px solid #d9e3ef;
+            background: #f7fbff;
+            color: #1e3b5f;
+            text-decoration: none;
+            font-weight: 700;
+        }
+        .parent-quick-link:hover { background: #edf5ff; }
         .welcome-modal-overlay {
             position: fixed;
             inset: 0;
@@ -109,6 +128,18 @@
                     <a href="{{ url_for('parent_messages') }}" class="btn btn-primary mt-10">
                         <i class="fas fa-external-link-alt"></i> Open Messages
                     </a>
+                </div>
+
+                {% set first_child_key = children[0].key if children else '' %}
+                <div class="card" id="parent-tools-card">
+                    <h3 class="no-margin"><i class="fas fa-compass"></i> Parent Tools</h3>
+                    <p class="muted mt-10">Quick links to the most used parent pages.</p>
+                    <div class="parent-quick-actions mt-10">
+                        <a href="{{ url_for('parent_notification_preferences') }}" class="parent-quick-link"><i class="fas fa-sliders-h"></i> Notification Preferences</a>
+                        <a href="{{ url_for('parent_disputes') }}" class="parent-quick-link"><i class="fas fa-comment-dots"></i> Dispute Updates</a>
+                        <a href="{{ url_for('parent_subject_comments', student_key=first_child_key) if first_child_key else url_for('parent_subject_comments') }}" class="parent-quick-link"><i class="fas fa-clipboard-list"></i> Subject Comments</a>
+                        <a href="{{ url_for('parent_timetable', student_key=first_child_key) if first_child_key else url_for('parent_timetable') }}" class="parent-quick-link"><i class="fas fa-calendar-week"></i> Timetable</a>
+                    </div>
                 </div>
 
                 <div class="card" id="parent-password-card">

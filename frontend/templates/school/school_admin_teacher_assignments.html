@@ -61,12 +61,8 @@
                 </div>
                 <div class="form-group">
                   <label for="class_name">Class</label>
-                  <select id="class_name" name="classname" required>
-                    <option value="">-- Select Class --</option>
-                    {% for class_name in class_options %}
-                    <option value="{{ class_name }}">{{ class_name }}</option>
-                    {% endfor %}
-                  </select>
+                  <input id="class_name" name="classname" list="class_options_list" placeholder="e.g., JSS1A" required />
+                  <p class="note-line">You can type class arms like JSS1A, JSS1B, SS2C.</p>
                 </div>
                 <div class="form-group">
                   <label for="class_term">Term</label>
@@ -98,12 +94,7 @@
                 </div>
                 <div class="form-group">
                   <label for="subject_classname">Class</label>
-                  <select id="subject_classname" name="target_classnames" required>
-                    <option value="">-- Select Class --</option>
-                    {% for class_name in class_options %}
-                    <option value="{{ class_name }}">{{ class_name }}</option>
-                    {% endfor %}
-                  </select>
+                  <input id="subject_classname" name="target_classnames" list="class_options_list" placeholder="e.g., JSS1A" required />
                 </div>
                 <div class="form-group">
                   <label for="subject_name">Subject</label>
@@ -171,6 +162,12 @@
             <p>No class assignments for current term/year.</p>
             {% endif %}
           </div>
+
+          <datalist id="class_options_list">
+            {% for class_name in class_options %}
+            <option value="{{ class_name }}"></option>
+            {% endfor %}
+          </datalist>
 
           <div class="card">
             <h2><i class="fas fa-table-list"></i> Current Subject Assigned</h2>
@@ -242,9 +239,34 @@
         } catch (e) {
           optionsMap = {};
         }
+        function canonicalizeClassName(value) {
+          return (value || '').replace(/[^a-z0-9]/gi, '').toUpperCase();
+        }
+        function baseClassKey(value) {
+          var canon = canonicalizeClassName(value);
+          var m = canon.match(/^(NURSERY|PRIMARY|JSS|SSS|SS)(\d+)/);
+          if (!m) return canon;
+          var level = m[1] === 'SSS' ? 'SS' : m[1];
+          return '' + level + m[2];
+        }
+        var canonicalMap = {};
+        Object.keys(optionsMap).forEach(function (key) {
+          var canon = canonicalizeClassName(key);
+          if (canon && !canonicalMap[canon]) {
+            canonicalMap[canon] = optionsMap[key];
+          }
+        });
         function renderSubjects() {
           var cls = classSelect.value || '';
-          var values = Array.isArray(optionsMap[cls]) ? optionsMap[cls] : [];
+          var values = Array.isArray(optionsMap[cls]) ? optionsMap[cls] : null;
+          if (!values) {
+            var canon = canonicalizeClassName(cls);
+            values = Array.isArray(canonicalMap[canon]) ? canonicalMap[canon] : null;
+          }
+          if (!values) {
+            var base = baseClassKey(cls);
+            values = Array.isArray(canonicalMap[base]) ? canonicalMap[base] : [];
+          }
           var current = subjectSelect.value || '';
           subjectSelect.innerHTML = '<option value="">-- Select Subject --</option>';
           values.forEach(function (s) {

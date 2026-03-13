@@ -122,6 +122,38 @@
             </form>
         </div>
 
+        {% if manual_payment_info %}
+        <div class="card">
+            <h2><i class="fas fa-receipt"></i> Submit Manual Payment Proof</h2>
+            <p class="note">If you paid via transfer, upload proof so we can confirm your payment.</p>
+            <form method="POST" action="{{ url_for('school_access_request') }}" enctype="multipart/form-data" class="toolbar">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="form_action" value="submit_payment_proof">
+                <div>
+                    <label for="payment_request_id">Request Reference</label>
+                    <input id="payment_request_id" name="payment_request_id" type="text" placeholder="REQ-20260308-ABC123" required>
+                </div>
+                <div>
+                    <label for="payment_school_email">School Email</label>
+                    <input id="payment_school_email" name="payment_school_email" type="email" placeholder="info@school.com">
+                </div>
+                <div>
+                    <label for="payment_reference">Payment Reference (optional)</label>
+                    <input id="payment_reference" name="payment_reference" type="text" placeholder="Bank transfer reference">
+                </div>
+                <div>
+                    <label for="payment_amount">Amount (optional)</label>
+                    <input id="payment_amount" name="payment_amount" type="number" min="0" step="0.01" placeholder="0.00">
+                </div>
+                <div>
+                    <label for="payment_proof">Payment Proof (PDF or image, max 5MB)</label>
+                    <input id="payment_proof" name="payment_proof" type="file" required accept=".pdf,.png,.jpg,.jpeg,.webp">
+                </div>
+                <button type="submit" class="btn btn-primary"><i class="fas fa-upload"></i> Submit Proof</button>
+            </form>
+        </div>
+        {% endif %}
+
         <div class="card">
             <h2><i class="fas fa-search"></i> Track Existing Request</h2>
             <form method="POST" action="{{ url_for('school_access_request') }}" class="toolbar">
@@ -160,6 +192,28 @@
             </div>
             {% endif %}
         </div>
+
+        {% if manual_payment_info %}
+        <div class="card">
+            <h2><i class="fas fa-building-columns"></i> Manual Payment (Optional)</h2>
+            <p class="note">If your school prefers manual payment, use the details below and submit proof to support.</p>
+            <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
+                <div class="stack-card">
+                    <p><strong>Account Number:</strong> {{ manual_payment_info.account_number }}</p>
+                    <p><strong>Account Name:</strong> {{ manual_payment_info.account_name }}</p>
+                    {% if manual_payment_info.bank_name %}
+                    <p><strong>Bank:</strong> {{ manual_payment_info.bank_name }}</p>
+                    {% endif %}
+                    {% if manual_payment_info.contact_phone %}
+                    <p><strong>Contact:</strong> {{ manual_payment_info.contact_phone }}</p>
+                    {% endif %}
+                    {% if manual_payment_info.note %}
+                    <p><strong>Note:</strong> {{ manual_payment_info.note }}</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% endif %}
     </div>
 </body>
 </html>

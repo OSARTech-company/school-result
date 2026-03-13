@@ -94,6 +94,8 @@
                                 <strong class="{{ 'op-on' if item.phone_verified else 'op-off' }}">{{ 'Yes' if item.phone_verified else 'No' }}</strong>
                                 | Document Verified:
                                 <strong class="{{ 'op-on' if item.document_verified else 'op-off' }}">{{ 'Yes' if item.document_verified else 'No' }}</strong>
+                                | Payment Proof:
+                                <strong class="{{ 'op-on' if item.payment_proof_path else 'op-off' }}">{{ 'Yes' if item.payment_proof_path else 'No' }}</strong>
                             </div>
                             {% if item.verification_meta and item.verification_meta.get('generic_email_domain') %}
                             <div class="school-meta"><strong>Risk Flag:</strong> School email is on a generic public domain. Keep stricter manual verification.</div>
@@ -106,6 +108,14 @@
                                 Not uploaded
                                 {% endif %}
                             </div>
+                            {% if item.payment_proof_path %}
+                            <div class="school-meta">
+                                Payment Proof:
+                                <a href="{{ url_for('super_admin_onboarding_download_proof', request_id=item.request_id) }}?payment=1" target="_blank" rel="noopener">Download</a>
+                                {% if item.payment_reference %}| Ref: {{ item.payment_reference }}{% endif %}
+                                {% if item.payment_amount %}| Amount: {{ item.payment_amount }}{% endif %}
+                            </div>
+                            {% endif %}
                             {% if item.note %}
                             <div class="school-meta"><strong>Note:</strong> {{ item.note }}</div>
                             {% endif %}
@@ -131,10 +141,15 @@
                                 <input type="email" name="admin_username" value="{{ item.admin_email }}" placeholder="Admin email">
                                 <select name="access_status" title="Access status">
                                     <option value="trial_free">Trial Free</option>
-                                    <option value="active_paid">Active Paid</option>
+                                    <option value="active_paid" {% if not item.payment_proof_path %}disabled{% endif %} title="Upload payment proof to enable Active Paid">Active Paid</option>
                                     <option value="pending_payment">Pending Payment</option>
                                     <option value="suspended">Suspended</option>
                                 </select>
+                                {% if not item.payment_proof_path %}
+                                <div class="flash error" style="margin-top:6px; padding:6px 10px; display:inline-block;">
+                                    Active Paid is locked until payment proof is uploaded.
+                                </div>
+                                {% endif %}
                                 <select name="class_arm_ranking_mode" title="Class arm ranking mode">
                                     <option value="separate">Arms Separate</option>
                                     <option value="together">Arms Together</option>

@@ -88,9 +88,21 @@
                     <i class="fas fa-user-plus"></i>
                     <span>Add Students</span>
                 </a>
+                <a href="{{ url_for('school_admin_student_reset_requests') }}" class="side-link{% if active_page == 'student_reset_requests' %} active{% endif %}">
+                    <i class="fas fa-unlock-alt"></i>
+                    <span>Reset Requests</span>
+                </a>
+                <a href="{{ url_for('school_admin_subject_requests') }}" class="side-link{% if active_page == 'subject_requests' %} active{% endif %}">
+                    <i class="fas fa-book"></i>
+                    <span>Subject Requests</span>
+                </a>
                 <a href="{{ url_for('school_admin_view_parents') }}" class="side-link{% if active_page == 'parents' %} active{% endif %}">
                     <i class="fas fa-user-friends"></i>
                     <span>View Parents</span>
+                </a>
+                <a href="{{ url_for('school_admin_parent_directory') }}" class="side-link{% if active_page == 'parents_directory' %} active{% endif %}">
+                    <i class="fas fa-address-book"></i>
+                    <span>Parent Directory</span>
                 </a>
             </div>
         </details>
@@ -107,6 +119,10 @@
                 <a href="{{ url_for('school_admin_teacher_assignments') }}" class="side-link{% if active_page == 'teacher_assignments' %} active{% endif %}">
                     <i class="fas fa-diagram-project"></i>
                     <span>Assign Teacher</span>
+                </a>
+                <a href="{{ url_for('school_admin_teacher_workload') }}" class="side-link{% if active_page == 'teacher_workload' %} active{% endif %}">
+                    <i class="fas fa-user-gear"></i>
+                    <span>Teacher Workload</span>
                 </a>
             </div>
         </details>
@@ -132,6 +148,10 @@
                     <i class="fas fa-calendar-alt"></i>
                     <span>Term Programs</span>
                 </a>
+                <a href="{{ url_for('school_admin_new_term_wizard') }}" class="side-link{% if active_page == 'new_term_wizard' %} active{% endif %}">
+                    <i class="fas fa-flag-checkered"></i>
+                    <span>New Term Wizard</span>
+                </a>
                 <a href="{{ url_for('school_admin_promote') }}" class="side-link{% if active_page == 'promote' %} active{% endif %}">
                     <i class="fas fa-arrow-up"></i>
                     <span>Promote Students</span>
@@ -156,9 +176,25 @@
                     <i class="fas fa-clipboard-list"></i>
                     <span>Score Audit Log</span>
                 </a>
+                <a href="{{ url_for('school_admin_attendance_integrity') }}" class="side-link{% if active_page == 'attendance_integrity' %} active{% endif %}">
+                    <i class="fas fa-check-double"></i>
+                    <span>Attendance Integrity</span>
+                </a>
+                <a href="{{ url_for('school_admin_attendance_summary') }}" class="side-link{% if active_page == 'attendance_summary' %} active{% endif %}">
+                    <i class="fas fa-clipboard-check"></i>
+                    <span>Attendance Summary</span>
+                </a>
+                <a href="{{ url_for('school_admin_timetable_coverage') }}" class="side-link{% if active_page == 'timetable_coverage' %} active{% endif %}">
+                    <i class="fas fa-calendar-week"></i>
+                    <span>Timetable Coverage</span>
+                </a>
                 <a href="{{ url_for('school_admin_disputes') }}" class="side-link{% if active_page == 'disputes' %} active{% endif %}">
                     <i class="fas fa-balance-scale"></i>
                     <span>Result Disputes</span>
+                </a>
+                <a href="{{ url_for('school_admin_reports') }}" class="side-link{% if active_page == 'reports' %} active{% endif %}">
+                    <i class="fas fa-file-export"></i>
+                    <span>Reports</span>
                 </a>
                 <a href="{{ url_for('school_admin_promotion_audit') }}" class="side-link{% if active_page == 'promotion_audit' %} active{% endif %}">
                     <i class="fas fa-history"></i>
@@ -178,6 +214,14 @@
                     {% if school_message_total|default(0) %}
                     <span class="notif-badge">{{ school_message_total }}</span>
                     {% endif %}
+                </a>
+                <a href="{{ url_for('school_admin_sms_health') }}" class="side-link{% if active_page == 'sms_health' %} active{% endif %}">
+                    <i class="fas fa-sms"></i>
+                    <span>SMS Health</span>
+                </a>
+                <a href="{{ url_for('school_admin_sms_logs') }}" class="side-link{% if active_page == 'sms_logs' %} active{% endif %}">
+                    <i class="fas fa-list"></i>
+                    <span>SMS Logs</span>
                 </a>
             </div>
         </details>

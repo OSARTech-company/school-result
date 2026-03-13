@@ -1,0 +1,137 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Subject Requests - Student Score Management System</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260307f') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { min-height: 100vh; }
+        .container { width: min(980px, 100%); margin: 0 auto; padding: 24px; }
+        .header { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+        .header h1 { margin: 0; font-size: 1.85rem; }
+        .header .back { color: white; text-decoration: none; font-weight: 700; }
+    </style>
+</head>
+<body style="--brand: {{ school.theme_primary_color if school and school.theme_primary_color else '#0F4C81' }}; --brand-2: {{ school.theme_secondary_color if school and school.theme_secondary_color else '#1F7A8C' }}; --accent: {{ school.theme_accent_color if school and school.theme_accent_color else '#1F7A8C' }};">
+    <div class="app-shell topbar-layout">
+        <div class="side-taskbar">
+            <div class="side-brand">
+                <img src="{{ url_for('static', filename='img/osartech-logo.png') }}" alt="Osartech Logo" class="brand-logo">
+                <span>Student</span>
+            </div>
+            <div class="side-links">
+                <a href="{{ url_for('student_dashboard') }}" class="side-link">
+                    <i class="fas fa-home"></i>
+                    <span>Dashboard</span>
+                </a>
+                <a href="{{ url_for('student_messages') }}" class="side-link">
+                    <i class="fas fa-bell"></i>
+                    <span>Messages</span>
+                </a>
+                <a href="{{ url_for('student_view_result') }}" class="side-link">
+                    <i class="fas fa-chart-bar"></i>
+                    <span>View Results</span>
+                </a>
+                <a href="{{ url_for('student_profile') }}" class="side-link">
+                    <i class="fas fa-user"></i>
+                    <span>Profile</span>
+                </a>
+                <a href="{{ url_for('student_subject_requests') }}" class="side-link active">
+                    <i class="fas fa-book"></i>
+                    <span>Subject Requests</span>
+                </a>
+                <a href="{{ url_for('student_change_password') }}" class="side-link">
+                    <i class="fas fa-key"></i>
+                    <span>Change Password</span>
+                </a>
+                <a href="{{ url_for('help', role='student') }}" class="side-link">
+                    <i class="fas fa-question-circle"></i>
+                    <span>Help</span>
+                </a>
+                <form method="post" action="{{ url_for('logout') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="side-link side-link-logout">
+                        <i class="fas fa-sign-out-alt"></i>
+                        <span>Logout</span>
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <div class="container">
+                <div class="header">
+                    <h1><i class="fas fa-book"></i> Subject Requests</h1>
+                    <a href="{{ url_for('student_dashboard') }}" class="back"><i class="fas fa-arrow-left"></i> Back to Dashboard</a>
+                </div>
+
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        {% for category, message in messages %}
+                            <div class="flash {{ category }}">{{ message }}</div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
+
+                <div class="card">
+                    <h2>Request Subject Change</h2>
+                    <p class="note">Current subjects: {{ student.subjects|join(', ') if student.subjects else 'None set' }}</p>
+                    <form method="post">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <div class="form-group">
+                            <label>Request Type</label>
+                            <select name="request_type" required>
+                                <option value="">Select</option>
+                                <option value="add">Add Subject(s)</option>
+                                <option value="remove">Remove Subject(s)</option>
+                                <option value="change">Change To These Subjects</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Subjects (comma or line separated)</label>
+                            <textarea name="subjects" rows="4" placeholder="e.g. Biology, Chemistry" required></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>Reason (optional)</label>
+                            <textarea name="reason" rows="3" maxlength="800"></textarea>
+                        </div>
+                        <button class="btn btn-primary" type="submit">Submit Request</button>
+                    </form>
+                </div>
+
+                <div class="card">
+                    <h2>Recent Requests</h2>
+                    {% if requests %}
+                    <table class="list-table">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Type</th>
+                                <th>Subjects</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in requests %}
+                            <tr>
+                                <td>{{ row.created_at }}</td>
+                                <td>{{ row.request_type|title }}</td>
+                                <td>{{ row.subjects|join(', ') }}</td>
+                                <td>{{ row.status|title }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                    {% else %}
+                    <p class="muted">No subject requests yet.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260309a') }}"></script>
+</body>
+</html>

@@ -28,6 +28,35 @@
     <div class="card">
         <p><strong>Import Error Report:</strong> Some rows failed validation.</p>
         <a class="btn btn-danger" href="{{ url_for('school_admin_import_csv_error_rows', token=error_token) }}">Download Error Rows CSV</a>
+        <a class="btn btn-secondary ml-10" href="{{ url_for('school_admin_import_csv_error_preview', token=error_token) }}">View Full Error Table</a>
+        {% if error_preview_rows %}
+        <div class="mt-10">
+            <button type="button" class="btn btn-secondary btn-sm" id="toggle-error-preview">Hide Preview</button>
+        </div>
+        <div class="table-wrap mt-10" id="error-preview-table" style="display:none;">
+            <table class="list-table">
+                <thead>
+                    <tr>
+                        {% for header in error_preview_headers %}
+                        <th>{{ header }}</th>
+                        {% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in error_preview_rows %}
+                    <tr>
+                        {% for header in error_preview_headers %}
+                        <td>{{ row.get(header, '') }}</td>
+                        {% endfor %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% if error_preview_truncated %}
+        <p class="note" id="error-preview-note" style="display:none;">Preview shows first 5 error rows. Download the CSV for full details.</p>
+        {% endif %}
+        {% endif %}
     </div>
     {% endif %}
 
@@ -51,7 +80,16 @@
 
     <div class="card">
         <h2>Import CSV</h2>
-        <p class="note">Students columns: student_id (optional, leave blank to auto-generate), firstname (or student_name/name), lastname/surname (optional), date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects, promoted, parent_phone</p>
+        {% if last_import_error_token %}
+        <div class="flash warning">
+            <strong>Last Import Report:</strong>
+            {{ last_import_target|default('')|replace('_', ' ')|title }} -
+            {{ last_import_failed_rows or 0 }} failed row(s).
+            {% if last_import_at %}({{ last_import_at }}){% endif %}
+            <a class="btn btn-secondary btn-sm ml-10" href="{{ url_for('school_admin_import_report') }}">Open Report</a>
+        </div>
+        {% endif %}
+        <p class="note">Students columns: student_id (optional, leave blank to auto-generate), firstname (or student_name/name), lastname/surname (optional), email (optional), date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects, promoted, parent_phone, parent_phone_2</p>
         <form method="post" action="{{ url_for('school_admin_import_target', target='students') }}" enctype="multipart/form-data">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="file" name="file" accept=".csv" required>
@@ -123,7 +161,26 @@
 </div>
     </div>
 </div>
-<script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260306e') }}"></script>
+    <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260306e') }}"></script>
+    <script>
+        (function () {
+            const toggleBtn = document.getElementById('toggle-error-preview');
+            const table = document.getElementById('error-preview-table');
+            const note = document.getElementById('error-preview-note');
+            if (!toggleBtn || !table) {
+                return;
+            }
+            toggleBtn.textContent = 'Show Preview';
+            toggleBtn.addEventListener('click', function () {
+                const isHidden = table.style.display === 'none';
+                table.style.display = isHidden ? '' : 'none';
+                if (note) {
+                    note.style.display = isHidden ? '' : 'none';
+                }
+                toggleBtn.textContent = isHidden ? 'Hide Preview' : 'Show Preview';
+            });
+        })();
+    </script>
 </body>
 </html>
 

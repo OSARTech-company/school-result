@@ -92,6 +92,7 @@
                             <tr>
                                 <th>Student ID</th>
                                 <th>Name</th>
+                                <th>Email</th>
                                 <th>Date of Birth</th>
                                 <th>Gender</th>
                                 <th>Term</th>
@@ -105,6 +106,7 @@
                             <tr>
                                 <td>{{ s.student_id }}</td>
                                 <td>{{ s.firstname }}</td>
+                                <td>{{ s.email or '-' }}</td>
                                 <td>{{ s.date_of_birth or '-' }}</td>
                                 <td>{{ s.gender or '-' }}</td>
                                 <td>{{ s.term }}</td>
@@ -127,7 +129,7 @@
                                 </td>
                             </tr>
                             {% else %}
-                            <tr><td colspan="8">No students in this class yet.</td></tr>
+                            <tr><td colspan="9">No students in this class yet.</td></tr>
                             {% endfor %}
                         </tbody>
                     </table>
@@ -138,7 +140,7 @@
 
         <div class="card">
             <h2><i class="fas fa-plus-circle"></i> Add Multiple Students</h2>
-            <p class="help-text">Student Name, Date of Birth, and Gender are required. Subjects are loaded automatically from Class Subjects configuration. For SS classes, school admin can add names first, then teacher allocates stream and optional subjects. If class list already exists, only newly enrolled students can be added.</p>
+            <p class="help-text">Student Name, Date of Birth, and Gender are required. Student Email is optional. Subjects are loaded automatically from Class Subjects configuration. For SS classes, school admin can add names first, then teacher allocates stream and optional subjects. If class list already exists, only newly enrolled students can be added.</p>
             <form method="POST" id="addStudentsForm">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                 
@@ -166,16 +168,18 @@
                     <table class="entry-table" id="studentsTable">
                         <thead>
                             <tr>
-                                <th style="width: 36%;">Student Name</th>
-                                <th style="width: 20%;">Date of Birth</th>
-                                <th style="width: 18%;">Gender</th>
-                                <th style="width: 18%;">Reg No. (Optional)</th>
+                                <th style="width: 28%;">Student Name</th>
+                                <th style="width: 22%;">Student Email (Optional)</th>
+                                <th style="width: 16%;">Date of Birth</th>
+                                <th style="width: 12%;">Gender</th>
+                                <th style="width: 14%;">Reg No. (Optional)</th>
                                 <th style="width: 8%;">Action</th>
                             </tr>
                         </thead>
                         <tbody id="studentsBody">
                             <tr>
                                 <td><input type="text" name="student_name[]" placeholder="e.g. John Doe" required></td>
+                                <td><input type="email" name="student_email[]" placeholder="e.g. student@school.com"></td>
                                 <td><input type="date" name="date_of_birth[]" required></td>
                                 <td>
                                     <select name="gender[]" required>
@@ -189,6 +193,7 @@
                             </tr>
                             <tr>
                                 <td><input type="text" name="student_name[]" placeholder="e.g. Jane Smith"></td>
+                                <td><input type="email" name="student_email[]" placeholder="e.g. student@school.com"></td>
                                 <td><input type="date" name="date_of_birth[]"></td>
                                 <td>
                                     <select name="gender[]">
@@ -233,6 +238,7 @@
         function buildRowHtml() {
             return `
                 <td><input type="text" name="student_name[]" placeholder="e.g. Student Name"></td>
+                <td><input type="email" name="student_email[]" placeholder="e.g. student@school.com"></td>
                 <td><input type="date" name="date_of_birth[]"></td>
                 <td>
                     <select name="gender[]">
@@ -297,15 +303,22 @@
             const rows = Array.from(document.querySelectorAll('#studentsBody tr'));
             for (let i = 0; i < rows.length; i++) {
                 const nameInput = rows[i].querySelector('input[name="student_name[]"]');
+                const emailInput = rows[i].querySelector('input[name="student_email[]"]');
                 const dobInput = rows[i].querySelector('input[name="date_of_birth[]"]');
                 const genderSelect = rows[i].querySelector('select[name="gender[]"]');
                 const name = (nameInput && nameInput.value ? nameInput.value : '').trim();
+                const email = (emailInput && emailInput.value ? emailInput.value : '').trim();
                 const dob = (dobInput && dobInput.value ? dobInput.value : '').trim();
                 const gender = (genderSelect && genderSelect.value ? genderSelect.value : '').trim();
                 if (!name && !dob && !gender) continue;
                 if (!name) {
                     e.preventDefault();
                     alert(`Row ${i + 1}: Student name is required.`);
+                    return;
+                }
+                if (email && !/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(email)) {
+                    e.preventDefault();
+                    alert(`Row ${i + 1}: Invalid email for ${name || 'student'}.`);
                     return;
                 }
                 if (!dob) {

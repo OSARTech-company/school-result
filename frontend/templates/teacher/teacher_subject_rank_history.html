@@ -11,6 +11,19 @@
     <style>
         .rank-table-wrap { width: 100%; overflow-x: auto; }
         .trend-chart-wrap { width: 100%; max-width: 760px; margin-top: 14px; }
+        .arm-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 12px;
+            border-radius: 999px;
+            border: 1px solid #dbe4ef;
+            background: #f8fbff;
+            color: #1e3a5f;
+            font-weight: 700;
+            margin-bottom: 12px;
+        }
+        .arm-toggle select { border-radius: 8px; padding: 4px 8px; }
     </style>
 </head>
 <body>
@@ -21,7 +34,7 @@
 <div class="container">
     <div class="header">
         <h1>Subject Rank History</h1>
-        <p><a class="btn" href="{{ url_for('teacher_dashboard') }}">Back to Dashboard</a></p>
+        <p><a class="btn" href="{{ url_for('teacher_dashboard', arm_mode=(request.args.get('arm_mode') or '')) }}">Back to Dashboard</a></p>
     </div>
 
     {% with messages = get_flashed_messages(with_categories=true) %}
@@ -32,8 +45,24 @@
         {% endif %}
     {% endwith %}
 
+    {% set arm_mode_value = (request.args.get('arm_mode') or (school.class_arm_ranking_mode if school else 'separate')) %}
+    <form method="get" class="arm-toggle">
+        <i class="fas fa-layer-group" aria-hidden="true"></i>
+        <span>Class Arm View:</span>
+        <select name="arm_mode" onchange="this.form.submit()">
+            <option value="separate" {% if arm_mode_value == 'separate' %}selected{% endif %}>Separate Arms</option>
+            <option value="together" {% if arm_mode_value == 'together' %}selected{% endif %}>Combine Arms</option>
+        </select>
+        {% if selected_year %}<input type="hidden" name="academic_year" value="{{ selected_year }}">{% endif %}
+        {% if selected_term %}<input type="hidden" name="term" value="{{ selected_term }}">{% endif %}
+        {% if selected_class %}<input type="hidden" name="classname" value="{{ selected_class }}">{% endif %}
+        {% if selected_subject %}<input type="hidden" name="subject" value="{{ selected_subject }}">{% endif %}
+        {% if trend_student_id %}<input type="hidden" name="trend_student_id" value="{{ trend_student_id }}">{% endif %}
+    </form>
+
     <div class="card">
         <form method="get" class="toolbar">
+            {% if arm_mode_value %}<input type="hidden" name="arm_mode" value="{{ arm_mode_value }}">{% endif %}
             <div>
                 <label>Academic Year</label>
                 <select name="academic_year" required>
@@ -111,6 +140,7 @@
             <input type="hidden" name="term" value="{{ selected_term }}">
             <input type="hidden" name="classname" value="{{ selected_class }}">
             <input type="hidden" name="subject" value="{{ selected_subject }}">
+            {% if arm_mode_value %}<input type="hidden" name="arm_mode" value="{{ arm_mode_value }}">{% endif %}
             <label>Student</label>
             <select name="trend_student_id">
                 <option value="">Select student</option>

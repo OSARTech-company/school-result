@@ -23,6 +23,14 @@
             <span class="notif-badge">{{ unread_parent_messages }}</span>
             {% endif %}
         </a>
+        <a href="{{ url_for('parent_notification_preferences') }}" class="side-link{% if active_page == 'notification_prefs' %} active{% endif %}">
+            <i class="fas fa-sliders-h"></i>
+            <span>Notification Prefs</span>
+        </a>
+        <a href="{{ url_for('parent_disputes') }}" class="side-link{% if active_page == 'disputes' %} active{% endif %}">
+            <i class="fas fa-balance-scale"></i>
+            <span>Dispute Updates</span>
+        </a>
 
         {% set selected_student_key = '' %}
         {% if student_key is defined and student_key %}
@@ -37,6 +45,18 @@
             <span>{% if (children or [])|length == 1 %}Child{% else %}Children{% endif %}</span>
             <span class="notif-badge">{{ (children or [])|length }}</span>
         </div>
+        {% if children %}
+        <div class="mt-8">
+            <label class="muted" for="parentChildSelect">Active Child</label>
+            <select id="parentChildSelect">
+                {% for child in (children or []) %}
+                <option value="{{ child.key }}" {% if selected_student_key == child.key %}selected{% endif %}>
+                    {{ child.firstname }} ({{ child.student_id }})
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+        {% endif %}
 
         {% for child in (children or []) %}
         {% set child_is_active = (selected_student_key == child.key) %}
@@ -64,6 +84,10 @@
                 <a href="{{ url_for('parent_timetable', student_key=child.key) }}" class="side-link{% if request.endpoint == 'parent_timetable' and child_is_active %} active{% endif %}">
                     <i class="fas fa-table"></i>
                     <span>Timetable</span>
+                </a>
+                <a href="{{ url_for('parent_subject_comments', student_key=child.key) }}" class="side-link{% if request.endpoint == 'parent_subject_comments' and child_is_active %} active{% endif %}">
+                    <i class="fas fa-comments"></i>
+                    <span>Subject Comments</span>
                 </a>
             </div>
         </details>
@@ -95,3 +119,14 @@
     </div>
 </div>
 {% include 'shared/_ai_assistant_widget.html' %}
+<script>
+    (function () {
+        const select = document.getElementById('parentChildSelect');
+        if (!select) return;
+        select.addEventListener('change', function () {
+            const url = new URL(window.location.href);
+            url.searchParams.set('student_key', select.value);
+            window.location.href = url.toString();
+        });
+    })();
+</script>

@@ -20,6 +20,8 @@
       .student-message-meta { color: #5b6475; font-size: 0.85rem; margin-bottom: 4px; }
       .student-message-target-fields { display: none; }
       .student-message-target-fields.show { display: block; }
+      .sms-help { display: none; }
+      .sms-help.is-visible { display: block; }
     </style>
   </head>
   <body style="--brand: {{ school.theme_primary_color if school and school.theme_primary_color else '#0F4C81' }}; --brand-2: {{ school.theme_secondary_color if school and school.theme_secondary_color else '#1F7A8C' }}; --accent: {{ school.theme_accent_color if school and school.theme_accent_color else '#1F7A8C' }};">
@@ -41,11 +43,47 @@
             {% endif %}
           {% endwith %}
 
+          <div class="card">
+            <h2><i class="fas fa-comments"></i> Message Feature</h2>
+            <p class="note">
+              These messaging tools promote efficient and effective processes. Through the school messaging system,
+              schools can improve communication flow with all stakeholders: teachers, students, employees, and parents/guardians.
+              A good flow of communication helps institutions meet their goals and fulfill their mission.
+            </p>
+            <h3>Benefits</h3>
+            <ul class="note" style="margin-top: 6px;">
+              <li><strong>Improved Information Dissemination:</strong> Messages, announcements, and news can be circulated quickly. The feature supports bulk notices, targeted messages, and file sharing so everyone stays informed.</li>
+              <li><strong>Document Exchange:</strong> Keep records of important conversations and files. Stakeholders can access shared documents for academic purposes.</li>
+              <li><strong>Accessible to Stakeholders:</strong> Responsive on mobile and desktop. Teachers can broadcast from laptops; students and parents receive messages on mobile.</li>
+              <li><strong>Helps in Strategic Planning:</strong> Collaborate on exams, schedules, and class activities. Better communication supports stronger workflows.</li>
+              <li><strong>Targeted Audience:</strong> Filter recipients by class, stream, subject, or role so notices reach the right people.</li>
+              <li><strong>Data Backup:</strong> Messages are stored in the app for future reference and audits.</li>
+            </ul>
+            <p class="note">SMS delivery uses Twilio when configured. Email delivery uses SMTP. If either is not set, the system will still send in-app messages only.</p>
+          </div>
+
+          <div class="card">
+            <h2><i class="fas fa-sms"></i> Test SMS</h2>
+            <p class="note">Send a quick SMS to confirm Twilio credentials. Use E.164 format (example: +2348012345678).</p>
+            {% if twilio_ready %}
+            <form action="{{ url_for('school_admin_test_sms') }}" method="POST">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+              <div class="form-group">
+                <label for="test_sms_phone">Test Phone</label>
+                <input type="text" id="test_sms_phone" name="test_phone" placeholder="+2348012345678" required />
+              </div>
+              <button type="submit" class="btn btn-primary"><i class="fas fa-paper-plane"></i> Send Test SMS</button>
+            </form>
+            {% else %}
+            <p class="note">Twilio is not configured yet. Set `SMS_PROVIDER=twilio`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_FROM_NUMBER` or `TWILIO_MESSAGING_SERVICE_SID`.</p>
+            {% endif %}
+          </div>
+
           <div class="grid-two">
             <div class="card">
               <h2><i class="fas fa-bullhorn"></i> Student Message Broadcast</h2>
               <p class="note">Send deadline notices or school messages to all students, one class, or one stream in a class.</p>
-              <form action="{{ url_for('school_admin_send_student_message') }}" method="POST">
+              <form action="{{ url_for('school_admin_send_student_message') }}" method="POST" enctype="multipart/form-data">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
                 <div class="form-group">
                   <label for="student_msg_title">Title</label>
@@ -85,6 +123,24 @@
                   <label for="student_msg_deadline">Deadline (optional)</label>
                   <input type="date" id="student_msg_deadline" name="deadline_date" />
                 </div>
+                <div class="form-group">
+                  <label for="student_msg_attachment">Attachment (optional)</label>
+                  <input type="file" id="student_msg_attachment" name="attachment_file" accept=".jpg,.jpeg,.png,.gif,.webp,.pdf" />
+                  <p class="note">Allowed: JPG/PNG/GIF/WEBP/PDF. Max 8MB (configurable).</p>
+                </div>
+                <div class="form-group">
+                  <label class="checkbox">
+                    <input type="checkbox" name="send_sms" value="1" />
+                    Send SMS to parents (Twilio)
+                  </label>
+                  <p class="note sms-help">Use E.164 format. Default country: {{ sms_default_country }}.</p>
+                </div>
+                <div class="form-group">
+                  <label class="checkbox">
+                    <input type="checkbox" name="send_email" value="1" />
+                    Send Email to students (uses student email)
+                  </label>
+                </div>
                 <button type="submit" class="btn btn-primary"><i class="fas fa-paper-plane"></i> Send to Students</button>
               </form>
               <div class="student-message-list">
@@ -108,8 +164,25 @@
                     {% endif %}
                     |
                     Sent: {{ msg.created_at }}
+                    | Reads: {{ msg.read_count }} students, {{ msg.parent_read_count }} parents
                   </div>
                   <div>{{ msg.message }}</div>
+                  {% if msg.attachment_url %}
+                  <div class="mt-10">
+                    {% if msg.attachment_mime and msg.attachment_mime.startswith('image/') %}
+                    <a href="{{ msg.attachment_url }}" target="_blank" rel="noopener" class="btn btn-secondary btn-xs">
+                      <i class="fas fa-image"></i> Open Attached Image
+                    </a>
+                    <div class="mt-10">
+                      <img src="{{ msg.attachment_url }}" alt="Attachment" style="max-width:100%; max-height:260px; border-radius:10px; border:1px solid #dbe4ef;">
+                    </div>
+                    {% else %}
+                    <a href="{{ msg.attachment_url }}" target="_blank" rel="noopener" class="btn btn-secondary btn-xs">
+                      <i class="fas fa-file"></i> Download Attachment
+                    </a>
+                    {% endif %}
+                  </div>
+                  {% endif %}
                 </div>
                 {% else %}
                 <p class="note">No student messages sent yet.</p>
@@ -120,7 +193,7 @@
             <div class="card">
               <h2><i class="fas fa-bullhorn"></i> Teacher Message Broadcast</h2>
               <p class="note">Send notices to all teachers, one class teacher group, one subject teacher group, or class + subject teachers.</p>
-              <form action="{{ url_for('school_admin_send_teacher_message') }}" method="POST">
+              <form action="{{ url_for('school_admin_send_teacher_message') }}" method="POST" enctype="multipart/form-data">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
                 <div class="form-group">
                   <label for="teacher_msg_title">Title</label>
@@ -161,6 +234,24 @@
                   <label for="teacher_msg_deadline">Deadline (optional)</label>
                   <input type="date" id="teacher_msg_deadline" name="deadline_date" />
                 </div>
+                <div class="form-group">
+                  <label for="teacher_msg_attachment">Attachment (optional)</label>
+                  <input type="file" id="teacher_msg_attachment" name="attachment_file" accept=".jpg,.jpeg,.png,.gif,.webp,.pdf" />
+                  <p class="note">Allowed: JPG/PNG/GIF/WEBP/PDF. Max 8MB (configurable).</p>
+                </div>
+                <div class="form-group">
+                  <label class="checkbox">
+                    <input type="checkbox" name="send_sms" value="1" />
+                    Send SMS to teachers (Twilio)
+                  </label>
+                  <p class="note sms-help">Use E.164 format. Default country: {{ sms_default_country }}.</p>
+                </div>
+                <div class="form-group">
+                  <label class="checkbox">
+                    <input type="checkbox" name="send_email" value="1" />
+                    Send Email to teachers (uses teacher login email + SMTP)
+                  </label>
+                </div>
                 <button type="submit" class="btn btn-primary"><i class="fas fa-paper-plane"></i> Send to Teachers</button>
               </form>
               <div class="student-message-list">
@@ -186,8 +277,25 @@
                     {% endif %}
                     |
                     Sent: {{ msg.created_at }}
+                    | Reads: {{ msg.read_count }}
                   </div>
                   <div>{{ msg.message }}</div>
+                  {% if msg.attachment_url %}
+                  <div class="mt-10">
+                    {% if msg.attachment_mime and msg.attachment_mime.startswith('image/') %}
+                    <a href="{{ msg.attachment_url }}" target="_blank" rel="noopener" class="btn btn-secondary btn-xs">
+                      <i class="fas fa-image"></i> Open Attached Image
+                    </a>
+                    <div class="mt-10">
+                      <img src="{{ msg.attachment_url }}" alt="Attachment" style="max-width:100%; max-height:260px; border-radius:10px; border:1px solid #dbe4ef;">
+                    </div>
+                    {% else %}
+                    <a href="{{ msg.attachment_url }}" target="_blank" rel="noopener" class="btn btn-secondary btn-xs">
+                      <i class="fas fa-file"></i> Download Attachment
+                    </a>
+                    {% endif %}
+                  </div>
+                  {% endif %}
                 </div>
                 {% else %}
                 <p class="note">No teacher messages sent yet.</p>
@@ -258,6 +366,20 @@
         }
         mode.addEventListener('change', syncMode);
         syncMode();
+      })();
+    </script>
+    <script>
+      (function () {
+        var smsChecks = document.querySelectorAll('input[name="send_sms"]');
+        smsChecks.forEach(function (chk) {
+          var help = chk.closest('.form-group').querySelector('.sms-help');
+          function sync() {
+            if (!help) return;
+            help.classList.toggle('is-visible', chk.checked);
+          }
+          chk.addEventListener('change', sync);
+          sync();
+        });
       })();
     </script>
   </body>

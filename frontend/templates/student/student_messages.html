@@ -51,6 +51,14 @@
                     <i class="fas fa-chart-bar"></i>
                     <span>View Results</span>
                 </a>
+                <a href="{{ url_for('student_profile') }}" class="side-link">
+                    <i class="fas fa-user"></i>
+                    <span>Profile</span>
+                </a>
+                <a href="{{ url_for('student_subject_requests') }}" class="side-link">
+                    <i class="fas fa-book"></i>
+                    <span>Subject Requests</span>
+                </a>
                 <a href="{{ url_for('student_change_password') }}" class="side-link">
                     <i class="fas fa-key"></i>
                     <span>Change Password</span>
@@ -123,12 +131,21 @@
                             <div>{{ msg.message }}</div>
                             {% if msg.attachment_url %}
                             <div class="mt-10">
+                                {% if msg.attachment_mime and msg.attachment_mime.startswith('image/') %}
                                 <a href="{{ msg.attachment_url }}" target="_blank" rel="noopener" class="btn btn-secondary">
                                     <i class="fas fa-image"></i> Open Attached Image
                                 </a>
                                 <div class="mt-10">
                                     <img src="{{ msg.attachment_url }}" alt="Attachment" style="max-width:100%; max-height:360px; border-radius:10px; border:1px solid #dbe4ef;">
                                 </div>
+                                {% else %}
+                                <a href="{{ msg.attachment_url }}" target="_blank" rel="noopener" class="btn btn-secondary">
+                                    <i class="fas fa-file"></i> Download Attachment
+                                </a>
+                                {% if msg.attachment_name %}
+                                <p class="note mt-10">File: {{ msg.attachment_name }}</p>
+                                {% endif %}
+                                {% endif %}
                             </div>
                             {% endif %}
                             {% if not msg.is_read %}
