@@ -2123,6 +2123,7 @@ def _assistant_page_guidance(role, source_page=''):
             ('/teacher/attendance', 'Attendance', 'Use this page to mark class attendance for valid school days.', ['Pick class and date.', 'Set student statuses.', 'Save and confirm summary counts.']),
             ('/teacher/timetable', 'Teacher Timetable', 'Use this page to view your teaching periods by class/day/time.', ['Open timetable view.', 'Check day and period blocks.', 'Use it to plan lesson and attendance windows.']),
             ('/teacher/upload-csv', 'Upload CSV', 'Use this page to upload score CSV files for assigned classes/subjects.', ['Download template first.', 'Fill columns correctly.', 'Upload and fix any error report rows.']),
+            ('/teacher/subject-comments', 'Subject Teacher Comments', 'Use this page to review subject-teacher comments for students in your assigned scope.', ['Filter by class, subject, term, and year.', 'Review each comment with student details.', 'Use it to follow up or guide score corrections.']),
             ('/teacher/subject-ranks', 'Subject Ranks', 'Use this page to review subject ranking history and export ranked sheets.', ['Choose year, term, class, and subject.', 'Review ranked students and trends.', 'Export rank CSV when needed.']),
             ('/teacher/behaviour-assessment', 'Behaviour Assessment', 'Use this page to score student behaviour attributes in class-teacher scope.', ['Select class context.', 'Enter behaviour values/comments.', 'Save before publishing workflow.']),
         ],
@@ -2184,7 +2185,7 @@ def _assistant_grouped_nav_hint(role, page=''):
     if role_name == 'teacher':
         mapping = [
             ('Classroom', ('/teacher/class-list', '/view-students', '/teacher/behaviour-assessment', '/teacher/attendance', '/teacher/period-attendance')),
-            ('Academics', ('/teacher/enter-scores', '/teacher/enter-subject-scores', '/teacher/upload-csv', '/teacher/timetable', '/teacher/subject-ranks')),
+            ('Academics', ('/teacher/enter-scores', '/teacher/enter-subject-scores', '/teacher/upload-csv', '/teacher/timetable', '/teacher/subject-comments', '/teacher/subject-ranks')),
             ('Communication', ('/teacher/messages', '/teacher/notifications')),
             ('Support', ('/report-issue', '/help', '/change_password')),
         ]
@@ -3229,8 +3230,31 @@ def _is_transient_db_transport_error(exc):
     return any(m in text for m in markers)
 
 def canonicalize_classname(value):
-    """Canonical class key used for shared subject catalog (e.g. 'Primary 1' -> 'PRIMARY1')."""
-    return re.sub(r'[^A-Za-z0-9]+', '', (value or '').strip()).upper()
+    """Canonical class key used for shared subject catalog (e.g. 'JSS 1' -> 'JSS1')."""
+    cleaned = re.sub(r'[^A-Za-z0-9]+', '', (value or '').strip()).upper()
+    if not cleaned:
+        return ''
+    # Normalize common aliases for secondary only.
+    cleaned = re.sub(r'^JS', 'JSS', cleaned)
+    cleaned = re.sub(r'^JUNIOR', 'JSS', cleaned)
+    cleaned = re.sub(r'^SSS', 'SS', cleaned)
+    cleaned = re.sub(r'^SS', 'SS', cleaned)
+    cleaned = re.sub(r'^SENIOR', 'SS', cleaned)
+    return cleaned
+
+def is_secondary_classname(value):
+    """Return True if classname is a valid secondary class (JSS/SS with optional arm)."""
+    cls = canonicalize_classname(value)
+    if not cls:
+        return False
+    return bool(re.fullmatch(r'(JSS|SS)\d+[A-Z]*', cls))
+
+def filter_secondary_classnames(classnames):
+    """Return only JSS/SS classnames, sorted."""
+    return sorted(
+        [c for c in (classnames or []) if is_secondary_classname(c)],
+        key=lambda value: str(value).lower(),
+    )
 
 def normalize_school_logo_url(raw_url):
     """Normalize school logo URLs to direct image links when possible."""
@@ -3425,15 +3449,6 @@ def build_result_verification_context(school_id, student_id, term, academic_year
 
 def _catalog_defaults_for_class(classname_key):
     key = canonicalize_classname(classname_key)
-    nursery_core = [
-        'English Language', 'Mathematics', 'Phonics', 'Creative Arts',
-        'Health Habits', 'Social Habits', 'Rhymes', 'Handwriting',
-    ]
-    primary_core = [
-        'English Language', 'Mathematics', 'Basic Science', 'Social Studies',
-        'Civic Education', 'Christian Religious Studies', 'Computer Studies',
-        'Agricultural Science', 'Physical and Health Education', 'Cultural and Creative Arts',
-    ]
     jss_core = [
         'English Language', 'Mathematics', 'Basic Science', 'Basic Technology',
         'Civic Education', 'Social Studies', 'Christian Religious Studies',
@@ -3446,16 +3461,12 @@ def _catalog_defaults_for_class(classname_key):
     ss_commercial = ['Financial Accounting', 'Commerce', 'Economics']
     ss_optional = ['Data Processing', 'Agricultural Science', 'French', 'Further Mathematics']
 
-    if key.startswith('NURSERY'):
-        return {'core': nursery_core, 'science': [], 'art': [], 'commercial': [], 'optional': []}
-    if key.startswith('PRIMARY'):
-        return {'core': primary_core, 'science': [], 'art': [], 'commercial': [], 'optional': []}
     if key.startswith('JSS'):
         return {'core': jss_core, 'science': [], 'art': [], 'commercial': [], 'optional': []}
     if key.startswith('SS') or key.startswith('SSS'):
         return {'core': ss_core, 'science': ss_science, 'art': ss_art, 'commercial': ss_commercial, 'optional': ss_optional}
     # Fallback for unknown class names.
-    return {'core': primary_core, 'science': [], 'art': [], 'commercial': [], 'optional': []}
+    return {'core': jss_core, 'science': [], 'art': [], 'commercial': [], 'optional': []}
 
 def _upsert_global_catalog_subject_with_cursor(c, classname_key, bucket, subject_name):
     raw = ' '.join((subject_name or '').strip().split())
@@ -3482,8 +3493,6 @@ def _upsert_global_catalog_subject_with_cursor(c, classname_key, bucket, subject
 
 def _seed_global_subject_catalog_defaults_with_cursor(c):
     classes = [
-        'NURSERY1', 'NURSERY2', 'NURSERY3',
-        'PRIMARY1', 'PRIMARY2', 'PRIMARY3', 'PRIMARY4', 'PRIMARY5', 'PRIMARY6',
         'JSS1', 'JSS2', 'JSS3',
         'SS1', 'SS2', 'SS3',
     ]
@@ -4150,6 +4159,7 @@ def init_db():
                         class_arm_ranking_mode TEXT DEFAULT 'separate',
                         combine_third_term_results INTEGER DEFAULT 0,
                         ss1_stream_mode TEXT DEFAULT 'separate',
+                        ss_arm_mode TEXT DEFAULT 'preserve',
                         parent_timetable_show_teacher INTEGER DEFAULT 1,
                         theme_primary_color TEXT DEFAULT '#1E3C72',
                         theme_secondary_color TEXT DEFAULT '#2A5298',
@@ -4186,6 +4196,7 @@ def init_db():
     safe_exec_ignore("ALTER TABLE schools ADD COLUMN class_arm_ranking_mode TEXT DEFAULT 'separate'")
     safe_exec_ignore("ALTER TABLE schools ADD COLUMN combine_third_term_results INTEGER DEFAULT 0")
     safe_exec_ignore("ALTER TABLE schools ADD COLUMN ss1_stream_mode TEXT DEFAULT 'separate'")
+    safe_exec_ignore("ALTER TABLE schools ADD COLUMN ss_arm_mode TEXT DEFAULT 'preserve'")
     safe_exec_ignore("ALTER TABLE schools ADD COLUMN theme_primary_color TEXT DEFAULT '#1E3C72'")
     safe_exec_ignore("ALTER TABLE schools ADD COLUMN theme_secondary_color TEXT DEFAULT '#2A5298'")
     safe_exec_ignore("ALTER TABLE schools ADD COLUMN theme_accent_color TEXT DEFAULT '#1F7A8C'")
@@ -4504,7 +4515,7 @@ def init_db():
                         UNIQUE(classname, bucket, subject_name)
                     )""")
 
-    # Per-level assessment/exam configuration (primary, jss, ss).
+    # Per-level assessment/exam configuration (jss, ss).
     db_execute(c, """CREATE TABLE IF NOT EXISTS assessment_configs (
                         id SERIAL PRIMARY KEY,
                         school_id TEXT NOT NULL,
@@ -5063,7 +5074,7 @@ def init_db():
            )"""
     )
     db_execute(c, 'CREATE UNIQUE INDEX IF NOT EXISTS uq_students_school_student ON students(school_id, student_id)')
-    # Normalize and deduplicate class subject config class names (e.g. "Primary 1" -> "PRIMARY1").
+    # Normalize and deduplicate class subject config class names (e.g. "JSS 1" -> "JSS1").
     db_execute(
         c,
         """DELETE FROM class_subject_configs
@@ -6743,10 +6754,10 @@ def _split_class_level_number_arm(classname):
     Examples:
     - JSS1 -> ('JSS', 1, '')
     - JSS1A -> ('JSS', 1, 'A')
-    - PRIMARY6BLUE -> ('PRIMARY', 6, 'BLUE')
+    - SS2B -> ('SS', 2, 'B')
     """
     normalized = re.sub(r'[^A-Za-z0-9]+', '', (classname or '')).upper()
-    m = re.fullmatch(r'(NURSERY|PRIMARY|JSS|SSS|SS)(\d+)([A-Z]+)?', normalized)
+    m = re.fullmatch(r'(JSS|SSS|SS)(\d+)([A-Z]+)?', normalized)
     if not m:
         return '', None, ''
     level = m.group(1)
@@ -6767,7 +6778,6 @@ def _entry_year_for_first_level(current_year, first_year_class):
     - JSS1 -> current year
     - JSS2 -> current year - 1
     - JSS3 -> current year - 2
-    Same principle for primary classes.
     """
     normalized = re.sub(r'[^A-Za-z0-9]+', '', (first_year_class or '')).upper()
     class_no = _extract_class_number(first_year_class) or 1
@@ -6777,7 +6787,6 @@ def _entry_year_for_first_level(current_year, first_year_class):
         # SS entry year should trace back to the JSS1 start year.
         # In this project's ID expectation, SS1/2/3 map as offsets 4/5/6.
         return current_year - max(0, class_no + 3)
-    # Primary (PRIMARY1/PRY1/PRI1/P1...) follows same rule.
     return current_year - max(0, class_no - 1)
 
 def generate_student_id(school_id, index_number, first_year_class):
@@ -6796,12 +6805,6 @@ def generate_student_id(school_id, index_number, first_year_class):
     start_year_short = str(start_year)[-2:]
     start_year_token = start_year_short
     normalized_first = re.sub(r'[^A-Za-z0-9]+', '', (first_year_class or '')).upper()
-    if normalized_first.startswith('NUR'):
-        # Nursery IDs use YYN token, e.g. 26N.
-        start_year_token = f"{start_year_short}N"
-    elif get_class_level(first_year_class) == 'primary':
-        # Primary IDs use YYP token, e.g. 26P.
-        start_year_token = f"{start_year_short}P"
     return f"{year_short}/{school_part}/{index_str}/{start_year_token}"
 
 def extract_generated_id_index(student_id):
@@ -6871,7 +6874,7 @@ def class_belongs_to_school_or_arm(school_id, classname, class_candidates=None):
     cls = (classname or '').strip()
     if not cls:
         return False
-    candidates = class_candidates or get_school_classnames(school_id) or []
+    candidates = class_candidates or get_secondary_school_classnames(school_id) or []
     if not candidates:
         return False
     normalized = canonicalize_classname(cls)
@@ -6913,7 +6916,7 @@ def related_classnames_for_class_arm_mode(school_id, classname, school=None):
     if mode != 'together':
         return [cls]
     target_group = class_arm_ranking_group(cls, mode='together')
-    classnames = get_school_classnames(school_id) or []
+    classnames = get_secondary_school_classnames(school_id) or []
     scoped = []
     for item in classnames:
         canonical = canonicalize_classname(item)
@@ -6926,26 +6929,17 @@ def related_classnames_for_class_arm_mode(school_id, classname, school=None):
     return sorted(set(scoped), key=lambda x: str(x).lower())
 
 def get_class_level(classname):
-    """Map class name to level key: primary, jss, ss."""
+    """Map class name to level key: jss or ss."""
     normalized = re.sub(r'[^A-Za-z0-9]+', '', (classname or '')).upper()
     if normalized.startswith('SS') or normalized.startswith('SSS'):
         return 'ss'
     if normalized.startswith('JSS'):
         return 'jss'
-    return 'primary'
+    return 'jss'
 
 def next_class_in_sequence(classname):
     """Return next class in progression sequence, or None if terminal/unknown."""
     progression = {
-        'NURSERY1': 'NURSERY2',
-        'NURSERY2': 'NURSERY3',
-        'NURSERY3': 'PRIMARY1',
-        'PRIMARY1': 'PRIMARY2',
-        'PRIMARY2': 'PRIMARY3',
-        'PRIMARY3': 'PRIMARY4',
-        'PRIMARY4': 'PRIMARY5',
-        'PRIMARY5': 'PRIMARY6',
-        'PRIMARY6': 'JSS1',
         'JSS1': 'JSS2',
         'JSS2': 'JSS3',
         'JSS3': 'SS1',
@@ -6982,6 +6976,31 @@ def is_valid_promotion_target(from_class, to_class):
             suffix = to_key[len(expected_base):]
             return (suffix == '' or bool(re.fullmatch(r'[A-Z]+', suffix)))
     return False
+
+def apply_promotion_arm_target(from_class, to_class, school=None):
+    """
+    Preserve or drop class arm during promotion based on SS arm policy.
+    If SS stream mode is used and ss_arm_mode is 'drop', remove arm on SS targets.
+    """
+    if not from_class or not to_class:
+        return to_class
+    f_level, f_num, f_arm = _split_class_level_number_arm(from_class)
+    if not f_arm:
+        return to_class
+    if canonicalize_classname(to_class) == 'GRADUATED':
+        return to_class
+    t_level, t_num, t_arm = _split_class_level_number_arm(to_class)
+    if t_arm:
+        return to_class
+    if school and class_uses_stream_for_school(school, to_class):
+        ss_arm_mode = (school.get('ss_arm_mode') or 'preserve').strip().lower()
+        if ss_arm_mode == 'drop':
+            if t_level and t_num is not None:
+                return f"{t_level}{t_num}"
+            return to_class
+    if t_level and t_num is not None:
+        return f"{t_level}{t_num}{f_arm}"
+    return to_class
 
 def normalize_stream_for_class(classname, stream, school=None):
     """Return a valid stream for class, or (None, error_message) on invalid input."""
@@ -7173,8 +7192,6 @@ def get_global_subject_catalog_map():
     Format: { 'JSS1': {'core': [...], 'science': [...], ...}, ... }
     """
     classes = [
-        'NURSERY1', 'NURSERY2', 'NURSERY3',
-        'PRIMARY1', 'PRIMARY2', 'PRIMARY3', 'PRIMARY4', 'PRIMARY5', 'PRIMARY6',
         'JSS1', 'JSS2', 'JSS3',
         'SS1', 'SS2', 'SS3',
     ]
@@ -7389,15 +7406,14 @@ def sync_student_subjects_to_class_config(student, school_id, school=None):
 def _default_assessment_config(level):
     """Default exam setup per level."""
     defaults = {
-        'primary': {'exam_mode': 'combined', 'objective_max': 0, 'theory_max': 0, 'exam_score_max': 60},
         'jss': {'exam_mode': 'combined', 'objective_max': 0, 'theory_max': 0, 'exam_score_max': 70},
         'ss': {'exam_mode': 'separate', 'objective_max': 30, 'theory_max': 40, 'exam_score_max': 70},
     }
-    return defaults.get(level, defaults['primary'])
+    return defaults.get(level, defaults['jss'])
 
 def get_assessment_config(school_id, level):
     """Get one assessment config for level."""
-    level = (level or 'primary').strip().lower()
+    level = (level or 'jss').strip().lower()
     with db_connection() as conn:
         c = conn.cursor()
         db_execute(
@@ -7427,7 +7443,7 @@ def get_assessment_config_for_class(school_id, classname):
 def get_all_assessment_configs(school_id):
     """Get assessment configs for all levels with defaults merged."""
     configs = {}
-    for level in ('primary', 'jss', 'ss'):
+    for level in ('jss', 'ss'):
         configs[level] = get_assessment_config(school_id, level)
     return configs
 
@@ -9319,6 +9335,7 @@ def _school_row_to_dict(row):
         'class_arm_ranking_mode': row['class_arm_ranking_mode'] if 'class_arm_ranking_mode' in row.keys() else 'separate',
         'combine_third_term_results': row['combine_third_term_results'] if 'combine_third_term_results' in row.keys() else 0,
         'ss1_stream_mode': row['ss1_stream_mode'] if 'ss1_stream_mode' in row.keys() else 'separate',
+        'ss_arm_mode': row['ss_arm_mode'] if 'ss_arm_mode' in row.keys() else 'preserve',
         'parent_timetable_show_teacher': row['parent_timetable_show_teacher'] if 'parent_timetable_show_teacher' in row.keys() else 1,
         'theme_primary_color': normalize_hex_color(row['theme_primary_color'] if 'theme_primary_color' in row.keys() else '', '#1E3C72'),
         'theme_secondary_color': normalize_hex_color(row['theme_secondary_color'] if 'theme_secondary_color' in row.keys() else '', '#2A5298'),
@@ -9431,6 +9448,7 @@ def get_all_schools():
                 'class_arm_ranking_mode': row['class_arm_ranking_mode'] if 'class_arm_ranking_mode' in row.keys() else 'separate',
                 'combine_third_term_results': row['combine_third_term_results'] if 'combine_third_term_results' in row.keys() else 0,
                 'ss1_stream_mode': row['ss1_stream_mode'] if 'ss1_stream_mode' in row.keys() else 'separate',
+                'ss_arm_mode': row['ss_arm_mode'] if 'ss_arm_mode' in row.keys() else 'preserve',
                 'parent_timetable_show_teacher': row['parent_timetable_show_teacher'] if 'parent_timetable_show_teacher' in row.keys() else 1,
                 'theme_primary_color': normalize_hex_color(row['theme_primary_color'] if 'theme_primary_color' in row.keys() else '', '#1E3C72'),
                 'theme_secondary_color': normalize_hex_color(row['theme_secondary_color'] if 'theme_secondary_color' in row.keys() else '', '#2A5298'),
@@ -9531,6 +9549,7 @@ def update_school_settings_with_cursor(c, school_id, settings):
     db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS class_arm_ranking_mode TEXT DEFAULT 'separate'")
     db_execute(c, 'ALTER TABLE schools ADD COLUMN IF NOT EXISTS combine_third_term_results INTEGER DEFAULT 0')
     db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS ss1_stream_mode TEXT DEFAULT 'separate'")
+    db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS ss_arm_mode TEXT DEFAULT 'preserve'")
     db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS theme_primary_color TEXT DEFAULT '#1E3C72'")
     db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS theme_secondary_color TEXT DEFAULT '#2A5298'")
     db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS theme_accent_color TEXT DEFAULT '#1F7A8C'")
@@ -9545,7 +9564,7 @@ def update_school_settings_with_cursor(c, school_id, settings):
                 "max_tests = ?, test_score_max = ?, exam_objective_max = ?, exam_theory_max = ?, "
                 "grade_a_min = ?, grade_b_min = ?, grade_c_min = ?, grade_d_min = ?, pass_mark = ?, "
                 "show_positions = ?, ss_ranking_mode = ?, class_arm_ranking_mode = ?, "
-                "combine_third_term_results = ?, ss1_stream_mode = ?, parent_timetable_show_teacher = ?, "
+                "combine_third_term_results = ?, ss1_stream_mode = ?, ss_arm_mode = ?, parent_timetable_show_teacher = ?, "
                 "theme_primary_color = ?, theme_secondary_color = ?, theme_accent_color = ?, leadership_title = ? "
                 "WHERE school_id = ?"),
                (settings.get('school_name'), settings.get('location', ''), settings.get('school_logo'),
@@ -9561,6 +9580,7 @@ def update_school_settings_with_cursor(c, school_id, settings):
                 settings.get('class_arm_ranking_mode', 'separate'),
                 settings.get('combine_third_term_results', 0),
                 settings.get('ss1_stream_mode', 'separate'),
+                settings.get('ss_arm_mode', 'preserve'),
                 settings.get('parent_timetable_show_teacher', 1),
                 normalize_hex_color(settings.get('theme_primary_color', ''), '#1E3C72'),
                 normalize_hex_color(settings.get('theme_secondary_color', ''), '#2A5298'),
@@ -14541,9 +14561,8 @@ def get_school_publication_statuses(school_id, term, academic_year='', assignmen
                     'reviewed_by': '',
                     'review_note': '',
                 }
-    all_classes = sorted(
-        {c for c in classes if c} | {c for c in publication_rows.keys() if c},
-        key=lambda value: str(value).lower(),
+    all_classes = filter_secondary_classnames(
+        {c for c in classes if c} | {c for c in publication_rows.keys() if c}
     )
     counts_by_class = get_class_published_view_counts(school_id, term, academic_year, all_classes)
 
@@ -14551,6 +14570,8 @@ def get_school_publication_statuses(school_id, term, academic_year='', assignmen
     seen_classes = set()
     for a in assignments:
         classname = a.get('classname', '')
+        if not is_secondary_classname(classname):
+            continue
         pub = publication_rows.get(classname, {})
         cnt = counts_by_class.get(classname, {})
         lock_status = get_term_edit_lock_status(school_id, classname, term, academic_year or '')
@@ -14577,6 +14598,8 @@ def get_school_publication_statuses(school_id, term, academic_year='', assignmen
         })
     for classname, pub in publication_rows.items():
         if not classname or classname in seen_classes:
+            continue
+        if not is_secondary_classname(classname):
             continue
         cnt = counts_by_class.get(classname, {})
         lock_status = get_term_edit_lock_status(school_id, classname, term, academic_year or '')
@@ -15314,6 +15337,10 @@ def get_school_classnames(school_id):
             if classname:
                 out.add(classname)
     return sorted(out, key=lambda value: str(value).lower())
+
+def get_secondary_school_classnames(school_id):
+    """Return only JSS/SS classnames for a school."""
+    return filter_secondary_classnames(get_school_classnames(school_id))
 
 def get_total_student_count(school_id):
     """Get total student count for one school."""
@@ -16671,6 +16698,7 @@ def promote_students(school_id, from_class, to_class, action_by_student, term=''
     - action=remove -> remove from class/school roster
     """
     school = get_school(school_id) or {}
+    adjusted_to_class = apply_promotion_arm_target(from_class, to_class, school=school)
     with db_connection(commit=True) as conn:
         c = conn.cursor()
         
@@ -16696,7 +16724,7 @@ def promote_students(school_id, from_class, to_class, action_by_student, term=''
             action = action_by_student.get(student_id, 'repeat')
 
             if action == 'promote':
-                target_class = to_class
+                target_class = adjusted_to_class
                 new_first_year_class = current_first_year_class
                 from_level = get_class_level(current_classname)
                 current_no = _extract_class_number(current_classname)
@@ -16712,7 +16740,7 @@ def promote_students(school_id, from_class, to_class, action_by_student, term=''
                 # so ID start-year is based on JSS entry year.
                 if normalized_to in {'JSS1'} and to_level == 'jss' and from_level != 'jss':
                     new_first_year_class = 'JSS1'
-                existing_subjects = json.loads(row[4] or '[]') if len(row) > 4 and row[4] else []
+                existing_subjects = _safe_json_rows(row[4]) if len(row) > 4 else []
                 new_stream = 'N/A'
                 new_subjects = list(existing_subjects) if isinstance(existing_subjects, list) else []
                 if target_class != 'Graduated':
@@ -17545,7 +17573,7 @@ def restore_school_backup_payload(school_id, payload, mode='merge'):
                        test_enabled = ?, exam_enabled = ?, max_tests = ?, test_score_max = ?, exam_objective_max = ?,
                        exam_theory_max = ?, grade_a_min = ?, grade_b_min = ?, grade_c_min = ?, grade_d_min = ?,
                        pass_mark = ?, show_positions = ?, ss_ranking_mode = ?, class_arm_ranking_mode = ?,
-                       combine_third_term_results = ?, ss1_stream_mode = ?, theme_primary_color = ?, theme_secondary_color = ?,
+                       combine_third_term_results = ?, ss1_stream_mode = ?, ss_arm_mode = ?, theme_primary_color = ?, theme_secondary_color = ?,
                        theme_accent_color = ?, phone = ?, email = ?, principal_name = ?, motto = ?, leadership_title = ?, updated_at = CURRENT_TIMESTAMP
                    WHERE school_id = ?""",
                 (
@@ -17570,6 +17598,7 @@ def restore_school_backup_payload(school_id, payload, mode='merge'):
                     school_data.get('class_arm_ranking_mode', 'separate'),
                     int(school_data.get('combine_third_term_results', 0) or 0),
                     school_data.get('ss1_stream_mode', 'separate'),
+                    school_data.get('ss_arm_mode', 'preserve'),
                     school_data.get('theme_primary_color', '#1E3C72'),
                     school_data.get('theme_secondary_color', '#2A5298'),
                     school_data.get('theme_accent_color', '#1F7A8C'),
@@ -22100,7 +22129,7 @@ def school_admin_dashboard():
 
     class_subject_options = {}
     try:
-        classnames_for_options = get_school_classnames(school_id)
+        classnames_for_options = get_secondary_school_classnames(school_id)
     except Exception as exc:
         logging.warning("Failed to load school class names for dashboard subject options: %s", exc)
         classnames_for_options = []
@@ -22485,10 +22514,9 @@ def school_admin_teacher_assignments():
         academic_year=current_year,
     ) or []
 
-    class_options = sorted(
+    class_options = filter_secondary_classnames(
         {str(name).strip() for name in class_counts.keys() if str(name).strip()}
-        | {str((row.get('classname') or '')).strip() for row in class_assignments if str((row.get('classname') or '')).strip()},
-        key=lambda v: str(v).lower(),
+        | {str((row.get('classname') or '')).strip() for row in class_assignments if str((row.get('classname') or '')).strip()}
     )
 
     class_subject_options = {}
@@ -22684,15 +22712,13 @@ def school_admin_messages():
     class_counts = get_student_count_by_class(school_id) or {}
 
     try:
-        class_options = sorted(
-            {str(name).strip() for name in get_school_classnames(school_id) if str(name).strip()}
-            | {str(name).strip() for name in class_counts.keys() if str(name).strip()},
-            key=lambda value: str(value).lower(),
+        class_options = filter_secondary_classnames(
+            {str(name).strip() for name in get_secondary_school_classnames(school_id) if str(name).strip()}
+            | {str(name).strip() for name in class_counts.keys() if str(name).strip()}
         )
     except Exception:
-        class_options = sorted(
-            [str(name).strip() for name in class_counts.keys() if str(name).strip()],
-            key=lambda value: str(value).lower(),
+        class_options = filter_secondary_classnames(
+            [str(name).strip() for name in class_counts.keys() if str(name).strip()]
         )
 
     try:
@@ -23884,6 +23910,9 @@ def school_admin_class_subjects():
         if not classname:
             flash('Class name is required.', 'error')
             return redirect(url_for('school_admin_class_subjects'))
+        if not is_secondary_classname(classname):
+            flash('Only secondary classes are supported (JSS/SS).', 'error')
+            return redirect(url_for('school_admin_class_subjects'))
         school = get_school(school_id) or {}
 
         core_subjects = _dedupe_keep_order([
@@ -23957,7 +23986,7 @@ def school_admin_class_subjects():
 
     configs = get_all_class_subject_configs(school_id)
     school = get_school(school_id) or {}
-    class_options = sorted(subject_catalog_map.keys())
+    class_options = filter_secondary_classnames(subject_catalog_map.keys())
     return render_template(
         'school/school_admin_class_subjects.html',
         configs=configs,
@@ -24014,6 +24043,7 @@ def school_admin_settings():
         ss_ranking_mode = request.form.get('ss_ranking_mode', 'together').strip().lower()
         class_arm_ranking_mode = request.form.get('class_arm_ranking_mode', 'separate').strip().lower()
         ss1_stream_mode = request.form.get('ss1_stream_mode', 'separate').strip().lower()
+        ss_arm_mode = (request.form.get('ss_arm_mode', current_school.get('ss_arm_mode', 'preserve')) or 'preserve').strip().lower()
         leadership_title = normalize_school_leadership_title(
             request.form.get('leadership_title', current_school.get('leadership_title', 'principal')),
             default=(current_school.get('leadership_title', 'principal') or 'principal'),
@@ -24028,6 +24058,8 @@ def school_admin_settings():
             class_arm_ranking_mode = 'separate'
         if ss1_stream_mode not in {'separate', 'combined'}:
             ss1_stream_mode = 'separate'
+        if ss_arm_mode not in {'preserve', 'drop'}:
+            ss_arm_mode = 'preserve'
         if not (0 <= grade_d_min <= grade_c_min <= grade_b_min <= grade_a_min <= 100):
             flash('Invalid grade configuration. Use A >= B >= C >= D within 0-100.', 'error')
             return redirect(url_for('school_admin_settings'))
@@ -24200,6 +24232,7 @@ def school_admin_settings():
             'class_arm_ranking_mode': class_arm_ranking_mode,
             'combine_third_term_results': combine_third,
             'ss1_stream_mode': ss1_stream_mode,
+            'ss_arm_mode': ss_arm_mode,
             'parent_timetable_show_teacher': parent_timetable_show_teacher,
             'theme_primary_color': normalize_hex_color(request.form.get('theme_primary_color', ''), '#1E3C72'),
             'theme_secondary_color': normalize_hex_color(request.form.get('theme_secondary_color', ''), '#2A5298'),
@@ -24207,7 +24240,7 @@ def school_admin_settings():
             'leadership_title': leadership_title,
         }
         assessment_updates = []
-        for level in ('primary', 'jss', 'ss'):
+        for level in ('jss', 'ss'):
             mode = request.form.get(f'exam_mode_{level}', 'separate').strip().lower()
             objective_max = _to_int(request.form.get(f'objective_max_{level}', 0), 0)
             theory_max = _to_int(request.form.get(f'theory_max_{level}', 0), 0)
@@ -24941,8 +24974,12 @@ def school_admin_promote():
             if key.startswith('action_'):
                 student_id = key.replace('action_', '', 1)
                 action_by_student[student_id] = value
-        
+
         if from_class and to_class:
+            adjusted_to = apply_promotion_arm_target(from_class, to_class, school=school)
+            if adjusted_to != to_class:
+                to_class = adjusted_to
+                flash(f'Class arm preserved: target class adjusted to {to_class}.', 'info')
             if from_class == to_class and not auto_ss3:
                 flash('Current class and promote-to class cannot be the same.', 'error')
                 return redirect(url_for('school_admin_promote', from_class=from_class))
@@ -24991,8 +25028,6 @@ def school_admin_promote():
         if not selected_class or canonicalize_classname(data.get('classname', '')) == selected_class_key
     }
     base_to_classes = [
-        'NURSERY2', 'NURSERY3',
-        'PRIMARY1', 'PRIMARY2', 'PRIMARY3', 'PRIMARY4', 'PRIMARY5', 'PRIMARY6',
         'JSS1', 'JSS2', 'JSS3',
         'SS1', 'SS2', 'SS3',
         'GRADUATED',
@@ -25063,7 +25098,10 @@ def school_admin_timetable():
     current_term = get_current_term(school)
     current_year = (school or {}).get('academic_year', '')
     assignments = get_class_assignments(school_id)
-    classes = sorted(set(get_student_count_by_class(school_id).keys()) | {a.get('classname', '') for a in assignments if a.get('classname')})
+    classes = filter_secondary_classnames(
+        set(get_student_count_by_class(school_id).keys())
+        | {a.get('classname', '') for a in assignments if a.get('classname')}
+    )
     teachers = get_teachers(school_id) or {}
     subject_assignment_rows = get_teacher_subject_assignments(
         school_id,
@@ -25249,6 +25287,9 @@ def school_admin_timetable():
                         if not classname or not day_raw or not period_label or not subject:
                             row_errors.append(f'Row {idx}: classname/day/period_label/subject are required.')
                             continue
+                        if not is_secondary_classname(classname):
+                            row_errors.append(f'Row {idx}: only secondary classes are supported (JSS/SS).')
+                            continue
                         day_of_week = day_map.get(day_raw)
                         if day_of_week is None:
                             row_errors.append(f'Row {idx}: day "{day_raw}" is invalid.')
@@ -25330,6 +25371,8 @@ def school_admin_timetable():
                     room = (request.form.get('room', '') or '').strip()
                     if not classname or not period_label or not subject:
                         raise ValueError('Class, period label, and subject are required.')
+                    if not is_secondary_classname(classname):
+                        raise ValueError('Only secondary classes are supported (JSS/SS).')
                     if day_of_week < 1 or day_of_week > 7:
                         raise ValueError('Day must be between 1 and 7.')
                     if start_time and not re.fullmatch(r'\d{2}:\d{2}', start_time):
@@ -25559,7 +25602,9 @@ def teacher_subject_rank_history():
         if (r.get('academic_year') or '').strip() == selected_year
         and (r.get('term') or '').strip() == selected_term
     ]
-    class_options = sorted({(r.get('classname') or '').strip() for r in scoped_assignments if (r.get('classname') or '').strip()}, key=lambda x: x.lower())
+    class_options = filter_secondary_classnames(
+        {(r.get('classname') or '').strip() for r in scoped_assignments if (r.get('classname') or '').strip()}
+    )
     selected_class = (request.args.get('classname', '') or '').strip()
     if selected_class not in class_options:
         selected_class = class_options[0] if class_options else ''
@@ -26459,7 +26504,7 @@ def school_admin_attendance_summary():
     school = get_school(school_id) or {}
     selected_term = (request.args.get('term', '') or '').strip() or get_current_term(school)
     selected_year = (request.args.get('academic_year', '') or '').strip() or (school.get('academic_year', '') or '')
-    classnames = get_school_classnames(school_id) or []
+    classnames = get_secondary_school_classnames(school_id) or []
     rows = []
     for cls in classnames:
         summary = get_class_attendance_summary(
@@ -26772,7 +26817,13 @@ def school_admin_import_target(target):
                 if not classname:
                     add_error(idx, row, 'classname is required.')
                     continue
+                if not is_secondary_classname(classname):
+                    add_error(idx, row, 'classname must be a secondary class (JSS/SS).')
+                    continue
                 first_year_class = canonicalize_classname(row.get('first_year_class', row.get('classname', '')))
+                if not is_secondary_classname(first_year_class):
+                    add_error(idx, row, 'first_year_class must be a secondary class (JSS/SS).')
+                    continue
                 sid_raw = (row.get('student_id', '') or '').strip()
                 sid = ''
                 if sid_raw:
@@ -26882,7 +26933,7 @@ def school_admin_import_target(target):
         elif target_key == 'class_assignments':
             teachers_map = get_teachers(school_id)
             teacher_ids = {k.lower() for k in (teachers_map or {}).keys()}
-            class_candidates = [str(c).strip() for c in (get_school_classnames(school_id) or []) if str(c).strip()]
+            class_candidates = [str(c).strip() for c in (get_secondary_school_classnames(school_id) or []) if str(c).strip()]
             school = get_school(school_id) or {}
             default_year = (school.get('academic_year', '') or '').strip()
             for idx, row in enumerate(rows, start=2):
@@ -26903,6 +26954,9 @@ def school_admin_import_target(target):
                     continue
                 if class_candidates and not class_belongs_to_school_or_arm(school_id, classname, class_candidates=class_candidates):
                     add_error(idx, row, f'classname "{classname}" is not a valid class for this school.')
+                    continue
+                if not is_secondary_classname(classname):
+                    add_error(idx, row, 'classname must be a secondary class (JSS/SS).')
                     continue
                 arm_variants = class_arm_variants_for_base(class_candidates, classname)
                 if arm_variants and not is_class_arm_variant(classname):
@@ -27568,9 +27622,12 @@ def school_admin_add_students_by_class():
         genders = [normalize_student_gender(gender) for gender in request.form.getlist('gender[]')]
         config = get_class_subject_config(school_id, classname)
         stream = 'N/A'
-        
+
         if not classname or not term:
             flash('Please fill in all required fields.', 'error')
+            return redirect(url_for('school_admin_add_students_by_class'))
+        if not is_secondary_classname(classname):
+            flash('Only secondary classes are supported (JSS/SS).', 'error')
             return redirect(url_for('school_admin_add_students_by_class'))
         if not config:
             flash('No class subject configuration found. Configure subjects for this class first.', 'error')
@@ -27718,7 +27775,9 @@ def school_admin_add_students_by_class():
 
     # Always build listing from fresh DB state so ordering and new additions are correct.
     all_students = load_students(school_id, include_archived=True)
-    class_options = sorted(set(s.get('classname') for s in all_students.values() if s.get('classname')))
+    class_options = filter_secondary_classnames(
+        {s.get('classname') for s in all_students.values() if s.get('classname')}
+    )
     class_students = [
         {
             'student_id': sid,
@@ -27758,6 +27817,9 @@ def school_admin_assign_teacher():
     if term not in valid_terms:
         flash('Invalid term selected.', 'error')
         return redirect(fallback_redirect)
+    if classname and not is_secondary_classname(classname):
+        flash('Only secondary classes are supported (JSS/SS).', 'error')
+        return redirect(fallback_redirect)
     
     if teacher_id and classname:
         try:
@@ -27768,7 +27830,7 @@ def school_admin_assign_teacher():
             if int(teacher_profile.get('is_archived', 0) or 0):
                 flash('Selected teacher is archived. Restore teacher before assigning.', 'error')
                 return redirect(fallback_redirect)
-            class_candidates = get_school_classnames(school_id)
+            class_candidates = get_secondary_school_classnames(school_id)
             if not class_belongs_to_school_or_arm(school_id, classname, class_candidates=class_candidates):
                 flash('Selected class does not exist for your school.', 'error')
                 return redirect(fallback_redirect)
@@ -27836,12 +27898,16 @@ def school_admin_assign_subject_teacher():
     if not subjects:
         flash('Select at least one subject for assignment.', 'error')
         return redirect(fallback_redirect)
+    invalid_classnames = [cls for cls in selected_classnames if cls and not is_secondary_classname(cls)]
+    if invalid_classnames:
+        flash('Only secondary classes are supported (JSS/SS).', 'error')
+        return redirect(fallback_redirect)
 
     try:
         school = get_school(school_id)
         academic_year = (school.get('academic_year', '') or '').strip() if school else ''
 
-        class_candidates = get_school_classnames(school_id)
+        class_candidates = get_secondary_school_classnames(school_id)
         if not class_candidates:
             flash('No classes available for subject assignment yet.', 'error')
             return redirect(fallback_redirect)
@@ -28050,10 +28116,13 @@ def school_admin_send_student_message():
             flash('Select class for stream-targeted message.', 'error')
             return redirect(url_for('school_admin_messages'))
     school = get_school(school_id) or {}
-    class_candidates = get_school_classnames(school_id) or []
+    class_candidates = get_secondary_school_classnames(school_id) or []
     if target_mode in {'class', 'stream'}:
         if target_classname and target_classname not in class_candidates:
             flash('Selected class is not valid for your school.', 'error')
+            return redirect(url_for('school_admin_messages'))
+        if target_classname and not is_secondary_classname(target_classname):
+            flash('Only secondary classes are supported (JSS/SS).', 'error')
             return redirect(url_for('school_admin_messages'))
     if target_mode == 'stream':
         normalized_stream, stream_error = normalize_stream_for_class(target_classname, target_stream, school)
@@ -28213,10 +28282,13 @@ def school_admin_send_teacher_message():
             flash('Select both class and subject for this teacher message target.', 'error')
             return redirect(url_for('school_admin_messages'))
 
-    class_candidates = get_school_classnames(school_id) or []
+    class_candidates = get_secondary_school_classnames(school_id) or []
     if target_mode in {'class', 'class_subject'}:
         if target_classname and target_classname not in class_candidates:
             flash('Selected class is not valid for your school.', 'error')
+            return redirect(url_for('school_admin_messages'))
+        if target_classname and not is_secondary_classname(target_classname):
+            flash('Only secondary classes are supported (JSS/SS).', 'error')
             return redirect(url_for('school_admin_messages'))
 
     def _subjects_for_class(cls_name):
@@ -29341,6 +29413,153 @@ def teacher_notifications():
     )
 
 
+@app.route('/teacher/subject-comments')
+def teacher_subject_comments():
+    if session.get('role') != 'teacher':
+        return redirect(url_for('login'))
+
+    school_id = session.get('school_id')
+    teacher_id = session.get('user_id')
+    school = get_school(school_id) or {}
+    current_term = get_current_term(school)
+    current_year = (school.get('academic_year', '') or '').strip()
+
+    teacher_profile = get_teachers(school_id).get(teacher_id, {})
+    teacher_name = f"{teacher_profile.get('firstname', '')} {teacher_profile.get('lastname', '')}".strip() or teacher_id
+    teacher_phone = (teacher_profile.get('phone') or '').strip()
+    teacher_profile_image = (teacher_profile.get('profile_image') or '').strip()
+    last_login_at = format_timestamp(get_last_login_at(session.get('user_id')))
+
+    class_teacher_classes = get_teacher_classes(school_id, teacher_id, term=current_term, academic_year=current_year)
+    subject_assignment_rows = get_teacher_subject_assignments(
+        school_id,
+        teacher_id=teacher_id,
+        term=current_term,
+        academic_year=current_year,
+    )
+    subject_assignment_by_class = {}
+    subject_assignment_set = set()
+    for row in subject_assignment_rows:
+        cls = (row.get('classname') or '').strip()
+        subj = normalize_subject_name(row.get('subject', ''))
+        if not cls or not subj:
+            continue
+        subject_assignment_by_class.setdefault(cls, set()).add(subj)
+        subject_assignment_set.add(subj)
+
+    eligible_classes = sorted(set(class_teacher_classes) | set(subject_assignment_by_class.keys()))
+    selected_class = (request.args.get('classname', '') or '').strip()
+    if selected_class and selected_class not in eligible_classes:
+        selected_class = ''
+
+    selected_term = (request.args.get('term', '') or '').strip() or current_term
+    selected_year = (request.args.get('academic_year', '') or '').strip() or current_year
+    selected_subject = (request.args.get('subject', '') or '').strip()
+
+    term_options = ['First Term', 'Second Term', 'Third Term']
+    year_options = sorted({y for y in [current_year, selected_year] if y})
+    if not year_options and current_year:
+        year_options = [current_year]
+
+    class_filter = [selected_class] if selected_class else eligible_classes
+    class_students_data = load_students_for_classes(school_id, class_filter, term_filter=selected_term) if class_filter else {}
+
+    available_subjects = set(subject_assignment_set)
+    comment_rows = []
+    for student_id, student in (class_students_data or {}).items():
+        student_year = (student.get('academic_year') or selected_year).strip()
+        if selected_year and student_year != selected_year:
+            continue
+        classname = (student.get('classname') or '').strip()
+        if selected_class and classname.lower() != selected_class.lower():
+            continue
+        allowed_subjects = set()
+        if classname in class_teacher_classes:
+            allowed_subjects.update(normalize_subjects_list(student.get('subjects', [])))
+        if classname in subject_assignment_by_class:
+            allowed_subjects.update(subject_assignment_by_class.get(classname, set()))
+        if not allowed_subjects:
+            continue
+        available_subjects.update(allowed_subjects)
+        snapshot = None
+        if selected_term:
+            snapshot = load_published_student_result(school_id, student_id, selected_term, selected_year, classname=classname)
+        score_source = 'published' if snapshot else 'live'
+        scores = snapshot.get('scores', {}) if snapshot else (student.get('scores') or {})
+
+        student_name = " ".join(
+            [student.get('firstname', ''), student.get('lastname', ''), student.get('othername', '')]
+        ).strip()
+        if not student_name:
+            student_name = student_id
+
+        for subject in sorted(allowed_subjects):
+            if selected_subject and subject.lower() != selected_subject.lower():
+                continue
+            score_block = get_subject_score_block(scores, subject)
+            if not isinstance(score_block, dict):
+                continue
+            comment = (score_block.get('subject_teacher_comment', '') or '').strip()
+            if not comment:
+                continue
+            comment_rows.append({
+                'student_id': student_id,
+                'student_name': student_name,
+                'classname': classname,
+                'subject': subject,
+                'comment': comment,
+                'term': selected_term,
+                'academic_year': selected_year,
+                'source': score_source,
+            })
+
+    comment_rows.sort(
+        key=lambda row: (
+            (row.get('classname', '') or '').lower(),
+            (row.get('subject', '') or '').lower(),
+            (row.get('student_name', '') or '').lower(),
+            (row.get('student_id', '') or '').lower(),
+        )
+    )
+
+    dashboard_classes = sorted(set(class_teacher_classes) | set(subject_assignment_by_class.keys()))
+    teacher_messages = get_teacher_messages_for_teacher(
+        school_id=school_id,
+        teacher_id=teacher_id,
+        classes=dashboard_classes,
+        subjects=list(subject_assignment_set),
+        limit=20,
+    )
+    unread_teacher_messages = sum(1 for row in teacher_messages if not row.get('is_read'))
+
+    return render_template(
+        'teacher/teacher_subject_comments.html',
+        school=school,
+        active_page='subject_comments',
+        teacher_id=teacher_id,
+        teacher_name=teacher_name,
+        teacher_phone=teacher_phone,
+        teacher_profile_image=teacher_profile_image,
+        last_login_at=last_login_at,
+        classes=eligible_classes,
+        selected_class=selected_class,
+        selected_subject=selected_subject,
+        selected_term=selected_term,
+        selected_year=selected_year,
+        term_options=term_options,
+        year_options=year_options,
+        available_subjects=sorted(available_subjects),
+        comment_rows=comment_rows,
+        teacher_sidebar_profile_image=teacher_profile_image,
+        teacher_sidebar_display_name=teacher_name,
+        teacher_unread_notifications=unread_teacher_messages,
+        teacher_score_nav_tree=[],
+        teacher_selected_score_subject='',
+        teacher_selected_score_class='',
+        teacher_has_class_assignment_nav=bool(class_teacher_classes),
+    )
+
+
 @app.route('/teacher/class-list')
 def teacher_class_list():
     if session.get('role') != 'teacher':
@@ -29689,7 +29908,7 @@ def teacher_attendance():
     if not classes:
         flash('No class assignment found for attendance.', 'error')
         return redirect(url_for('teacher_dashboard'))
-    classes = sorted(set(classes), key=lambda x: str(x).lower())
+    classes = filter_secondary_classnames(set(classes))
 
     selected_class = (request.values.get('classname', '') or '').strip()
     if selected_class not in classes:

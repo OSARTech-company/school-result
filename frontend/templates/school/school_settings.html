@@ -110,19 +110,13 @@
 
                 <div class="section-title"><i class="fas fa-calendar-alt"></i> Term Calendar</div>
                 <div class="form-group">
-                    <label for="calendar_academic_year">Calendar Academic Year:</label>
-                    <input type="text" id="calendar_academic_year" name="calendar_academic_year" value="{{ selected_calendar_year or (school.academic_year if school else '') }}" placeholder="e.g., 2026-2027">
-                </div>
-                <div class="form-group">
-                    <label for="calendar_term">Calendar Term:</label>
-                    <select id="calendar_term" name="calendar_term">
-                        <option value="First Term" {% if selected_calendar_term == 'First Term' %}selected{% endif %}>First Term</option>
-                        <option value="Second Term" {% if selected_calendar_term == 'Second Term' %}selected{% endif %}>Second Term</option>
-                        <option value="Third Term" {% if selected_calendar_term == 'Third Term' %}selected{% endif %}>Third Term</option>
-                    </select>
-                    <small style="color:#5a6c7d; display:block; margin-top:6px;">
-                        Pick year + term to load and edit any saved calendar for that term.
-                    </small>
+                    <label>Calendar Term Scope</label>
+                    <div class="note">
+                        Using current term/year: <strong>{{ school.current_term if school else 'First Term' }}</strong>
+                        ({{ school.academic_year if school else '' }})
+                    </div>
+                    <input type="hidden" id="calendar_academic_year" name="calendar_academic_year" value="{{ school.academic_year if school else '' }}">
+                    <input type="hidden" id="calendar_term" name="calendar_term" value="{{ school.current_term if school else 'First Term' }}">
                 </div>
                 <div class="form-group">
                     <label for="term_open_date">Term Open Date:</label>
@@ -180,7 +174,7 @@
                 </div>
                 
                 <div class="section-title"><i class="fas fa-file-alt"></i> Exam Structure</div>
-                {% for level in ['primary', 'jss', 'ss'] %}
+                {% for level in ['jss', 'ss'] %}
                 {% set cfg = assessment_configs[level] %}
                 <div class="settings-row">
                     <div style="font-weight:700; margin-bottom:10px; text-transform: uppercase;">{{ level }}</div>
@@ -255,6 +249,17 @@
                     </select>
                 </div>
                 <div class="form-group">
+                    <label for="ss_arm_mode">Senior Secondary Arm Mode</label>
+                    <select id="ss_arm_mode" name="ss_arm_mode">
+                        <option value="preserve" {% if not school or school.ss_arm_mode != 'drop' %}selected{% endif %}>
+                            Keep class arms when promoting into SS (e.g., SS1A)
+                        </option>
+                        <option value="drop" {% if school and school.ss_arm_mode == 'drop' %}selected{% endif %}>
+                            Drop class arms in SS and use stream only (SS1 + Science/Art/Commercial)
+                        </option>
+                    </select>
+                </div>
+                <div class="form-group">
                     <label for="class_arm_ranking_mode">Class Arm Ranking Mode (e.g., JSS1A/JSS1S)</label>
                     <select id="class_arm_ranking_mode" name="class_arm_ranking_mode">
                         <option value="separate" {% if not school or school.class_arm_ranking_mode != 'together' %}selected{% endif %}>
@@ -306,6 +311,47 @@
             </form>
         </div>
 
+        <div class="card" id="term-calendar-view">
+            <h2><i class="fas fa-eye"></i> View Other Term Calendars (Read-only)</h2>
+            {% if calendar_rows %}
+            <div class="form-group">
+                <label for="calendar_view_key">Select Saved Term</label>
+                <select id="calendar_view_key">
+                    {% for row in calendar_rows %}
+                    <option value="{{ (row.academic_year or '') ~ '||' ~ (row.term or '') }}">
+                        {{ row.term }} ({{ row.academic_year or '-' }})
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="settings-row">
+                <div class="form-group">
+                    <label>Open Date</label>
+                    <input type="text" id="calendar_view_open" readonly>
+                </div>
+                <div class="form-group">
+                    <label>Close Date</label>
+                    <input type="text" id="calendar_view_close" readonly>
+                </div>
+                <div class="form-group">
+                    <label>Next Term Begins</label>
+                    <input type="text" id="calendar_view_next" readonly>
+                </div>
+                <div class="form-group">
+                    <label>Midterm Break</label>
+                    <input type="text" id="calendar_view_break" readonly>
+                </div>
+                <div class="form-group">
+                    <label>Days Open</label>
+                    <input type="text" id="calendar_view_days" readonly>
+                </div>
+            </div>
+            <small class="note">Use this panel to review past terms without changing the current term/year.</small>
+            {% else %}
+            <p>No saved term calendars available yet.</p>
+            {% endif %}
+        </div>
+
         <div class="card">
             <h2><i class="fas fa-calendar-check"></i> Saved Term Calendars</h2>
             {% if calendar_rows %}
@@ -326,6 +372,7 @@
                 <tbody>
                     {% for row in calendar_rows %}
                     {% set row_is_closed = row.close_date and row.close_date < today_iso %}
+                    {% set row_is_current = (school and row.term == school.current_term and row.academic_year == school.academic_year) %}
                     <tr>
                         <td>{{ row.academic_year or '-' }}</td>
                         <td>{{ row.term }}</td>
@@ -341,15 +388,21 @@
                         </td>
                         <td>{{ row.days_open }}</td>
                         <td>
-                            {% if row_is_closed %}
-                                <span style="color:#b42318; font-weight:700;">Closed</span>
-                            {% else %}
+                            {% if row_is_current %}
                                 <a
                                     class="btn btn-secondary"
                                     style="padding:6px 10px; font-size:0.88rem;"
                                     href="{{ url_for('school_admin_settings', calendar_term=row.term, calendar_year=row.academic_year) }}"
                                 >
                                     Edit
+                                </a>
+                            {% else %}
+                                <a
+                                    class="btn btn-secondary"
+                                    style="padding:6px 10px; font-size:0.88rem;"
+                                    href="{{ url_for('school_admin_settings', calendar_term=row.term, calendar_year=row.academic_year) }}#term-calendar-view"
+                                >
+                                    View
                                 </a>
                             {% endif %}
                         </td>
@@ -374,6 +427,25 @@
             const key = `${(row.academic_year || '').trim()}||${(row.term || '').trim()}`;
             if (key !== '||') savedCalendarByKey[key] = row;
         });
+
+        function renderReadOnlyCalendar(key) {
+            const openEl = document.getElementById('calendar_view_open');
+            const closeEl = document.getElementById('calendar_view_close');
+            const nextEl = document.getElementById('calendar_view_next');
+            const breakEl = document.getElementById('calendar_view_break');
+            const daysEl = document.getElementById('calendar_view_days');
+            if (!openEl || !closeEl || !nextEl || !breakEl || !daysEl) return;
+            const row = savedCalendarByKey[key] || {};
+            openEl.value = row.open_date || '';
+            closeEl.value = row.close_date || '';
+            nextEl.value = row.next_term_begin_date || '';
+            if (row.midterm_break_start && row.midterm_break_end) {
+                breakEl.value = `${row.midterm_break_start} to ${row.midterm_break_end}`;
+            } else {
+                breakEl.value = '';
+            }
+            daysEl.value = (row.days_open !== undefined && row.days_open !== null) ? String(row.days_open) : '';
+        }
 
         function parseDateLocal(value) {
             if (!value) return null;
@@ -449,7 +521,7 @@
             combinedEls.forEach(el => el.style.display = isCombined ? 'block' : 'none');
         }
 
-        ['primary', 'jss', 'ss'].forEach(level => {
+        ['jss', 'ss'].forEach(level => {
             const modeEl = document.getElementById(`exam_mode_${level}`);
             modeEl.addEventListener('change', () => refreshExamMode(level));
             refreshExamMode(level);
@@ -463,6 +535,32 @@
         const calendarTermEl = document.getElementById('calendar_term');
         if (calendarYearEl) calendarYearEl.addEventListener('change', loadSelectedCalendarIfSaved);
         if (calendarTermEl) calendarTermEl.addEventListener('change', loadSelectedCalendarIfSaved);
+
+        // Support querystring-driven calendar view (from Saved Term Calendars table).
+        const params = new URLSearchParams(window.location.search);
+        const qsYear = (params.get('calendar_year') || '').trim();
+        const qsTerm = (params.get('calendar_term') || '').trim();
+        const currentYear = '{{ school.academic_year if school else "" }}';
+        const currentTerm = '{{ school.current_term if school else "" }}';
+        const qsIsCurrent = qsYear && qsTerm && qsYear === currentYear && qsTerm === currentTerm;
+        if (qsIsCurrent && calendarYearEl) {
+            calendarYearEl.value = qsYear;
+        }
+        if (qsIsCurrent && calendarTermEl) {
+            calendarTermEl.value = qsTerm;
+        }
+        const viewKeyEl = document.getElementById('calendar_view_key');
+        if (viewKeyEl) {
+            const qsKey = qsYear && qsTerm ? `${qsYear}||${qsTerm}` : '';
+            const defaultKey = savedCalendarByKey[qsKey]
+                ? qsKey
+                : (viewKeyEl.value || Object.keys(savedCalendarByKey)[0] || '');
+            if (defaultKey) {
+                viewKeyEl.value = defaultKey;
+                renderReadOnlyCalendar(defaultKey);
+            }
+            viewKeyEl.addEventListener('change', () => renderReadOnlyCalendar(viewKeyEl.value));
+        }
         loadSelectedCalendarIfSaved();
         calcDaysOpenPreview();
     </script>

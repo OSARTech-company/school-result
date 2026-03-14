@@ -244,7 +244,7 @@
         }
         function baseClassKey(value) {
           var canon = canonicalizeClassName(value);
-          var m = canon.match(/^(NURSERY|PRIMARY|JSS|SSS|SS)(\d+)/);
+          var m = canon.match(/^(JSS|SSS|SS)(\d+)/);
           if (!m) return canon;
           var level = m[1] === 'SSS' ? 'SS' : m[1];
           return '' + level + m[2];

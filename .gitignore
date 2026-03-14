@@ -13,6 +13,9 @@ reports.json
 # VS Code
 .vscode/
 
+# Local secrets
+.env
+
 # OS files
 .DS_Store
 Thumbs.db
@@ -21,3 +24,16 @@ Thumbs.db
 *.zip
 __pycache__/
 .pytest_cache/
+
+# Local logs and backups
+app.log
+backups/
+*.dump
+*.log
+*.pid
+
+# Local Postgres data dir (if created in repo)
+ssss/
+
+# Local installers/binaries
+ne/

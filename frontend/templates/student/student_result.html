@@ -997,40 +997,6 @@
             </div>
         </div>
 
-        {% if session.get('role') == 'parent' %}
-        <div class="subjects-table">
-            <div class="table-title">Subject Teacher Comments (Parent View)</div>
-            <div class="table-wrap">
-            <table>
-                <thead>
-                    <tr>
-                        <th style="width: 35%;">Subject</th>
-                        <th>Comment</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% set parent_comment_rows = [] %}
-                    {% for subject, s in student.subjects.items() %}
-                        {% if (s.get('subject_teacher_comment', '') or '')|trim %}
-                            {% set _ = parent_comment_rows.append({'subject': subject, 'comment': (s.get('subject_teacher_comment', '') or '')|trim}) %}
-                        {% endif %}
-                    {% endfor %}
-                    {% for row in parent_comment_rows %}
-                    <tr>
-                        <td style="text-align:left; font-weight:bold;">{{ row.subject }}</td>
-                        <td style="text-align:left;">{{ row.comment }}</td>
-                    </tr>
-                    {% else %}
-                    <tr>
-                        <td colspan="2" style="text-align:center;">No subject teacher comments available.</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            </div>
-        </div>
-        {% endif %}
-
         {% set leadership_label = 'Head Teacher' if school and school.leadership_title == 'head_teacher' else 'Principal' %}
         <div class="teacher-comment">
             <div class="comment-title">{{ leadership_label }}'s Comment</div>

@@ -95,6 +95,10 @@
                     <i class="fas fa-list-ol"></i>
                     <span>Subject Ranks</span>
                 </a>
+                <a href="{{ url_for('teacher_subject_comments') }}" class="side-link{% if active_page == 'subject_comments' %} active{% endif %}">
+                    <i class="fas fa-comments"></i>
+                    <span>Subject Comments</span>
+                </a>
                 <a href="{{ url_for('teacher_subject_handover') }}" class="side-link{% if active_page == 'subject_handover' %} active{% endif %}">
                     <i class="fas fa-clipboard-check"></i>
                     <span>Subject Handover</span>

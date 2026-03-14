@@ -84,7 +84,7 @@
                     <div>
                         <div class="form-group">
                             <label for="classname">Class Name</label>
-                            <input type="text" id="classname" name="classname" list="classSuggestions" placeholder="e.g. Primary 1, JSS1, SS1" required>
+                            <input type="text" id="classname" name="classname" list="classSuggestions" placeholder="e.g. JSS1, JSS2A, SS1" required>
                             <datalist id="classSuggestions">
                                 {% for class_name in class_options %}
                                 <option value="{{ class_name }}"></option>
@@ -214,7 +214,7 @@
         }
         function classParts(v) {
             const n = normalizeClassName(v);
-            const m = n.match(/^(NURSERY|PRIMARY|JSS|SSS|SS)(\d+)([A-Z]+)?$/);
+            const m = n.match(/^(JSS|SSS|SS)(\d+)([A-Z]+)?$/);
             if (!m) return { level: '', num: '', arm: '', key: n };
             const level = (m[1] === 'SSS') ? 'SS' : m[1];
             return { level: level, num: m[2], arm: m[3] || '', key: `${level}${m[2]}` };
