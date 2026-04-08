@@ -28,6 +28,7 @@ from datetime import date, datetime, timedelta
 import smtplib
 from email.message import EmailMessage
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.exceptions import HTTPException
 import mimetypes
 import time
 import urllib.request
@@ -16915,16 +16916,25 @@ def _resolve_login_display_name(role, username, school_id=''):
     role_name = (role or '').strip().lower()
     uname = (username or '').strip().lower()
     sid = (school_id or '').strip()
-    if role_name == 'teacher' and sid and uname:
-        teacher = get_teacher(sid, uname) or {}
-        name = f"{(teacher.get('firstname') or '').strip()} {(teacher.get('lastname') or '').strip()}".strip()
-        if name:
-            return name
-    if role_name == 'student' and sid and uname:
-        student = load_student(sid, uname) or {}
-        name = (student.get('firstname') or '').strip()
-        if name:
-            return name
+    try:
+        if role_name == 'teacher' and sid and uname:
+            teacher = get_teacher(sid, uname) or {}
+            name = f"{(teacher.get('firstname') or '').strip()} {(teacher.get('lastname') or '').strip()}".strip()
+            if name:
+                return name
+        if role_name == 'student' and sid and uname:
+            student = load_student(sid, uname) or {}
+            name = (student.get('firstname') or '').strip()
+            if name:
+                return name
+    except Exception as exc:
+        logging.warning(
+            "Login display name lookup failed for role=%s username=%s school_id=%s: %s",
+            role_name,
+            uname,
+            sid,
+            exc,
+        )
     return uname
 
 def _begin_super_admin_email_2fa(user, client_ip=''):
@@ -16993,7 +17003,17 @@ def _complete_authenticated_login(user, user_school_id):
     session.pop('show_first_login_tutorial', None)
     session.pop('first_login_tutorial_role', None)
     session['last_activity_at'] = datetime.now().isoformat()
-    session['post_login_welcome_name'] = _resolve_login_display_name(role, username, user_school_id)
+    try:
+        session['post_login_welcome_name'] = _resolve_login_display_name(role, username, user_school_id)
+    except Exception as exc:
+        logging.warning(
+            "Login welcome-name fallback for role=%s username=%s school_id=%s: %s",
+            role,
+            username,
+            user_school_id,
+            exc,
+        )
+        session['post_login_welcome_name'] = username
     record_login_audit(username, role, user_school_id, 'login', True, '')
     update_login_timestamps(username)
     if role != 'super_admin' and not has_user_seen_first_login_tutorial(username):
@@ -24947,6 +24967,48 @@ def internal_server_error(error):
         role=role,
     ), 500
 
+def _auth_error_render_context(template_name):
+    """Build fallback template context for auth routes after an exception."""
+    terms_read = False
+    try:
+        terms_read = (request.args.get('terms_read') == '1') or (request.form.get('agree_terms') == 'on')
+    except Exception:
+        terms_read = False
+    context = {}
+    if template_name in {'shared/login.html', 'shared/cbt_login.html'}:
+        context['terms_read'] = terms_read
+    elif template_name == 'shared/super_admin_2fa.html':
+        context['username'] = (
+            (session.get('super_admin_2fa_auth_user') or '').strip().lower()
+            or (session.get('super_admin_2fa_pending_user') or '').strip().lower()
+        )
+    return context
+
+def safe_auth_route(template_name):
+    """Catch unexpected auth-route failures and return a friendly fallback page."""
+    def _decorator(func):
+        @wraps(func)
+        def _wrapped(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except HTTPException:
+                raise
+            except Exception as exc:
+                error_uid = ''
+                try:
+                    error_uid = log_app_error(
+                        exc,
+                        endpoint=(request.endpoint or func.__name__),
+                        extra_meta={'auth_route': func.__name__},
+                    )
+                except Exception:
+                    error_uid = ''
+                logging.exception("Auth route failed in %s: %s", func.__name__, exc)
+                flash(f'Sign-in temporarily failed. Reference: {error_uid or "ERR-UNKNOWN"}', 'error')
+                return render_template(template_name, **_auth_error_render_context(template_name)), 500
+        return _wrapped
+    return _decorator
+
 @app.before_request
 def enforce_school_operations_toggle():
     """Apply school-level operation lock set by super admin."""
@@ -25543,6 +25605,7 @@ def apply_pwa_and_cache_headers(response):
     return response
 
 @app.route('/cbt-login', methods=['GET', 'POST'])
+@safe_auth_route('shared/cbt_login.html')
 @require_rate_limit('cbt_login', RATE_LIMIT_LOGIN_PER_MIN, 60, redirect_endpoint='cbt_login', methods=('POST',))
 def cbt_login():
     """Dedicated student CBT login that opens CBT-only workspace."""
@@ -25652,6 +25715,7 @@ def cbt_login():
 
 
 @app.route('/login', methods=['GET', 'POST'])
+@safe_auth_route('shared/login.html')
 @require_rate_limit('login', RATE_LIMIT_LOGIN_PER_MIN, 60, redirect_endpoint='login', methods=('POST',))
 def login():
     """Single login for all users - no role selection."""
@@ -25841,6 +25905,7 @@ def login():
 
 
 @app.route('/super-admin/2fa', methods=['GET', 'POST'])
+@safe_auth_route('shared/super_admin_2fa.html')
 @require_rate_limit('super_admin_2fa_verify', 25, 3600, redirect_endpoint='login', methods=('POST',))
 def super_admin_two_factor():
     if not SUPER_ADMIN_EMAIL_2FA_ENABLED:
