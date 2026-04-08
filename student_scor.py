@@ -5263,6 +5263,17 @@ def _log_suppressed_exception(context, exc):
     except Exception:
         pass
 
+def _normalize_school_id_text(value):
+    """Return a safe string school_id for helpers that expect text IDs."""
+    if value is None:
+        return ''
+    if isinstance(value, bytes):
+        try:
+            value = value.decode('utf-8', errors='ignore')
+        except Exception:
+            value = str(value)
+    return str(value).strip()
+
 # Short-lived in-memory store for teacher CSV error exports.
 CSV_ERROR_EXPORTS = {}
 
@@ -7012,7 +7023,7 @@ def get_user(username, return_meta=False):
             'username': row[0],
             'password_hash': row[1],
             'role': row[2] or 'student',
-            'school_id': row[3],
+            'school_id': _normalize_school_id_text(row[3]),
             'terms_accepted': int(row[4] or 0),
             'password_changed_at': (row[5] if has_password_changed_at and len(row) > 5 else None),
         }
@@ -13330,7 +13341,7 @@ def _school_row_to_dict(row):
 
 def get_school(school_id):
     """Get school details."""
-    school_key = (school_id or '').strip()
+    school_key = _normalize_school_id_text(school_id)
     if not school_key:
         return None
     ensure_school_access_schema()
@@ -13444,6 +13455,9 @@ def get_all_schools():
 
 def get_school_admin_username(school_id):
     """Get the school admin username/email for a school."""
+    school_key = _normalize_school_id_text(school_id)
+    if not school_key:
+        return ''
     with db_connection() as conn:
         c = conn.cursor()
         db_execute(
@@ -13452,14 +13466,14 @@ def get_school_admin_username(school_id):
                WHERE CAST(school_id AS TEXT) = ? AND role = 'school_admin'
                ORDER BY id ASC
                LIMIT 1""",
-            (school_id,)
+            (school_key,)
         )
         row = c.fetchone()
         return row[0] if row else ''
 
 def update_school_admin_account(school_id, new_username, new_password=''):
     """Update existing school admin username/password, or create one if missing."""
-    normalized_school_id = str((school_id or '')).strip()
+    normalized_school_id = _normalize_school_id_text(school_id)
     new_username = (new_username or '').strip().lower()
     if not normalized_school_id or not new_username:
         raise ValueError('School ID and school admin email are required.')
