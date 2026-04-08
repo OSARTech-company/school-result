@@ -4825,6 +4825,7 @@ _STUDENTS_HAS_PHONE_COL = None
 _TEACHERS_HAS_ARCHIVE_COLS = None
 _USERS_HAS_PASSWORD_CHANGED_AT = None
 _USERS_HAS_TUTORIAL_SEEN_AT = None
+_USERS_HAS_LAST_LOGIN_AT = None
 _REPORTS_HAS_CONTEXT_COLS = None
 
 def students_has_user_id_column():
@@ -5018,6 +5019,29 @@ def users_has_tutorial_seen_at_column():
     except Exception:
         _USERS_HAS_TUTORIAL_SEEN_AT = False
     return _USERS_HAS_TUTORIAL_SEEN_AT
+
+def users_has_last_login_at_column():
+    """Detect whether users.last_login_at exists on this DB."""
+    global _USERS_HAS_LAST_LOGIN_AT
+    if _USERS_HAS_LAST_LOGIN_AT is not None:
+        return _USERS_HAS_LAST_LOGIN_AT
+    try:
+        with db_connection() as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """SELECT 1
+                   FROM information_schema.columns
+                   WHERE table_schema = 'public'
+                     AND table_name = 'users'
+                     AND column_name = 'last_login_at'
+                   LIMIT 1""",
+                None,
+            )
+            _USERS_HAS_LAST_LOGIN_AT = bool(c.fetchone())
+    except Exception:
+        _USERS_HAS_LAST_LOGIN_AT = False
+    return _USERS_HAS_LAST_LOGIN_AT
 
 def reports_has_context_columns():
     """Detect whether reports context columns exist (reporter_role/school_id/source_page)."""
@@ -7290,17 +7314,24 @@ def update_login_timestamps(username):
 
 def get_last_login_at(username):
     """Return last successful login timestamp for a user."""
+    if not users_has_last_login_at_column():
+        return None
     with db_connection() as conn:
         c = conn.cursor()
-        db_execute(
-            c,
-            """SELECT last_login_at
-               FROM users
-               WHERE LOWER(username) = LOWER(?)
-               LIMIT 1""",
-            ((username or '').strip(),),
-        )
-        row = c.fetchone()
+        try:
+            db_execute(
+                c,
+                """SELECT last_login_at
+                   FROM users
+                   WHERE LOWER(username) = LOWER(?)
+                   LIMIT 1""",
+                ((username or '').strip(),),
+            )
+            row = c.fetchone()
+        except Exception as exc:
+            if 'last_login_at' in str(exc).lower() or 'undefinedcolumn' in str(exc).lower():
+                return None
+            raise
     return row[0] if row else None
 
 def format_timestamp(ts):
@@ -24339,6 +24370,7 @@ def load_reports(status_filter='', user_filter='', text_filter='', page=1, per_p
             params.append(f'%{text_val}%')
 
         has_context_cols = reports_has_context_columns()
+        has_read_at_col = True
         if has_context_cols:
             query = """SELECT id, user_id, description, timestamp, status, read_at,
                               reporter_role, reporter_school_id, source_page
@@ -24370,24 +24402,34 @@ def load_reports(status_filter='', user_filter='', text_filter='', page=1, per_p
                 or ('reporter_school_id' in em and 'does not exist' in em)
                 or ('source_page' in em and 'does not exist' in em)
             )
+            missing_read_at_col = ('read_at' in em and 'does not exist' in em) or ('undefinedcolumn' in em and 'read_at' in em)
             if not (has_context_cols and missing_context_col):
-                raise
+                if not missing_read_at_col:
+                    raise
             logging.warning(
-                "reports context columns missing at runtime; falling back to legacy reports query: %s",
+                "reports schema missing at runtime; falling back to legacy reports query: %s",
                 exc,
             )
-            global _REPORTS_HAS_CONTEXT_COLS
-            _REPORTS_HAS_CONTEXT_COLS = False
-            has_context_cols = False
-            legacy_query = """SELECT id, user_id, description, timestamp, status, read_at
-                              FROM reports"""
+            if missing_context_col:
+                global _REPORTS_HAS_CONTEXT_COLS
+                _REPORTS_HAS_CONTEXT_COLS = False
+                has_context_cols = False
+            if missing_read_at_col:
+                has_read_at_col = False
+            legacy_select_cols = 'id, user_id, description, timestamp, status'
+            if has_read_at_col:
+                legacy_select_cols += ', read_at'
+            if has_context_cols:
+                legacy_select_cols += ', reporter_role, reporter_school_id, source_page'
+            legacy_query = f"SELECT {legacy_select_cols} FROM reports"
             if where:
                 legacy_query += ' WHERE ' + ' AND '.join(where)
             legacy_query += ' ORDER BY timestamp DESC LIMIT ? OFFSET ?'
             db_execute(c, legacy_query, tuple((params or []) + [per_page, offset]))
             rows = c.fetchall()
+        base_idx = 6 if has_read_at_col else 5
         school_ids = (
-            sorted({(row[7] or '').strip() for row in rows if len(row) > 7 and (row[7] or '').strip()})
+            sorted({(row[base_idx + 1] or '').strip() for row in rows if has_context_cols and len(row) > base_idx + 1 and (row[base_idx + 1] or '').strip()})
             if has_context_cols else []
         )
         school_name_map = {}
@@ -24401,11 +24443,11 @@ def load_reports(status_filter='', user_filter='', text_filter='', page=1, per_p
                 'description': row[2],
                 'timestamp': row[3],
                 'status': row[4],
-                'read_at': row[5],
-                'reporter_role': (row[6] or '').strip() if has_context_cols and len(row) > 6 else '',
-                'reporter_school_id': (row[7] or '').strip() if has_context_cols and len(row) > 7 else '',
-                'source_page': (row[8] or '').strip() if has_context_cols and len(row) > 8 else '',
-                'reporter_school_name': school_name_map.get((row[7] or '').strip(), '') if has_context_cols and len(row) > 7 else '',
+                'read_at': row[5] if has_read_at_col and len(row) > 5 else '',
+                'reporter_role': (row[base_idx] or '').strip() if has_context_cols and len(row) > base_idx else '',
+                'reporter_school_id': (row[base_idx + 1] or '').strip() if has_context_cols and len(row) > base_idx + 1 else '',
+                'source_page': (row[base_idx + 2] or '').strip() if has_context_cols and len(row) > base_idx + 2 else '',
+                'reporter_school_name': school_name_map.get((row[base_idx + 1] or '').strip(), '') if has_context_cols and len(row) > base_idx + 1 else '',
             }
             for row in rows
         ]
@@ -24948,8 +24990,14 @@ def internal_server_error(error):
         except Exception:
             error_uid = ''
     role = (session.get('role') or '').strip().lower()
+    failing_endpoint = (request.endpoint or '').strip()
     if role == 'super_admin':
-        back_url = url_for('super_admin_dashboard')
+        if failing_endpoint in {'super_admin_dashboard', 'view_reports'}:
+            back_url = url_for('super_admin_error_logs')
+        elif failing_endpoint == 'super_admin_error_logs':
+            back_url = url_for('menu')
+        else:
+            back_url = url_for('super_admin_error_logs')
     elif role == 'school_admin':
         back_url = url_for('school_admin_dashboard')
     elif role == 'teacher':
