@@ -31,9 +31,11 @@ backups/
 *.dump
 *.log
 *.pid
+logs/*.log
 
 # Local Postgres data dir (if created in repo)
 ssss/
 
 # Local installers/binaries
 ne/
+local_ai/artifacts/

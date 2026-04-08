@@ -1,4 +1,4 @@
-const SW_VERSION = 'school-result-pwa-v1';
+const SW_VERSION = 'school-result-pwa-v2';
 const STATIC_CACHE = `${SW_VERSION}-static`;
 const OFFLINE_URL = '/static/offline.html';
 

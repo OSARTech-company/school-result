@@ -1,6 +1,6 @@
-<div class="side-taskbar">
+<div class="side-taskbar school-admin-sidebar parent-sidebar">
     <div class="side-brand">
-        <img src="{{ url_for('static', filename='img/osartech-logo.png') }}" alt="Osartech Logo" class="brand-logo">
+        <img src="{{ url_for('static', filename='img/osartech-logo.png', v='20260322a') }}" alt="Osartech Logo" class="brand-logo">
         <span>Parent</span>
     </div>
     {% if school_access_state %}
@@ -41,12 +41,12 @@
             {% set selected_student_key = request.args.get('student_key') %}
         {% endif %}
 
-        <div class="side-group-toggle" aria-hidden="true">
+        <div class="side-section-label side-child-count" aria-hidden="true">
             <span>{% if (children or [])|length == 1 %}Child{% else %}Children{% endif %}</span>
             <span class="notif-badge">{{ (children or [])|length }}</span>
         </div>
         {% if children %}
-        <div class="mt-8">
+        <div class="mt-8 parent-child-select-wrap">
             <label class="muted" for="parentChildSelect">Active Child</label>
             <select id="parentChildSelect">
                 {% for child in (children or []) %}
@@ -93,11 +93,15 @@
         </details>
         {% endfor %}
 
-        <details class="side-group" {% if request.endpoint in ['help', 'parent_change_password'] %}open{% endif %}>
+        <details class="side-group" {% if request.endpoint in ['help', 'parent_change_password'] or active_page == 'assistant_analytics' %}open{% endif %}>
             <summary class="side-group-toggle">
                 <span>Support</span><i class="fas fa-chevron-down"></i>
             </summary>
             <div class="side-group-links">
+                <a href="{{ url_for('parent_assistant_analytics') }}" class="side-link{% if active_page == 'assistant_analytics' %} active{% endif %}">
+                    <i class="fas fa-robot"></i>
+                    <span>Assistant Analytics</span>
+                </a>
                 <a href="{{ url_for('parent_dashboard') }}#parent-password-card" class="side-link">
                     <i class="fas fa-key"></i>
                     <span>Change Password</span>

@@ -5,10 +5,10 @@ A comprehensive Flask web application for managing student academic records,
 including multi-school support, role-based access, and advanced features.
 
 Author: OSondu Stanley
-Version: 2.0.0
+Version: 2.1.0
 """
 
-from flask import Flask, render_template, request, redirect, url_for, session, flash, send_file, Response, g, has_request_context
+from flask import Flask, render_template, request, redirect, url_for, session, flash, send_file, Response, jsonify, g, has_request_context
 from flask import got_request_exception
 from flask_wtf.csrf import CSRFProtect, CSRFError
 import argparse
@@ -16,6 +16,7 @@ import json
 import csv
 import re
 import math
+import random
 import difflib
 import calendar
 import base64
@@ -34,7 +35,7 @@ import urllib.parse
 import base64
 import threading
 import socket
-from collections import deque
+from collections import deque, Counter
 import traceback
 
 import os
@@ -44,6 +45,7 @@ from contextlib import contextmanager
 from functools import wraps
 
 import logging
+from logging.handlers import RotatingFileHandler
 try:
     from dotenv import load_dotenv
 except Exception:
@@ -369,8 +371,10 @@ def inject_assistant_preferences_context():
     preferred_mode = get_assistant_user_preference(role=role, key='response_mode', default=default_mode)
     if preferred_mode not in APP_ASSISTANT_RESPONSE_MODES:
         preferred_mode = default_mode
+    quick_prompts = _assistant_role_quick_prompts(role)
     return {
         'assistant_preferred_mode': preferred_mode,
+        'assistant_quick_prompts': quick_prompts[:8],
     }
 
 @app.context_processor
@@ -388,6 +392,38 @@ def inject_school_access_ui_context():
     except Exception:
         return {'school_access_state': None}
 
+
+@app.context_processor
+def inject_school_feature_flags():
+    """Expose school-level feature switches for nav/UI visibility."""
+    role = (session.get('role') or '').strip().lower()
+    if role not in {'school_admin', 'teacher', 'student', 'parent'}:
+        return {'school_cbt_enabled': True}
+    school_id = (session.get('school_id') or '').strip()
+    if not school_id:
+        return {'school_cbt_enabled': True}
+    try:
+        school = get_school(school_id) or {}
+        return {'school_cbt_enabled': bool(normalize_school_cbt_enabled(school.get('cbt_enabled', 1), default=1))}
+    except Exception:
+        return {'school_cbt_enabled': True}
+
+
+@app.context_processor
+def inject_school_admin_nav_counts():
+    role = (session.get('role') or '').strip().lower()
+    if role != 'school_admin':
+        return {'school_pending_privacy_review_count': 0}
+    school_id = (session.get('school_id') or '').strip()
+    if not school_id:
+        return {'school_pending_privacy_review_count': 0}
+    try:
+        pending_count = count_school_pending_privacy_reviews(school_id)
+    except Exception as exc:
+        logging.warning("Failed to load school privacy pending count for nav: %s", exc)
+        pending_count = 0
+    return {'school_pending_privacy_review_count': int(pending_count or 0)}
+
 def _current_role():
     return (session.get('role') or '').strip().lower()
 
@@ -395,8 +431,19 @@ APP_ASSISTANT_MAX_QUESTION_CHARS = 1200
 APP_ASSISTANT_OPENAI_MODEL = (os.environ.get('APP_ASSISTANT_OPENAI_MODEL', 'gpt-4.1-mini') or 'gpt-4.1-mini').strip()
 APP_ASSISTANT_OPENAI_TIMEOUT_SECONDS = max(4, int((os.environ.get('APP_ASSISTANT_OPENAI_TIMEOUT_SECONDS', '18') or '18').strip() or '18'))
 APP_ASSISTANT_FUZZY_CUTOFF = 0.76
-APP_ASSISTANT_RESPONSE_MODES = {'standard', 'simple', 'detailed', 'local', 'pidgin'}
+APP_ASSISTANT_RESPONSE_MODES = {'standard', 'simple', 'detailed', 'local', 'pidgin', 'checklist', 'ultra_simple'}
+APP_ASSISTANT_ANSWER_VERSION = (os.environ.get('APP_ASSISTANT_ANSWER_VERSION', '2026.03.28.1') or '2026.03.28.1').strip()
 APP_ASSISTANT_SAFETY_NOTE = 'Guidance only: I cannot execute actions, publish results, or change app data.'
+APP_ASSISTANT_ENABLE_OPENAI = (os.environ.get('APP_ASSISTANT_ENABLE_OPENAI', '0') or '0').strip().lower() in ('1', 'true', 'yes')
+APP_ASSISTANT_LOCAL_QA_MATCH_CUTOFF = max(0.70, min(0.98, float((os.environ.get('APP_ASSISTANT_LOCAL_QA_MATCH_CUTOFF', '0.83') or '0.83').strip() or '0.83')))
+APP_ASSISTANT_ENABLE_BPE = (os.environ.get('APP_ASSISTANT_ENABLE_BPE', '1') or '1').strip().lower() in ('1', 'true', 'yes')
+APP_ASSISTANT_BPE_MAX_MERGES = max(20, min(240, int((os.environ.get('APP_ASSISTANT_BPE_MAX_MERGES', '90') or '90').strip() or '90')))
+APP_ASSISTANT_BPE_RETRAIN_SECONDS = max(120, min(86400, int((os.environ.get('APP_ASSISTANT_BPE_RETRAIN_SECONDS', '1800') or '1800').strip() or '1800')))
+APP_ASSISTANT_LOCAL_QA_MAX_ROWS_PER_ROLE = max(100, min(5000, int((os.environ.get('APP_ASSISTANT_LOCAL_QA_MAX_ROWS_PER_ROLE', '800') or '800').strip() or '800')))
+APP_ASSISTANT_LOCAL_QA_RETENTION_DAYS = max(30, min(730, int((os.environ.get('APP_ASSISTANT_LOCAL_QA_RETENTION_DAYS', '180') or '180').strip() or '180')))
+APP_ASSISTANT_TRANSFORMER_ENABLED = (os.environ.get('APP_ASSISTANT_TRANSFORMER_ENABLED', '0') or '0').strip().lower() in ('1', 'true', 'yes')
+APP_ASSISTANT_TRANSFORMER_MIN_CONFIDENCE = max(0.45, min(0.99, float((os.environ.get('APP_ASSISTANT_TRANSFORMER_MIN_CONFIDENCE', '0.72') or '0.72').strip() or '0.72')))
+APP_ASSISTANT_TRANSFORMER_ARTIFACT_DIR = (os.environ.get('APP_ASSISTANT_TRANSFORMER_ARTIFACT_DIR', 'local_ai/artifacts') or 'local_ai/artifacts').strip()
 APP_ASSISTANT_RATE_LIMIT_PER_MIN = max(6, int((os.environ.get('APP_ASSISTANT_RATE_LIMIT_PER_MIN', '40') or '40').strip() or '40'))
 APP_ASSISTANT_MEMORY_DAYS = max(1, min(7, int((os.environ.get('APP_ASSISTANT_MEMORY_DAYS', '2') or '2').strip() or '2')))
 APP_ASSISTANT_MEMORY_MAX_EXCHANGES = max(6, min(80, int((os.environ.get('APP_ASSISTANT_MEMORY_MAX_EXCHANGES', '30') or '30').strip() or '30')))
@@ -407,10 +454,16 @@ def _assistant_default_response_mode_for_role(role=''):
     global_default = (os.environ.get('APP_ASSISTANT_DEFAULT_MODE', 'standard') or 'standard').strip().lower()
     teacher_default = (os.environ.get('APP_ASSISTANT_DEFAULT_MODE_TEACHER', 'detailed') or 'detailed').strip().lower()
     school_admin_default = (os.environ.get('APP_ASSISTANT_DEFAULT_MODE_SCHOOL_ADMIN', 'detailed') or 'detailed').strip().lower()
+    student_default = (os.environ.get('APP_ASSISTANT_DEFAULT_MODE_STUDENT', 'ultra_simple') or 'ultra_simple').strip().lower()
+    parent_default = (os.environ.get('APP_ASSISTANT_DEFAULT_MODE_PARENT', 'ultra_simple') or 'ultra_simple').strip().lower()
     if role_name == 'teacher':
         mode = teacher_default
     elif role_name == 'school_admin':
         mode = school_admin_default
+    elif role_name == 'student':
+        mode = student_default
+    elif role_name == 'parent':
+        mode = parent_default
     else:
         mode = global_default
     if mode not in APP_ASSISTANT_RESPONSE_MODES:
@@ -445,6 +498,77 @@ APP_ASSISTANT_TYPO_MAP = {
     'ansewer': 'answer',
     'quesion': 'question',
     'funcion': 'function',
+    'resert': 'reset',
+    'stident': 'student',
+    'corection': 'correction',
+    'refrence': 'reference',
+    'opload': 'upload',
+    'signeture': 'signature',
+    'soveld': 'shuffled',
+    'answere': 'answer',
+    'authomatically': 'automatically',
+    'cheak': 'check',
+    'relevent': 'relevant',
+    'areng': 'arrange',
+    'arengment': 'arrangement',
+    'aranged': 'arranged',
+    'arrenged': 'arranged',
+    'saperate': 'separate',
+    'seperate': 'separate',
+    'seperated': 'separated',
+    'shoud': 'should',
+    'mssing': 'missing',
+    'mising': 'missing',
+    'fuction': 'function',
+    'funtion': 'function',
+    'nav bare': 'navbar',
+    'techaing': 'teaching',
+    'tearmly': 'termly',
+    'teram': 'term',
+    'calss': 'class',
+    'classrom': 'classroom',
+    'restet': 'reset',
+    'resart': 'restart',
+    'authmatic': 'automatic',
+    'illitrate': 'illiterate',
+    'profectional': 'professional',
+    'sugest': 'suggest',
+    'surgest': 'suggest',
+    'anser': 'answer',
+    'ansr': 'answer',
+    'scoore': 'score',
+    'scorre': 'score',
+}
+APP_ASSISTANT_FALLBACK_LANGUAGE_MAP = {
+    'wetin': 'what',
+    'wetin be': 'what is',
+    'abeg': 'please',
+    'how far': 'how',
+    'i no see': 'i cannot find',
+    'e no show': 'not showing',
+    'no dey show': 'not showing',
+    'na where': 'where',
+    'na who': 'who',
+    'na wetin': 'what',
+    'una': 'you',
+    'dey': 'is',
+    'fit': 'can',
+    'waka me through': 'guide me',
+    'make i': 'how do i',
+    'i wan': 'i want',
+    'shey': 'can',
+    'abeg help me': 'please help me',
+    'e clear': 'is clear',
+    'e no clear': 'not clear',
+    'i no understand': 'i do not understand',
+    'no understand': 'do not understand',
+    'na wa': 'problem',
+    'i need am sharp sharp': 'i need quick steps',
+    'give me simple': 'use simple english',
+    'talk am small': 'short answer',
+    'show me button': 'show quick prompts',
+    'which one i go click': 'what should i click',
+    'make e dey easy': 'make it easy',
 }
 STUDENT_MESSAGE_MAX_CHARS = max(1000, int((os.environ.get('STUDENT_MESSAGE_MAX_CHARS', '12000') or '12000').strip() or '12000'))
 STUDENT_MESSAGE_ATTACHMENT_MAX_BYTES = max(256 * 1024, int((os.environ.get('STUDENT_MESSAGE_ATTACHMENT_MAX_BYTES', str(8 * 1024 * 1024)) or str(8 * 1024 * 1024)).strip() or str(8 * 1024 * 1024)))
@@ -572,8 +696,8 @@ APP_ASSISTANT_ROLE_KB = {
         {
             'topic': 'privacy_requests',
             'title': 'Resolve privacy/data requests',
-            'summary': 'Privacy Requests handle personal-data rights requests (export, correction, deletion/restriction) with formal resolution tracking.',
-            'steps': ['Open Privacy Requests.', 'Filter to pending and review request details.', 'Set status to resolved/rejected, add resolution note, then update.'],
+            'summary': 'Privacy Requests use a two-step flow: school admin reviews first, then super admin applies final resolution/action.',
+            'steps': ['Open Privacy Requests.', 'Filter pending rows and check school review status.', 'For school-approved rows, set approved/rejected and apply action where needed.'],
             'keywords': ['privacy request', 'data request', 'personal data', 'export data', 'delete data', 'correction request', '/super-admin/privacy-requests', '/super-admin/privacy-requests/resolve', 'resolved', 'rejected'],
         },
         {
@@ -962,16 +1086,16 @@ APP_ASSISTANT_MICRO_FAQ = {
         },
         {
             'aliases': ['data request', 'privacy request', 'privacy requests', 'personal data request', 'the data request is for what'],
-            'where': 'Open footer `Data Request` or `/privacy-request`. Super admin reviews requests in `/super-admin/privacy-requests`.',
+            'where': 'Open footer `Data Request` or `/privacy-request`. School admin reviews at `/school-admin/privacy-requests`, then super admin finalizes at `/super-admin/privacy-requests`.',
             'use': 'Data Request is for personal-data rights actions like export, correction, deletion/restriction requests.',
-            'steps': ['Choose request type and provide details.', 'Submit and keep the reference ID.', 'Super admin reviews and updates status with a resolution note.'],
-            'next_question': 'Do you want the exact super-admin resolution steps too?',
+            'steps': ['Choose request type and provide details.', 'Submit and keep the reference ID.', 'School admin approves/rejects first; approved requests move to super admin for final action.'],
+            'next_question': 'Do you want exact steps for school-admin review and super-admin final action?',
         },
         {
             'aliases': ['how do super admin resolve data request', 'how does super admin resolve privacy request', 'resolve privacy request', 'privacy request workflow'],
             'where': 'Open Super Admin > Privacy Requests.',
-            'use': 'Super admin resolves privacy requests by setting `Resolved` or `Rejected` with a required resolution note.',
-            'steps': ['Open `/super-admin/privacy-requests`.', 'Filter pending and open target request.', 'Select status (resolved/rejected), enter note, and click Update.'],
+            'use': 'Super admin can only finalize requests after school admin review is approved.',
+            'steps': ['Open `/super-admin/privacy-requests`.', 'Filter pending and confirm school review is Approved.', 'Set Approved/Rejected with a note, then apply action for controlled request types.'],
             'next_question': 'Do you want a resolution-note template for approval/rejection?',
         },
         {
@@ -995,6 +1119,39 @@ APP_ASSISTANT_MICRO_FAQ = {
             'use': 'Add Students is for manual intake or CSV import by class and term.',
             'steps': ['Select class and term.', 'Add rows manually or upload CSV.', 'Save and review validation messages.'],
             'next_question': 'Do you want manual entry steps or CSV format?',
+        },
+        {
+            'aliases': [
+                'reset student password',
+                'resert student password',
+                'student password reset',
+                'reset class student password',
+                'reset class student passwords',
+                'temporary password student',
+            ],
+            'where': 'Open Students > View Students for single reset, or use Students > Reset Class Student Passwords for bulk reset.',
+            'use': 'Password reset sets a temporary/default password so the student can log in again and change it.',
+            'how': 'Open Students > View Students, locate the student, use Reset Password. For many students, use Reset Class Student Passwords by class.',
+            'steps': [
+                'For one student: View Students -> find student -> Reset Password.',
+                'For many students: run Reset Class Student Passwords for the selected class.',
+                'Share the temporary password securely, then ask students to change password after login.',
+            ],
+            'next_question': 'Do you want single-student steps or class bulk-reset steps?',
+        },
+        {
+            'aliases': ['subject request', 'subject requests', 'student subject request', 'subject request page'],
+            'where': 'Open Academics > Subject Requests.',
+            'use': 'Subject Requests is for reviewing and resolving student requests to add or drop subjects.',
+            'steps': ['Open Subject Requests and filter by Pending status.', 'Review student, class, and requested subject action.', 'Approve or reject, then confirm the student subject list is updated.'],
+            'next_question': 'Do you want approval rules for when to accept or reject a subject request?',
+        },
+        {
+            'aliases': ['data request review', 'privacy request review', 'privacy requests review', 'school admin privacy request', 'review data request'],
+            'where': 'Open Support > Data Requests.',
+            'use': 'School admin does first review for privacy/data requests in your school before super admin final action.',
+            'steps': ['Open Data Requests and filter Pending School Review.', 'Approve or reject with a clear review note.', 'Approved requests move to super admin for final approval/apply.'],
+            'next_question': 'Do you want a short review-note template?',
         },
         {
             'aliases': ['view students', 'student list', 'students page'],
@@ -1174,6 +1331,13 @@ APP_ASSISTANT_MICRO_FAQ = {
             'next_question': 'Do you want term-comparison support too?',
         },
         {
+            'aliases': ['subject request', 'subject requests', 'request subject', 'change subject request'],
+            'where': 'Open Subject Requests from student sidebar.',
+            'use': 'Subject Requests lets you request to add or drop subjects for school-admin review.',
+            'steps': ['Open Subject Requests.', 'Create request with subject and reason.', 'Track status: pending, approved, or rejected.'],
+            'next_question': 'Do you want tips for writing a clear request reason?',
+        },
+        {
             'aliases': ['messages', 'notice', 'notification', 'inbox'],
             'where': 'Open Messages from student sidebar.',
             'use': 'Messages shows school notices and updates for you.',
@@ -1182,6 +1346,200 @@ APP_ASSISTANT_MICRO_FAQ = {
         },
     ],
 }
+
+# Additional high-frequency workflow intents.
+APP_ASSISTANT_MICRO_FAQ.setdefault('school_admin', []).extend([
+    {
+        'aliases': ['add teacher', 'create teacher', 'register teacher', 'teacher onboarding'],
+        'where': 'Open Teachers group > Add Teacher.',
+        'use': 'Add Teacher creates a teacher record and login under your school.',
+        'steps': ['Open Add Teacher.', 'Enter teacher details and save.', 'Verify teacher appears in Teachers list.'],
+        'next_question': 'Do you want single-teacher steps or bulk onboarding steps?',
+    },
+    {
+        'aliases': ['assign teacher to class', 'class teacher assignment', 'assign class teacher'],
+        'where': 'Open Teachers group > Assign Teachers.',
+        'use': 'Assign Teachers links a teacher as class owner for class-level workflows.',
+        'steps': ['Select teacher, class, term, and year.', 'Save assignment.', 'Confirm in current class assignments table.'],
+        'next_question': 'Do you want class-arm assignment examples too?',
+    },
+    {
+        'aliases': ['assign subject teacher', 'subject assignment', 'assign teacher subject'],
+        'where': 'Open Teachers group > Assign Teachers (Subject Assignment section).',
+        'use': 'Subject assignment controls who can enter scores for each subject/class.',
+        'steps': ['Select teacher, class, subject, term, and year.', 'Save assignment.', 'Confirm in current subject assignments list.'],
+        'next_question': 'Do you want a rule guide for avoiding duplicate assignments?',
+    },
+    {
+        'aliases': ['why cant publish results', 'cannot publish result', 'publish results blocked', 'publish error'],
+        'use': 'Publishing is blocked when required checks fail (missing scores, term lock, or config mismatch).',
+        'steps': ['Check missing score alerts first.', 'Confirm class/term/year and assignment coverage.', 'Verify result lock/unlock state and retry publish.'],
+        'next_question': 'Do you want a pre-publish troubleshooting checklist?',
+    },
+    {
+        'aliases': ['unlock result correction', 'unlock result for correction', 'unlock term edit'],
+        'where': 'Open Publish Results / correction controls for the target class/term.',
+        'use': 'Unlock temporarily allows score corrections on locked/published result data.',
+        'steps': ['Choose class + term + year.', 'Set unlock window and confirm.', 'Complete corrections quickly and audit changes.'],
+        'next_question': 'Do you want safe unlock duration recommendations?',
+    },
+    {
+        'aliases': ['relock result', 'relock after correction', 'lock after correction'],
+        'where': 'Open the same correction control page used for unlock.',
+        'use': 'Relock closes the correction window to protect final result integrity.',
+        'steps': ['Verify all corrections are complete.', 'Relock class/term/year.', 'Re-check publish status and audit log.'],
+        'next_question': 'Do you want a final relock verification checklist?',
+    },
+    {
+        'aliases': ['fix missing score alert', 'missing score alert fix', 'why missing score alert'],
+        'use': 'Missing score alerts clear only when required assigned-subject entries are complete.',
+        'steps': ['Confirm teacher-subject assignment exists for that class/term/year.', 'Enter or upload missing scores for assigned subjects.', 'Refresh notifications/alerts after save.'],
+        'next_question': 'Do you want me to list likely causes when alert still remains?',
+    },
+    {
+        'aliases': ['set timetable', 'create timetable', 'update timetable schedule'],
+        'where': 'Open Academics > Timetable.',
+        'use': 'Timetable sets period schedule by class and subject allocation.',
+        'steps': ['Select class.', 'Add/edit period rows and subjects.', 'Save and verify no teacher/period conflicts.'],
+        'next_question': 'Do you want CSV timetable import format too?',
+    },
+    {
+        'aliases': ['promote students', 'student promotion', 'run promotion'],
+        'where': 'Open Academics > Promote Students.',
+        'use': 'Promote Students moves students to next class/level based on your promotion action.',
+        'steps': ['Select source class and target class.', 'Review eligible student count.', 'Run promotion and verify class totals.'],
+        'next_question': 'Do you want promotion safety checks before running?',
+    },
+    {
+        'aliases': ['difference promote and promotion audit', 'promote vs promotion audit', 'promotion audit difference'],
+        'use': 'Promote Students performs movement action; Promotion Audit is the historical log/verification page.',
+        'steps': ['Use Promote Students to execute class movement.', 'Use Promotion Audit to review who moved, when, and by whom.'],
+        'next_question': 'Do you want an example workflow using both pages?',
+    },
+    {
+        'aliases': ['data integrity used for', 'what is data integrity used for', 'integrity check purpose'],
+        'use': 'Data Integrity detects assignment/config mismatches, orphan records, and inconsistent school data.',
+        'steps': ['Run checks for current term/year.', 'Fix high-severity items first.', 'Re-run checks to confirm clean status.'],
+        'next_question': 'Do you want issue-priority order for fixing data integrity items?',
+    },
+    {
+        'aliases': ['resolve result dispute', 'how to resolve dispute', 'dispute resolution'],
+        'where': 'Open Monitoring > Result Disputes.',
+        'use': 'Dispute page tracks complaint investigation and resolution status updates.',
+        'steps': ['Open dispute item and review evidence.', 'Apply correction if valid through proper workflow.', 'Update dispute status and resolution note.'],
+        'next_question': 'Do you want a dispute resolution note template?',
+    },
+    {
+        'aliases': ['link parent to student', 'parent student link', 'how to add parent to student'],
+        'where': 'Open Students > View Parents / parent-link workflow.',
+        'use': 'Parent linking grants parent portal access for the selected student(s).',
+        'steps': ['Create/confirm parent record.', 'Link parent phone to the student.', 'Test parent login and child visibility.'],
+        'next_question': 'Do you want single-child or multiple-children linking steps?',
+    },
+    {
+        'aliases': ['reset teacher password', 'teacher password reset'],
+        'where': 'Open Teachers list and use reset action for the target teacher.',
+        'use': 'Reset teacher password sets a temporary password so teacher can sign in again.',
+        'steps': ['Locate teacher record.', 'Run reset password action.', 'Share temporary password securely and require change after login.'],
+        'next_question': 'Do you want bulk teacher reset guidance too?',
+    },
+    {
+        'aliases': ['reset parent password', 'parent password reset'],
+        'where': 'Open parent management page under Students/Parents.',
+        'use': 'Reset parent password restores parent access when login is blocked or forgotten.',
+        'steps': ['Find parent record linked to student.', 'Run reset password action.', 'Share temporary credentials and verify parent can sign in.'],
+        'next_question': 'Do you want steps for parent with multiple linked children?',
+    },
+    {
+        'aliases': ['move to next term', 'change term', 'switch term', 'advance term'],
+        'where': 'Open term setup/new-term controls in school admin.',
+        'use': 'Term change updates current term/year context used by assignments, scores, and workflows.',
+        'steps': ['Complete publishing/audit checks for current term.', 'Open new-term/term settings and switch term/year.', 'Verify assignments/timetable/programs for the new term.'],
+        'next_question': 'Do you want a term-transition checklist before switch?',
+    },
+])
+
+APP_ASSISTANT_MICRO_FAQ.setdefault('teacher', []).extend([
+    {
+        'aliases': ['create cbt', 'how to create cbt', 'cbt setup'],
+        'where': 'Open Academics > CBT.',
+        'use': 'CBT page creates test/exam with class, subject, slot, and timing.',
+        'steps': ['Create CBT test metadata.', 'Set score-over and slot (for test).', 'Add questions and publish when ready.'],
+        'next_question': 'Do you want test-slot mapping explained before publish?',
+    },
+    {
+        'aliases': ['add cbt question', 'enter cbt question', 'cbt question setup'],
+        'where': 'Open CBT > Questions for the selected test.',
+        'use': 'Question page stores question text, answer key, marks, and timer per question.',
+        'steps': ['Choose question type (MCQ/True-False/Fill Blank).', 'Enter options/answer key and points.', 'Save question and repeat for full pool.'],
+        'next_question': 'Do you want fill-blank accepted-answer variants example?',
+    },
+    {
+        'aliases': ['cbt autosave', 'how cbt autosave works', 'cbt draft save'],
+        'use': 'Autosave stores in-progress answers and remaining time so students can resume safely.',
+        'steps': ['Student opens CBT and starts answering.', 'System periodically saves draft + remaining seconds.', 'On refresh/reopen, student resumes from saved state.'],
+        'next_question': 'Do you want troubleshooting steps if autosave seems not updating?',
+    },
+    {
+        'aliases': ['cbt score enter score sheet', 'cbt score sync', 'cbt to score sheet'],
+        'use': 'Submitted CBT score syncs automatically to the teacher score sheet using selected test slot/exam mode.',
+        'steps': ['Set assessment type and score slot when creating CBT.', 'Student submits CBT.', 'System writes scaled score into matching score-sheet component.'],
+        'next_question': 'Do you want slot examples (Test 1/Test 2/Exam) with sample numbers?',
+    },
+])
+
+APP_ASSISTANT_MICRO_FAQ.setdefault('parent', []).extend([
+    {
+        'aliases': ['where can parent see timetable', 'parent timetable page', 'how parent view timetable'],
+        'where': 'Open child-specific Timetable from parent dashboard/sidebar.',
+        'use': 'Parent timetable shows only the linked child class and offered-subject schedule.',
+        'steps': ['Select child first.', 'Open Timetable.', 'Review periods filtered to that child context.'],
+        'next_question': 'Do you want print/export timetable steps for parent?',
+    },
+])
+
+APP_ASSISTANT_MICRO_FAQ.setdefault('super_admin', []).extend([
+    {
+        'aliases': ['difference report issue and data request', 'report issue vs data request', 'report issue and data request difference'],
+        'use': 'Report Issue is support/bug tracking; Data Request is privacy-rights workflow with formal approval/resolution states.',
+        'steps': ['Use Reported Issues queue for support handling.', 'Use Privacy Requests queue for legal/data-rights actions.'],
+        'next_question': 'Do you want exact resolution flow for each queue?',
+    },
+    {
+        'aliases': ['how super admin resolves data request', 'super admin data request resolution', 'resolve data request as super admin'],
+        'where': 'Open Super Admin > Privacy Requests.',
+        'use': 'Super admin finalizes approved school requests with resolved/rejected status and audit note.',
+        'steps': ['Filter requests awaiting final review.', 'Confirm school-admin review note.', 'Resolve/reject and apply required action with resolution note.'],
+        'next_question': 'Do you want a strict approval checklist for super admin?',
+    },
+])
+
+APP_ASSISTANT_MICRO_FAQ.setdefault('common', []).extend([
+    {
+        'aliases': ['request reference not found', 'reference not found', 'invalid request reference'],
+        'use': 'This means the reference ID is wrong, expired, or from another environment (local vs deployed).',
+        'steps': ['Copy exact reference from submission success message.', 'Check same environment/database where request was created.', 'Retry search with exact ID (no extra spaces).'],
+        'next_question': 'Do you want a quick checklist to verify request-reference generation?',
+    },
+    {
+        'aliases': ['email not sending verification code', 'verification code not sent', 'gmail code not receiving'],
+        'use': 'Verification email fails when SMTP settings are missing/invalid or outbound network is blocked.',
+        'steps': ['Confirm SMTP env vars are set correctly.', 'Check sender account/app password validity.', 'Review server logs for SMTP/network error detail and retry.'],
+        'next_question': 'Do you want a full SMTP env variable checklist?',
+    },
+    {
+        'aliases': ['sms not sending', 'sms not delivered', 'twilio sms failed'],
+        'use': 'SMS fails when provider credentials/sender config are invalid or SMS sending is disabled.',
+        'steps': ['Confirm SMS provider env vars and sending toggle.', 'Verify Twilio sender/service SID and account status.', 'Check SMS delivery logs for exact error and retry.'],
+        'next_question': 'Do you want Twilio setup checklist and test-message steps?',
+    },
+    {
+        'aliases': ['report issue used for', 'what is report issue used for', 'report issue purpose'],
+        'use': 'Report Issue sends support/bug details (role, school, page, and description) for faster investigation.',
+        'steps': ['Open Report Issue.', 'Paste exact error and action taken.', 'Submit and track from super-admin reported issues queue.'],
+        'next_question': 'Do you want a good issue-report message template?',
+    },
+])
 
 def _assistant_match_micro_faq(role, q_norm):
     role_name = (role or '').strip().lower()
@@ -1218,6 +1576,13 @@ def _assistant_match_micro_faq(role, q_norm):
     best_score = 0
     for entry in pool:
         aliases = [str(a).strip() for a in (entry.get('aliases') or []) if str(a).strip()]
+        # Disambiguate "subject request" vs "data/privacy request".
+        # Without this, short prompts like "subject request is for what" can
+        # accidentally match the data-request FAQ because both contain "request".
+        if 'subject request' in text:
+            alias_join = ' '.join(_assistant_normalize_text(a) for a in aliases)
+            if 'data request' in alias_join or 'privacy request' in alias_join or 'personal data request' in alias_join:
+                continue
         score = 0
         for alias in aliases:
             score = max(score, _alias_score(alias))
@@ -1357,6 +1722,8 @@ def _assistant_nav_links(role, school_id='', teacher_scope=None):
     role = (role or '').strip().lower()
     if role == 'super_admin':
         _add('Dashboard', 'super_admin_dashboard')
+        _add('Assistant Analytics', 'super_admin_assistant_analytics')
+        _add('Assistant Health', 'assistant_health')
         _add('Add School', 'super_admin_add_school_page')
         _add('View Schools', 'super_admin_view_schools')
         _add('Onboarding Requests', 'super_admin_onboarding_requests')
@@ -1370,6 +1737,7 @@ def _assistant_nav_links(role, school_id='', teacher_scope=None):
         _add('Add Students', 'school_admin_add_students_by_class')
         _add('Teachers', 'school_admin_teachers')
         _add('Assign Teachers', 'school_admin_teacher_assignments')
+        _add('Data Requests', 'school_admin_privacy_requests')
         _add('Messages', 'school_admin_messages')
         _add('Disputes', 'school_admin_disputes')
         _add('Publish Results', 'school_admin_publish_results')
@@ -1384,6 +1752,7 @@ def _assistant_nav_links(role, school_id='', teacher_scope=None):
         _add('Help', 'help', role='school_admin')
     elif role == 'teacher':
         _add('Dashboard', 'teacher_dashboard')
+        _add('Assistant Analytics', 'teacher_assistant_analytics')
         _add('Class List', 'teacher_class_list')
         _add('Messages', 'teacher_messages')
         _add('Notifications', 'teacher_notifications')
@@ -1405,6 +1774,7 @@ def _assistant_nav_links(role, school_id='', teacher_scope=None):
         _add('Help', 'help', role='student')
     elif role == 'parent':
         _add('Dashboard', 'parent_dashboard')
+        _add('Assistant Analytics', 'parent_assistant_analytics')
         _add('Messages', 'parent_messages')
         _add('Attendance', 'parent_period_attendance')
         _add('Timetable', 'parent_timetable')
@@ -1416,16 +1786,28 @@ def _assistant_role_quick_prompts(role, teacher_scope=None):
     role = (role or '').strip().lower()
     prompts = {
         'super_admin': [
+            'Add school',
+            'View schools',
+            'Reported issues',
             'How do I add a new school?',
             'Where can I view reported issues?',
             'How do I switch school operations on/off?',
             'How do I resolve a privacy/data request?',
         ],
         'school_admin': [
+            'Add student',
+            'Reset student password',
+            'Assign teacher',
+            'Publish result',
             'Where do I manage teacher assignments?',
             'How do I send messages to teachers or students?',
+            'How do I review privacy/data requests from my school?',
+            'How do I move to next term safely?',
         ],
         'teacher': [
+            'Enter scores',
+            'Mark attendance',
+            'Create CBT',
             'How do I enter scores for my class?',
             'How do I submit results to class teacher?',
             'What classes and subjects am I assigned to?',
@@ -1434,11 +1816,17 @@ def _assistant_role_quick_prompts(role, teacher_scope=None):
             'Where is Class List and what is it used for?',
         ],
         'student': [
+            'View result',
+            'Read messages',
+            'Change password',
             'How do I view my published result?',
             'Where can I read school messages?',
             'How do I change my password?',
         ],
         'parent': [
+            'View child result',
+            'Check attendance',
+            'View timetable',
             'How do I see my child result?',
             'Where can I compare terms?',
             'How do I report a dispute?',
@@ -1463,6 +1851,13 @@ def _assistant_apply_typo_map(value):
         dst_n = str(dst or '').strip().lower()
         if src_n and dst_n and src_n in text:
             text = text.replace(src_n, dst_n)
+    for src, dst in (APP_ASSISTANT_FALLBACK_LANGUAGE_MAP or {}).items():
+        src_n = str(src or '').strip().lower()
+        dst_n = str(dst or '').strip().lower()
+        if not src_n or not dst_n:
+            continue
+        pattern = r'(?<![a-z0-9])' + re.escape(src_n) + r'(?![a-z0-9])'
+        text = re.sub(pattern, dst_n, text)
     return text
 
 def _assistant_normalize_text(text):
@@ -1485,8 +1880,31 @@ def _assistant_expand_tokens_with_fuzzy(tokens, vocabulary):
     return expanded
 
 def _assistant_execution_intent_detected(q_low):
-    verbs = ('do it', 'execute', 'run', 'delete', 'remove', 'reset', 'publish now', 'send now', 'create now', 'update now')
-    return any(v in q_low for v in verbs)
+    text = (q_low or '').strip().lower()
+    if not text:
+        return False
+    # Keep guidance questions out of execution-intent blocking.
+    if (
+        text.startswith(('how ', 'where ', 'what ', 'why ', 'can ', 'is ', 'should ', 'which ', 'who '))
+        or 'how to' in text
+        or 'for what' in text
+    ):
+        return False
+    command_phrases = (
+        'do it',
+        'do all',
+        'execute',
+        'run it',
+        'run this',
+        'fix it',
+        'delete',
+        'remove',
+        'publish now',
+        'send now',
+        'create now',
+        'update now',
+    )
+    return any(v in text for v in command_phrases)
 
 def _assistant_is_greeting(q_norm):
     tokens = set((q_norm or '').split())
@@ -1539,6 +1957,161 @@ def _assistant_extract_route_hint(text):
         return ''
     return path.rstrip('/') or '/'
 
+def _assistant_clean_source_page(value):
+    raw = str(value or '').strip()
+    if not raw:
+        return ''
+    route = _assistant_extract_route_hint(raw)
+    if route:
+        return route[:220]
+    if raw.startswith('/'):
+        cleaned = raw.split('?', 1)[0].split('#', 1)[0].strip().lower()
+        return cleaned[:220]
+    return ''
+
+def _assistant_parse_steps_json(steps_json):
+    try:
+        rows = json.loads(steps_json or '[]')
+        if not isinstance(rows, list):
+            return []
+        return [str(s).strip() for s in rows if str(s).strip()][:6]
+    except Exception:
+        return []
+
+def _assistant_build_bpe_corpus(role, school_id='', source_page=''):
+    role_name = (role or '').strip().lower()
+    seed_texts = []
+    for item in _assistant_role_kb(role_name):
+        title = str(item.get('title') or '').strip()
+        summary = str(item.get('summary') or '').strip()
+        if title:
+            seed_texts.append(title)
+        if summary:
+            seed_texts.append(summary)
+        for kw in (item.get('keywords') or []):
+            kw_text = str(kw or '').strip()
+            if kw_text:
+                seed_texts.append(kw_text)
+
+    page_key = _assistant_clean_source_page(source_page)
+    try:
+        if ensure_extended_features_schema():
+            with db_connection() as conn:
+                c = conn.cursor()
+                db_execute(
+                    c,
+                    """SELECT question_norm
+                       FROM assistant_local_qa
+                       WHERE COALESCE(school_id, '') = COALESCE(?, '')
+                         AND LOWER(role) = ?
+                         AND (COALESCE(source_page, '') = '' OR COALESCE(source_page, '') = COALESCE(?, ''))
+                       ORDER BY
+                         (COALESCE(helpful_count, 0) - COALESCE(not_helpful_count, 0)) DESC,
+                         COALESCE(usage_count, 0) DESC,
+                         updated_at DESC
+                       LIMIT 320""",
+                    ((school_id or ''), role_name, page_key),
+                )
+                rows = c.fetchall() or []
+            for row in rows:
+                qn = str((row[0] or '')).strip()
+                if qn:
+                    seed_texts.append(qn)
+    except Exception as exc:
+        _log_suppressed_exception('_assistant_build_bpe_corpus', exc)
+
+    words = []
+    for text in seed_texts:
+        for token in _assistant_normalize_text(text).split():
+            if len(token) >= 2:
+                words.append(token)
+    return words[:6000]
+
+def _assistant_train_bpe_merges(words, max_merges=90):
+    if not words:
+        return []
+    vocab = Counter()
+    for w in words:
+        chars = tuple(list(w) + ['</w>'])
+        vocab[chars] += 1
+    merges = []
+    for _ in range(max(1, int(max_merges or APP_ASSISTANT_BPE_MAX_MERGES))):
+        pair_counts = Counter()
+        for pieces, freq in vocab.items():
+            if len(pieces) < 2:
+                continue
+            for i in range(len(pieces) - 1):
+                pair_counts[(pieces[i], pieces[i + 1])] += freq
+        if not pair_counts:
+            break
+        best_pair, best_freq = pair_counts.most_common(1)[0]
+        if int(best_freq or 0) < 2:
+            break
+        merges.append(best_pair)
+        new_vocab = Counter()
+        for pieces, freq in vocab.items():
+            merged = []
+            i = 0
+            while i < len(pieces):
+                if i < len(pieces) - 1 and pieces[i] == best_pair[0] and pieces[i + 1] == best_pair[1]:
+                    merged.append(pieces[i] + pieces[i + 1])
+                    i += 2
+                else:
+                    merged.append(pieces[i])
+                    i += 1
+            new_vocab[tuple(merged)] += freq
+        vocab = new_vocab
+    return merges
+
+def _assistant_get_bpe_merges(role, school_id='', source_page=''):
+    if not APP_ASSISTANT_ENABLE_BPE:
+        return []
+    role_name = (role or '').strip().lower()
+    school_key = (school_id or '').strip()
+    page_key = _assistant_clean_source_page(source_page)
+    cache_key = f'{role_name}|{school_key}|{page_key}'
+    now_ts = int(time.time())
+    with _ASSISTANT_BPE_LOCK:
+        cached = _ASSISTANT_BPE_CACHE.get(cache_key) or {}
+        if cached and (now_ts - int(cached.get('ts') or 0) <= APP_ASSISTANT_BPE_RETRAIN_SECONDS):
+            return list(cached.get('merges') or [])
+    corpus = _assistant_build_bpe_corpus(role_name, school_id=school_key, source_page=page_key)
+    merges = _assistant_train_bpe_merges(corpus, max_merges=APP_ASSISTANT_BPE_MAX_MERGES)
+    with _ASSISTANT_BPE_LOCK:
+        _ASSISTANT_BPE_CACHE[cache_key] = {'ts': now_ts, 'merges': list(merges or [])}
+    return merges
+
+def _assistant_bpe_encode_word(word, merges):
+    pieces = [ch for ch in str(word or '').strip() if ch] + ['</w>']
+    if len(pieces) <= 2:
+        return [str(word or '').strip().lower()] if str(word or '').strip() else []
+    for left, right in (merges or []):
+        out = []
+        i = 0
+        while i < len(pieces):
+            if i < len(pieces) - 1 and pieces[i] == left and pieces[i + 1] == right:
+                out.append(left + right)
+                i += 2
+            else:
+                out.append(pieces[i])
+                i += 1
+        pieces = out
+    return [p for p in pieces if p and p != '</w>']
+
+def _assistant_bpe_piece_set(text, merges):
+    norm = _assistant_normalize_text(text)
+    if not norm:
+        return set()
+    result = set()
+    for word in norm.split():
+        encoded = _assistant_bpe_encode_word(word, merges)
+        for piece in encoded[:8]:
+            if len(piece) >= 2:
+                result.add(piece)
+        if len(result) >= 260:
+            break
+    return result
+
 def _assistant_is_page_help_question(q_norm):
     checks = (
         'what can i do',
@@ -1574,6 +2147,32 @@ def _assistant_is_contextual_page_question(q_norm):
         'what is this for',
     )
     return any(h in text for h in hints)
+
+def _assistant_is_unclear_question(q_norm):
+    text = _assistant_normalize_text(q_norm or '')
+    if not text:
+        return True
+    generic_tokens = {
+        'yes', 'no', 'ok', 'okay', 'help', 'hello', 'hi', 'please',
+        'do', 'it', 'continue', 'next', 'again', 'why', 'how', 'what',
+        'not working', 'not clear', 'problem', 'issue', 'error',
+    }
+    if text in generic_tokens:
+        return True
+    if len(text.split()) <= 2 and text not in {'add student', 'view result', 'reset password'}:
+        return True
+    vague_phrases = (
+        'it is not working',
+        'still not working',
+        'what of this',
+        'how now',
+        'no show',
+        'e no clear',
+        'i no understand',
+        'not clear',
+        'do it',
+    )
+    return any(p in text for p in vague_phrases)
 
 def _assistant_page_relevance_score(q_norm, page_guidance):
     text = _assistant_normalize_text(q_norm or '')
@@ -1758,6 +2357,161 @@ def _assistant_build_low_confidence_question(role='', q_norm='', page_guidance=N
     }
     return defaults.get(role_name, 'Which exact page do you mean?')
 
+def _assistant_extract_nav_group(nav_group_hint=''):
+    text = str(nav_group_hint or '').strip()
+    if not text:
+        return ''
+    m = re.search(r'`([^`]+)`', text)
+    if m:
+        return str(m.group(1) or '').strip()
+    return ''
+
+def _assistant_build_click_path(role='', page_guidance=None, nav_group_hint='', source_page='', fallback_label='', links=None):
+    role_name = (role or '').strip().lower()
+    title = str((page_guidance or {}).get('title') or '').strip()
+    group = _assistant_extract_nav_group(nav_group_hint)
+    route = _assistant_clean_source_page(source_page or '')
+    if group and title:
+        return f'Sidebar -> {group} -> {title}'
+    if role_name in {'school_admin', 'teacher'} and title:
+        return f'Sidebar -> {title}'
+    if role_name in {'parent', 'student', 'super_admin'} and title:
+        return f'Sidebar -> {title}'
+    if route and route != '/':
+        parts = [p for p in route.strip('/').split('/') if p]
+        if parts:
+            label = ' '.join(p.replace('-', ' ') for p in parts[-2:])
+            label = re.sub(r'\s+', ' ', label).strip().title()
+            if label:
+                return f'Sidebar -> {label}'
+    fallback = str(fallback_label or '').strip()
+    if not fallback and isinstance(links, list):
+        for item in links:
+            label = str((item or {}).get('label') or '').strip()
+            if label:
+                fallback = label
+                break
+    if fallback:
+        return f'Sidebar -> {fallback}'
+    if role_name in {'school_admin', 'teacher', 'parent', 'student', 'super_admin'}:
+        return 'Sidebar -> Dashboard'
+    return 'Sidebar'
+
+def _assistant_role_scope_note(role='', q_norm='', teacher_scope=None):
+    role_name = (role or '').strip().lower()
+    text = _assistant_normalize_text(q_norm or '')
+    if not role_name or not text:
+        return ''
+    asks_permission = any(tok in text for tok in (
+        'can we', 'allowed', 'permission', 'access', 'role', 'work of', 'do the work', 'what admin do', 'what teacher do'
+    ))
+    if 'can i' in text and not text.startswith('where can i '):
+        asks_permission = True
+    mentions_other_role = (
+        (role_name != 'teacher' and bool(re.search(r'\bteacher\b', text)))
+        or (role_name != 'school_admin' and bool(re.search(r'\bschool admin\b', text)))
+        or (role_name != 'super_admin' and bool(re.search(r'\bsuper admin\b', text)))
+    )
+    if not asks_permission and not mentions_other_role:
+        return ''
+
+    if role_name == 'school_admin':
+        return 'Role scope: As School Admin, you can manage school setup, users, assignments, and publishing workflows; you cannot perform super-admin global control actions.'
+    if role_name == 'teacher':
+        scope_mode = ((teacher_scope or {}).get('mode') or '').strip().lower()
+        if scope_mode in {'none', ''}:
+            return 'Role scope: As Teacher, you can use teacher pages; score/attendance actions are limited until assignment is added by school admin.'
+        return 'Role scope: As Teacher, you can enter scores and manage assigned class/subject workflows; you cannot change school-wide settings or super-admin operations.'
+    if role_name == 'parent':
+        return 'Role scope: As Parent, you can view linked-child records and submit disputes/requests; you cannot edit school academic records directly.'
+    if role_name == 'student':
+        return 'Role scope: As Student, you can view your own records/messages and submit allowed requests; you cannot change teacher/admin-managed data.'
+    if role_name == 'super_admin':
+        return 'Role scope: As Super Admin, you can manage global platform operations; school-level record edits are done through school-admin workflows.'
+    return ''
+
+def get_assistant_learning_signal(school_id, role='', question='', source_page='', days=45):
+    sid = (school_id or '').strip()
+    role_name = (role or '').strip().lower()
+    question_text = str(question or '').strip()
+    if not sid or not role_name or not question_text or not ensure_extended_features_schema():
+        return {'needs_update': False, 'helpful': 0, 'not_helpful': 0, 'unresolved_hits': 0, 'avg_confidence': 0.0}
+    days = max(7, min(int(days or 45), 180))
+    q_norm = _assistant_normalize_text(question_text)
+    if not q_norm:
+        return {'needs_update': False, 'helpful': 0, 'not_helpful': 0, 'unresolved_hits': 0, 'avg_confidence': 0.0}
+    feedback_rows = []
+    query_rows = []
+    try:
+        with db_connection() as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """SELECT question, helpful
+                   FROM assistant_feedback_logs
+                   WHERE school_id = ?
+                     AND LOWER(role) = ?
+                     AND created_at >= (CURRENT_TIMESTAMP - (? || ' days')::interval)
+                     AND COALESCE(TRIM(question), '') <> ''
+                   ORDER BY created_at DESC
+                   LIMIT 300""",
+                (sid, role_name, str(days)),
+            )
+            feedback_rows = c.fetchall() or []
+            db_execute(
+                c,
+                """SELECT question, COALESCE(unresolved, 0), COALESCE(confidence, 0.0)
+                   FROM assistant_query_logs
+                   WHERE school_id = ?
+                     AND LOWER(role) = ?
+                     AND created_at >= (CURRENT_TIMESTAMP - (? || ' days')::interval)
+                     AND COALESCE(TRIM(question), '') <> ''
+                   ORDER BY created_at DESC
+                   LIMIT 300""",
+                (sid, role_name, str(days)),
+            )
+            query_rows = c.fetchall() or []
+    except Exception:
+        return {'needs_update': False, 'helpful': 0, 'not_helpful': 0, 'unresolved_hits': 0, 'avg_confidence': 0.0}
+
+    helpful = 0
+    not_helpful = 0
+    unresolved_hits = 0
+    conf_vals = []
+    for row in feedback_rows:
+        row_q = _assistant_normalize_text(row[0] or '')
+        if not row_q:
+            continue
+        sim = difflib.SequenceMatcher(None, q_norm, row_q).ratio()
+        if sim < 0.88:
+            continue
+        if int(row[1] or 0) == 1:
+            helpful += 1
+        else:
+            not_helpful += 1
+    for row in query_rows:
+        row_q = _assistant_normalize_text(row[0] or '')
+        if not row_q:
+            continue
+        sim = difflib.SequenceMatcher(None, q_norm, row_q).ratio()
+        if sim < 0.88:
+            continue
+        unresolved_hits += int(row[1] or 0)
+        conf_vals.append(float(row[2] or 0.0))
+    avg_conf = round((sum(conf_vals) / len(conf_vals)), 3) if conf_vals else 0.0
+    needs_update = bool(
+        (not_helpful >= 2 and not_helpful >= helpful)
+        or unresolved_hits >= 3
+        or (len(conf_vals) >= 3 and avg_conf < 0.58)
+    )
+    return {
+        'needs_update': needs_update,
+        'helpful': helpful,
+        'not_helpful': not_helpful,
+        'unresolved_hits': unresolved_hits,
+        'avg_confidence': avg_conf,
+    }
+
 def _assistant_extract_error_guidance(question_text, q_norm=''):
     raw = str(question_text or '').strip()
     low = raw.lower()
@@ -1866,6 +2620,124 @@ def _assistant_extract_error_guidance(question_text, q_norm=''):
             ],
             confidence=0.89,
             unresolved=False
+        )
+
+    if 'undefinedcolumn' in low and 'reporter_role' in low:
+        return _guidance(
+            'Database schema is behind code: `reporter_role` column is missing in reports table.',
+            [
+                'Run startup migration/DDL so new report metadata columns are created.',
+                'Verify `reporter_role`, `reporter_school_id`, and `source_page` exist in the reports table.',
+                'Restart the app after migration and retry the page.',
+            ],
+            confidence=0.97,
+            unresolved=False,
+            next_question='Do you want a DB check query to confirm these columns exist?',
+            fix_snippet="ALTER TABLE reports ADD COLUMN IF NOT EXISTS reporter_role VARCHAR(32);\nALTER TABLE reports ADD COLUMN IF NOT EXISTS reporter_school_id VARCHAR(64);\nALTER TABLE reports ADD COLUMN IF NOT EXISTS source_page TEXT;"
+        )
+
+    if 'undefinedcolumn' in low and 'pref_value' in low:
+        return _guidance(
+            'Database schema is behind code: parent notification preference value column is missing.',
+            [
+                'Run startup migration/DDL to add parent notification preference columns.',
+                'Confirm the table includes `pref_key` and `pref_value` for parent preference storage.',
+                'Restart app worker and reload Parent Dashboard.',
+            ],
+            confidence=0.97,
+            unresolved=False,
+            next_question='Do you want a quick migration-safe SQL snippet for this column?',
+            fix_snippet="ALTER TABLE parent_notification_prefs ADD COLUMN IF NOT EXISTS pref_value TEXT DEFAULT '';"
+        )
+
+    if 'ssl error: decryption failed or bad record mac' in low or 'ssl syscall error: eof detected' in low:
+        return _guidance(
+            'This is a transient PostgreSQL SSL connection drop between app worker and database.',
+            [
+                'Retry once; if it repeats, restart app workers to refresh stale DB connections.',
+                'Enable connection keepalive and ensure DB URL SSL mode is configured correctly.',
+                'Avoid reusing broken cursors after OperationalError; reopen connection/cursor for retry.',
+                'Check provider status/network stability around the same timestamp.',
+            ],
+            confidence=0.92,
+            unresolved=False,
+            next_question='Do you want exact reconnect/retry code pattern for this error?'
+        )
+
+    if 'interfaceerror' in low and 'cursor already closed' in low:
+        return _guidance(
+            'This means code tried to execute a query on a cursor after a prior DB failure closed it.',
+            [
+                'Do not reuse the same cursor after an OperationalError.',
+                'Open a new db_connection context and cursor before retrying the query.',
+                'Wrap retry logic at connection scope, not cursor scope.',
+            ],
+            confidence=0.93,
+            unresolved=False,
+            fix_snippet="try:\n    db_execute(c, query, params)\nexcept Exception:\n    # reopen connection/cursor before retry\n    with db_connection() as conn2:\n        c2 = conn2.cursor()\n        db_execute(c2, query, params)"
+        )
+
+    if 'network is unreachable' in low and ('email send failed' in low or 'smtp' in low):
+        return _guidance(
+            'The app could not reach the email server from this deployment environment.',
+            [
+                'Verify SMTP host/port/env vars are correct in deployed environment.',
+                'Check hosting provider outbound network restrictions for SMTP ports.',
+                'Use provider-supported email API/SMTP path and test with a simple email health check.',
+            ],
+            confidence=0.92,
+            unresolved=False,
+            next_question='Do you want the exact env var checklist for SMTP on your host?'
+        )
+
+    if 'secret_key is required in production' in low:
+        return _guidance(
+            'Production guard blocked startup because `SECRET_KEY` is missing.',
+            [
+                'Set `SECRET_KEY` in deployment environment variables (not in code).',
+                'Redeploy/restart service after setting it.',
+                'Use a long random value for security (32+ chars).',
+            ],
+            confidence=0.98,
+            unresolved=False
+        )
+
+    if 'missing required production env vars' in low:
+        return _guidance(
+            'Startup guard detected required production environment variables are missing.',
+            [
+                'Read the exact missing variable names in the error line.',
+                'Set each missing key in your host environment settings.',
+                'Redeploy/restart and verify startup logs are clean.',
+            ],
+            confidence=0.98,
+            unresolved=False
+        )
+
+    if 'value too long for type character varying(32)' in low and 'alembic_version' in low:
+        return _guidance(
+            'Alembic migration version string is longer than current DB column size.',
+            [
+                'Use a shorter migration revision ID, or enlarge `alembic_version.version_num` column.',
+                'Apply schema fix, then rerun migration/deploy.',
+                'Keep future revision identifiers within DB column constraints.',
+            ],
+            confidence=0.95,
+            unresolved=False,
+            fix_snippet="ALTER TABLE alembic_version ALTER COLUMN version_num TYPE VARCHAR(64);"
+        )
+
+    if 'request is still pending verification' in low and 'verify school email first' in low:
+        return _guidance(
+            'This request has not completed school email verification yet, so approval is blocked.',
+            [
+                'Open Onboarding Requests and locate the same request reference.',
+                'Run email verification flow and confirm `school_email_verified = 1`.',
+                'After verification, retry approval/review action.',
+            ],
+            confidence=0.96,
+            unresolved=False,
+            next_question='Do you want the exact verification and approval sequence for onboarding requests?'
         )
 
     if 'csrf' in low or ('400' in low and 'bad request' in low and 'token' in low):
@@ -2111,6 +2983,7 @@ def _assistant_page_guidance(role, source_page=''):
             ('/school-admin/parents', 'Parents', 'Use this page to review and manage linked parent records.', ['Search parent/student links.', 'Review contact details.', 'Update through supported correction flows.']),
             ('/school-admin/settings', 'School Settings', 'Use this page to configure school profile, academic/session settings, and visual identity.', ['Review current school configuration.', 'Update fields carefully.', 'Save and verify dashboard/header changes.']),
             ('/school-admin/attendance-summary', 'Attendance Summary', 'Use this page to review attendance totals per class/arm.', ['Filter by term/year.', 'Compare present/absent/late counts per class.', 'Export CSV when needed.']),
+            ('/school-admin/privacy-requests', 'School Privacy Requests', 'Use this page to review privacy/data requests submitted by users in your school before super-admin final action.', ['Filter pending-school requests.', 'Approve or reject with a review note.', 'Approved requests move to super admin for final approval/apply.']),
         ],
         'teacher': [
             ('/teacher', 'Teacher Dashboard', 'Use this page to manage assigned classes/subjects and pending tasks.', ['Check assignment and pending score cards.', 'Send assignment/note to students in assigned scope.', 'Open score entry or attendance workflows.']),
@@ -2122,10 +2995,12 @@ def _assistant_page_guidance(role, source_page=''):
             ('/teacher/period-attendance', 'Period Attendance', 'Use this page to mark attendance by period/date.', ['Select class, date, and period.', 'Mark student attendance states.', 'Submit and verify summary.']),
             ('/teacher/attendance', 'Attendance', 'Use this page to mark class attendance for valid school days.', ['Pick class and date.', 'Set student statuses.', 'Save and confirm summary counts.']),
             ('/teacher/timetable', 'Teacher Timetable', 'Use this page to view your teaching periods by class/day/time.', ['Open timetable view.', 'Check day and period blocks.', 'Use it to plan lesson and attendance windows.']),
+            ('/teacher/cbt', 'Teacher CBT', 'Use this page to create CBT tests/exams for your assigned class-subject scope.', ['Create CBT and choose test/exam + score-over target.', 'Add questions and publish when ready.', 'Retrieve results and export after students submit.']),
             ('/teacher/upload-csv', 'Upload CSV', 'Use this page to upload score CSV files for assigned classes/subjects.', ['Download template first.', 'Fill columns correctly.', 'Upload and fix any error report rows.']),
             ('/teacher/subject-comments', 'Subject Teacher Comments', 'Use this page to review subject-teacher comments for students in your assigned scope.', ['Filter by class, subject, term, and year.', 'Review each comment with student details.', 'Use it to follow up or guide score corrections.']),
             ('/teacher/subject-ranks', 'Subject Ranks', 'Use this page to review subject ranking history and export ranked sheets.', ['Choose year, term, class, and subject.', 'Review ranked students and trends.', 'Export rank CSV when needed.']),
             ('/teacher/behaviour-assessment', 'Behaviour Assessment', 'Use this page to score student behaviour attributes in class-teacher scope.', ['Select class context.', 'Enter behaviour values/comments.', 'Save before publishing workflow.']),
+            ('/teacher/assistant-analytics', 'Assistant Analytics', 'Use this page to review your AI helper usage quality and unresolved patterns.', ['Select usage window.', 'Review confidence/unresolved counts.', 'Use top repeated questions to refine team guidance.']),
         ],
         'student': [
             ('/student', 'Student Dashboard', 'Use this page to track your result status and account actions.', ['Check dashboard notices.', 'Open messages and result pages.', 'Use change password for account security.']),
@@ -2141,11 +3016,14 @@ def _assistant_page_guidance(role, source_page=''):
             ('/parent/student-result', 'Child Result View', 'Use this page to see one child published result details.', ['Choose child result link.', 'Select term/year context.', 'Review grades and comments.']),
             ('/parent/compare-results', 'Compare Results', 'Use this page to compare child performance across terms.', ['Open compare page for selected child.', 'Choose terms to compare.', 'Review trend differences by subject and average.']),
             ('/parent/dispute', 'Parent Dispute', 'Use this page to submit result dispute for a child.', ['Select child and term context.', 'Describe issue clearly with details.', 'Submit and monitor messages for updates.']),
+            ('/parent/assistant-analytics', 'Assistant Analytics', 'Use this page to monitor your AI helper quality and common unresolved questions.', ['Select a time window.', 'Review top questions you asked.', 'Use not-helpful patterns to ask clearer follow-up questions.']),
         ],
         'super_admin': [
             ('/super-admin', 'Super Admin Dashboard', 'Use this page to monitor system-wide school operations.', ['Review overview statistics.', 'Go to add/view school workflows.', 'Track reported issues queue.']),
             ('/super-admin/schools/add', 'Add School', 'Use this page to create a new school and admin account.', ['Enter school profile details.', 'Set school admin credentials.', 'Save and verify in View Schools.']),
             ('/super-admin/view-schools', 'View Schools', 'Use this page to manage school records and operations state.', ['Edit school/admin details.', 'Toggle operations per school.', 'Validate tenant setup consistency.']),
+            ('/super-admin/assistant-analytics', 'Assistant Analytics', 'Use this page to monitor assistant quality, unresolved trends, and update priorities across schools.', ['Select a time window.', 'Review top unresolved pages/questions.', 'Use not-helpful patterns to prioritize answer upgrades.']),
+            ('/assistant/health', 'Assistant Health', 'Use this endpoint to verify assistant schema/db/response-engine status quickly.', ['Open Assistant Health from super-admin assistant links.', 'Check failed checks and notes.', 'Fix failing dependency then re-test.']),
             ('/super-admin/privacy-requests', 'Privacy Requests', 'Use this page to process personal-data rights requests.', ['Filter by status/search.', 'Review request details and context.', 'Resolve or reject with a required note.']),
             ('/view-reports', 'Reported Issues', 'Use this page to process submitted issue reports.', ['Filter/search issue queue.', 'Mark report read/unread.', 'Track support resolution.']),
             ('/super-admin/error-logs', 'Error Logs', 'Use this page to inspect application exceptions and traceback details.', ['Filter by role/endpoint/text.', 'Review traceback and suggested resolution.', 'Apply fix then verify logs no longer repeat.']),
@@ -2154,13 +3032,20 @@ def _assistant_page_guidance(role, source_page=''):
     }
     external_map = _assistant_load_page_guidance_map()
     items = list(external_map.get(role_name, [])) + list(by_role.get(role_name, []))
+    best = None
+    best_len = -1
     for prefix, title, summary, steps in items:
         if page == prefix or page.startswith(prefix + '/'):
-            return {
-                'title': title,
-                'summary': summary,
-                'steps': steps,
-            }
+            prefix_len = len(prefix or '')
+            if prefix_len > best_len:
+                best_len = prefix_len
+                best = {
+                    'title': title,
+                    'summary': summary,
+                    'steps': steps,
+                }
+    if best:
+        return best
     return None
 
 def _assistant_grouped_nav_hint(role, page=''):
@@ -2176,7 +3061,7 @@ def _assistant_grouped_nav_hint(role, page=''):
             ('Monitoring', ('/school-admin/analytics', '/school-admin/data-integrity', '/school-admin/score-audit', '/school-admin/disputes', '/school-admin/promotion-audit', '/school-admin/attendance-summary')),
             ('Communication', ('/school-admin/messages',)),
             ('System', ('/school-admin/settings', '/school-admin/bulk-tools', '/school-admin/import-report', '/school-admin/security', '/school-admin/action-audit', '/school-admin/health', '/school-admin/disaster-recovery-drill')),
-            ('Support', ('/report-issue', '/help')),
+            ('Support', ('/school-admin/privacy-requests', '/report-issue', '/help')),
         ]
         for group, prefixes in mapping:
             for prefix in prefixes:
@@ -2185,9 +3070,18 @@ def _assistant_grouped_nav_hint(role, page=''):
     if role_name == 'teacher':
         mapping = [
             ('Classroom', ('/teacher/class-list', '/view-students', '/teacher/behaviour-assessment', '/teacher/attendance', '/teacher/period-attendance')),
-            ('Academics', ('/teacher/enter-scores', '/teacher/enter-subject-scores', '/teacher/upload-csv', '/teacher/timetable', '/teacher/subject-comments', '/teacher/subject-ranks')),
+            ('Academics', ('/teacher/enter-scores', '/teacher/enter-subject-scores', '/teacher/upload-csv', '/teacher/timetable', '/teacher/cbt', '/teacher/subject-comments', '/teacher/subject-ranks')),
             ('Communication', ('/teacher/messages', '/teacher/notifications')),
-            ('Support', ('/report-issue', '/help', '/change_password')),
+            ('Support', ('/teacher/assistant-analytics', '/report-issue', '/help', '/change_password')),
+        ]
+        for group, prefixes in mapping:
+            for prefix in prefixes:
+                if route == prefix or route.startswith(prefix + '/'):
+                    return f'Open the `{group}` group in the sidebar, then select this page.'
+    if role_name == 'parent':
+        mapping = [
+            ('Core', ('/parent', '/parent/messages', '/parent/notification-preferences', '/parent/disputes')),
+            ('Support', ('/parent/assistant-analytics', '/help')),
         ]
         for group, prefixes in mapping:
             for prefix in prefixes:
@@ -2209,6 +3103,59 @@ def _assistant_page_example_hint(page_guidance):
         return f'On this page ({title}), use the visible action buttons in order and save after each change.'
     return ''
 
+def _assistant_build_checklist_items(role, q_norm, page_guidance=None, step_rows=None):
+    role_name = (role or '').strip().lower()
+    q_text = _assistant_normalize_text(q_norm or '')
+    guide_title = _assistant_normalize_text((page_guidance or {}).get('title') or '')
+    checks = []
+
+    def _add(item):
+        text = str(item or '').strip()
+        if text and text not in checks:
+            checks.append(text)
+
+    if role_name == 'school_admin' and ('add student' in q_text or 'register student' in q_text):
+        _add('Open `Students` -> `Add Students`.')
+        _add('Confirm class, term, and academic year before entering data.')
+        _add('Add manually or import CSV, then review skipped/error rows.')
+        _add('Verify students appear on `View Students`.')
+    elif role_name == 'school_admin' and ('publish result' in q_text or 'publish results' in q_text):
+        _add('Open `Academics` -> `Publish Results`.')
+        _add('Confirm class, term, and academic year match the intended publication.')
+        _add('Check missing scores and validation warnings.')
+        _add('Approve/reject submissions, then publish and verify output.')
+    elif role_name == 'teacher' and ('enter score' in q_text or 'score entry' in q_text or 'upload csv' in q_text):
+        _add('Open `Academics` -> `Score Entry`.')
+        _add('Confirm class, subject, term, and year are correct.')
+        _add('Enter or upload scores, then save.')
+        _add('Review warnings and confirm submission status.')
+    elif role_name == 'parent' and ('result' in q_text or 'compare' in q_text or 'attendance' in q_text):
+        _add('Select the correct child first.')
+        _add('Open the target page from that child section in sidebar.')
+        _add('Confirm term/year filters before interpreting data.')
+        _add('Use dispute flow if you notice incorrect records.')
+
+    if guide_title and 'new term wizard' in guide_title:
+        _add('Confirm the current term is fully closed before rollover.')
+        _add('Run New Term Wizard and verify copied assignments.')
+        _add('Lock previous term edits after rollover (if policy requires).')
+
+    for step in (step_rows or []):
+        if len(checks) >= 8:
+            break
+        text = str(step or '').strip()
+        if not text:
+            continue
+        if text.startswith('On this page'):
+            continue
+        _add(text)
+
+    if not checks:
+        _add('Confirm the exact page and your role permissions first.')
+        _add('Follow the page steps in order and save after each section.')
+        _add('Re-open the page to verify the change persisted.')
+    return checks[:8]
+
 def _assistant_build_response(role, question, teacher_scope=None, source_page='', page_context='', conversation_history=None, response_mode='standard'):
     role = (role or '').strip().lower()
     q = (question or '').strip()
@@ -2216,7 +3163,8 @@ def _assistant_build_response(role, question, teacher_scope=None, source_page=''
     mode = (response_mode or 'standard').strip().lower()
     if mode not in APP_ASSISTANT_RESPONSE_MODES:
         mode = 'standard'
-    q_norm = _assistant_normalize_text(q_low)
+    q_norm_raw = _assistant_normalize_text(q_low)
+    q_norm = q_norm_raw
     page_context_text = str(page_context or '').strip()
     page_context_norm = _assistant_normalize_text(page_context_text) if page_context_text else ''
     if page_context_norm and (
@@ -2234,10 +3182,45 @@ def _assistant_build_response(role, question, teacher_scope=None, source_page=''
             if role_val in {'user', 'assistant'} and text_val:
                 history_rows.append({'role': role_val, 'text': text_val[:400]})
     user_history = [r.get('text', '') for r in history_rows if r.get('role') == 'user']
+    assistant_history = [r.get('text', '') for r in history_rows if r.get('role') == 'assistant']
+
+    def _is_affirmative_short(text_norm):
+        text_norm = _assistant_normalize_text(text_norm)
+        affirmative = {'yes', 'y', 'ok', 'okay', 'sure', 'yeah', 'yep', 'alright', 'continue', 'go on', 'proceed'}
+        return text_norm in affirmative or (len(text_norm.split()) <= 2 and text_norm in {'yes please', 'ok please', 'continue please'})
+
+    if _is_affirmative_short(q_norm_raw):
+        affirm_text = q_norm_raw
+        last_assistant_norm = _assistant_normalize_text(assistant_history[-1]) if assistant_history else ''
+        last_user_norm = _assistant_normalize_text(user_history[-1]) if user_history else ''
+        combined_recent = f'{last_user_norm} {last_assistant_norm}'.strip()
+        if any(tok in last_user_norm for tok in ('add student', 'add students', 'student intake', 'register student')):
+            if any(tok in affirm_text for tok in ('csv', 'import')):
+                q_norm = 'add students csv import steps'
+            elif any(tok in affirm_text for tok in ('manual', 'entry', 'type')):
+                q_norm = 'add students manual entry steps'
+            else:
+                q_norm = 'add students manual and csv import steps'
+        elif (
+            'manual entry steps or csv import steps' in last_assistant_norm
+            or 'manual entry steps or csv format' in last_assistant_norm
+            or (
+                any(tok in combined_recent for tok in ('add student', 'add students', 'student intake', 'register student'))
+                and ('manual entry' in combined_recent or 'csv import' in combined_recent or 'csv format' in combined_recent)
+            )
+        ):
+            if any(tok in affirm_text for tok in ('csv', 'import')):
+                q_norm = 'add students csv import steps'
+            elif any(tok in affirm_text for tok in ('manual', 'entry', 'type')):
+                q_norm = 'add students manual entry steps'
+            else:
+                q_norm = 'add students manual and csv import steps'
+
     if len(q_norm.split()) <= 5 and user_history:
         last_context = _assistant_normalize_text(' '.join(user_history[-2:]))
         if last_context:
             q_norm = (q_norm + ' ' + last_context).strip()
+
     q_norm = _assistant_expand_indirect_intent(role, q_norm)
     links = _assistant_nav_links(role, teacher_scope=teacher_scope)
     quick_prompts = _assistant_role_quick_prompts(role, teacher_scope=teacher_scope)
@@ -2248,13 +3231,10 @@ def _assistant_build_response(role, question, teacher_scope=None, source_page=''
     page_guidance = _assistant_page_guidance(role, effective_page)
     nav_group_hint = _assistant_grouped_nav_hint(role, effective_page)
     page_relevance_score = _assistant_page_relevance_score(q_norm, page_guidance)
+    role_scope_note = _assistant_role_scope_note(role, q_norm, teacher_scope=teacher_scope)
 
     def _default_followups():
         suggestions = []
-        for _, topic in (ranked_topics or [])[:3]:
-            title = str(topic.get('title') or '').strip()
-            if title:
-                suggestions.append(f'Explain {title} with an example')
         for item in (quick_prompts or []):
             t = str(item or '').strip()
             if not t:
@@ -2262,6 +3242,10 @@ def _assistant_build_response(role, question, teacher_scope=None, source_page=''
             t_norm = _assistant_normalize_text(t)
             if t_norm and t_norm not in q_norm:
                 suggestions.append(t)
+        for _, topic in (ranked_topics or [])[:3]:
+            title = str(topic.get('title') or '').strip()
+            if title:
+                suggestions.append(f'Explain {title} with an example')
         out = []
         seen = set()
         for s in suggestions:
@@ -2277,6 +3261,10 @@ def _assistant_build_response(role, question, teacher_scope=None, source_page=''
         text = str(answer_text or '').strip()
         if not text:
             return ''
+        if mode == 'ultra_simple':
+            text = re.sub(r'\([^)]*\)', '', text)
+            text = re.sub(r'\s+', ' ', text).strip()
+            return text[:170]
         if mode == 'simple':
             return text[:240]
         if mode in {'local', 'pidgin'}:
@@ -2289,6 +3277,10 @@ def _assistant_build_response(role, question, teacher_scope=None, source_page=''
 
     def _mode_tune_steps(step_rows):
         rows = [str(x).strip() for x in (step_rows or []) if str(x).strip()]
+        if mode == 'ultra_simple':
+            return rows[:2]
+        if mode == 'checklist':
+            return rows[:8]
         if mode == 'simple':
             return rows[:3]
         if mode == 'detailed':
@@ -2338,6 +3330,15 @@ def _assistant_build_response(role, question, teacher_scope=None, source_page=''
         low_conf = bool(clarification_needed or conf < 0.50)
         step_rows = _mode_tune_steps(steps or [])
         answer_text = _assistant_enforce_guide_only_text(_mode_tune_answer(answer))
+        smart_links = _pick_smart_links()
+        click_path = _assistant_build_click_path(
+            role=role,
+            page_guidance=page_guidance,
+            nav_group_hint=nav_group_hint,
+            source_page=effective_page,
+            fallback_label=(smart_links[0].get('label', '') if smart_links else ''),
+            links=links,
+        )
         if low_conf:
             # Keep low-confidence replies short and ask one clear clarifying question.
             follow_up_rows = []
@@ -2368,6 +3369,13 @@ def _assistant_build_response(role, question, teacher_scope=None, source_page=''
         if not next_q:
             next_q = 'Tell me what you want to do next, and I will guide you step by step.'
         source_hints = [str(item.get('label') or '').strip() for item in (links or []) if str(item.get('label') or '').strip()][:4]
+        guided_mode = (mode == 'checklist') or ('checklist' in q_norm) or ('check list' in q_norm)
+        checklist_items = _assistant_build_checklist_items(
+            role=role,
+            q_norm=q_norm,
+            page_guidance=page_guidance,
+            step_rows=step_rows,
+        ) if guided_mode else []
         return {
             'answer': answer_text,
             'steps': step_rows,
@@ -2375,12 +3383,16 @@ def _assistant_build_response(role, question, teacher_scope=None, source_page=''
             'follow_ups': follow_up_rows,
             'next_question': next_q,
             'links': links,
-            'smart_links': _pick_smart_links(),
+            'smart_links': smart_links,
             'source_hints': source_hints,
+            'click_path': click_path,
+            'role_scope': role_scope_note,
             'confidence': conf,
             'unresolved': unresolved_flag,
             'clarification_needed': bool(clarification_needed or unresolved_flag),
             'response_mode': mode,
+            'guided_checklist': bool(checklist_items),
+            'checklist_items': checklist_items,
             'safety_note': APP_ASSISTANT_SAFETY_NOTE,
             'needs_llm': bool(needs_llm),
             'action_blocked': bool(action_blocked),
@@ -2418,6 +3430,119 @@ def _assistant_build_response(role, question, teacher_scope=None, source_page=''
             unresolved=error_guidance.get('unresolved'),
             next_question=error_guidance.get('next_question') or 'Do you want the exact fix steps for this error?',
             fix_snippet=error_guidance.get('fix_snippet') or ''
+        )
+
+    if _assistant_is_unclear_question(q_norm) and not ranked_topics:
+        return _payload(
+            'I did not understand clearly yet. Tap one quick button below or ask in one short sentence.',
+            [
+                'Example: "Where can I add student?"',
+                'Example: "How do I reset student password?"',
+            ],
+            confidence=0.42,
+            unresolved=True,
+            clarification_needed=True,
+            next_question='Tell me your exact page and one task you want to do.'
+        )
+
+    # High-priority disambiguation: "subject request" must not fall through to
+    # privacy/data-request intents.
+    if role == 'school_admin' and (
+        'subject request' in q_norm
+        or 'subject requests' in q_norm
+        or '/school-admin/subject-requests' in q_low
+    ):
+        return _payload(
+            'Subject Requests is used to review and decide student add/drop subject requests.',
+            [
+                'Open `Academics` group, then `Subject Requests`.',
+                'Filter by pending requests to process new items first.',
+                'Approve or reject each request and verify student subject enrollment updates.',
+            ],
+            confidence=0.98,
+            unresolved=False,
+            next_question='Do you want approval rules (when to approve vs reject) for subject requests?'
+        )
+    if role == 'student' and (
+        'subject request' in q_norm
+        or 'subject requests' in q_norm
+        or '/student/subject-requests' in q_low
+    ):
+        return _payload(
+            'Subject Requests lets you request to add or drop subjects for school-admin review.',
+            [
+                'Open `Subject Requests` from your sidebar.',
+                'Create request with subject and a short reason.',
+                'Track status (pending, approved, rejected) on the same page.',
+            ],
+            confidence=0.98,
+            unresolved=False,
+            next_question='Do you want a good reason template for submitting a subject request?'
+        )
+
+    if role == 'school_admin' and 'add students manual entry steps' in q_norm:
+        return _payload(
+            'Use Add Students by Class for manual student entry.',
+            [
+                'Open `Students` group, then `Add Students`.',
+                'Select class, term, and year, then choose student count.',
+                'Fill student details (name, gender, optional email) and save.',
+                'Review success/validation messages and correct any skipped rows.',
+            ],
+            confidence=0.98,
+            unresolved=False,
+            next_question='Do you also want CSV import steps and sample columns?'
+        )
+    if role == 'school_admin' and 'add students csv import steps' in q_norm:
+        return _payload(
+            'Use Add Students by Class CSV import to add many students at once.',
+            [
+                'Open `Students` group, then `Add Students`.',
+                'Select class, term, and year, then choose CSV import.',
+                'Prepare CSV columns: `student_id` (optional), `name`, `gender`, and optional `email`.',
+                'Upload CSV, review skipped rows/errors, then re-upload corrected rows if needed.',
+            ],
+            confidence=0.98,
+            unresolved=False,
+            next_question='Do you want a ready CSV sample row to copy?'
+        )
+    if role == 'school_admin' and 'add students manual and csv import steps' in q_norm:
+        return _payload(
+            'You can add students either manually or with CSV import on the same Add Students page.',
+            [
+                'Open `Students` group, then `Add Students`.',
+                'Manual: choose class/term/year, set student count, fill each row, and save.',
+                'CSV: switch to import, upload CSV (`name`, `gender`, optional `email`), then fix skipped rows and re-upload.',
+            ],
+            confidence=0.98,
+            unresolved=False,
+            next_question='Do you want me to give you a copy-ready CSV sample now?'
+        )
+
+    model_hit = _assistant_transformer_predict(role, q_norm, source_page=effective_page)
+    if model_hit and str(model_hit.get('answer') or '').strip():
+        model_steps = [str(s).strip() for s in (model_hit.get('steps') or []) if str(s).strip()]
+        return _payload(
+            str(model_hit.get('answer') or '').strip(),
+            model_steps[:6],
+            confidence=float(model_hit.get('confidence') or 0.8),
+            unresolved=False,
+            needs_llm=False,
+            next_question='Do you want exact clicks for this workflow?'
+        )
+
+    local_hit = _assistant_lookup_local_qa(role, q_norm, source_page=effective_page)
+    if local_hit and str(local_hit.get('answer') or '').strip():
+        local_steps = [str(s).strip() for s in (local_hit.get('steps') or []) if str(s).strip()]
+        if not local_steps and ranked_topics:
+            local_steps = _assistant_build_explanatory_steps(ranked_topics[0][1], nav_group_hint=nav_group_hint, role=role)[:4]
+        return _payload(
+            str(local_hit.get('answer') or '').strip(),
+            local_steps,
+            confidence=float(local_hit.get('confidence') or 0.84),
+            unresolved=False,
+            needs_llm=False,
+            next_question=_assistant_page_next_question(role=role, page_guidance=page_guidance) if page_guidance else 'Do you want exact clicks for this workflow?'
         )
 
     if _assistant_is_overview_question(q_norm):
@@ -2514,6 +3639,71 @@ def _assistant_build_response(role, question, teacher_scope=None, source_page=''
             next_question='Do you want manual entry steps or CSV import steps?'
         )
     if role == 'school_admin' and (
+        any(token in q_norm for token in ('add student', 'add students', 'student intake', 'register student'))
+        and any(token in q_norm for token in ('manual entry', 'manual', 'type one by one', 'enter manually'))
+    ):
+        return _payload(
+            'Use Add Students by Class for manual student entry.',
+            [
+                'Open `Students` group, then `Add Students`.',
+                'Select class, term, and year, then choose student count.',
+                'Fill student details (name, gender, optional email) and save.',
+                'Review success/validation messages and correct any skipped rows.',
+            ],
+            confidence=0.98,
+            unresolved=False,
+            next_question='Do you also want CSV import steps and sample columns?'
+        )
+    if role == 'school_admin' and (
+        any(token in q_norm for token in ('add student', 'add students', 'student intake', 'register student'))
+        and any(token in q_norm for token in ('csv', 'import', 'upload csv', 'csv format', 'csv template'))
+    ):
+        return _payload(
+            'Use Add Students by Class CSV import to add many students at once.',
+            [
+                'Open `Students` group, then `Add Students`.',
+                'Select class, term, and year, then choose CSV import.',
+                'Prepare CSV columns: `student_id` (optional), `name`, `gender`, and optional `email`.',
+                'Upload CSV, review skipped rows/errors, then re-upload corrected rows if needed.',
+            ],
+            confidence=0.98,
+            unresolved=False,
+            next_question='Do you want a ready CSV sample row to copy?'
+        )
+    if role == 'school_admin' and (
+        any(token in q_norm for token in ('add student', 'add students', 'student intake', 'register student'))
+        and (
+            ('manual' in q_norm and ('csv' in q_norm or 'import' in q_norm))
+            or 'manual and csv' in q_norm
+        )
+    ):
+        return _payload(
+            'You can add students either manually or with CSV import on the same Add Students page.',
+            [
+                'Open `Students` group, then `Add Students`.',
+                'Manual: choose class/term/year, set student count, fill each row, and save.',
+                'CSV: switch to import, upload CSV (`name`, `gender`, optional `email`), then fix skipped rows and re-upload.',
+            ],
+            confidence=0.98,
+            unresolved=False,
+            next_question='Do you want me to give you a copy-ready CSV sample now?'
+        )
+    if role == 'school_admin' and (
+        any(token in q_norm for token in ('reset student password', 'student password reset', 'reset class student password', 'reset class student passwords', 'temporary password'))
+        or ('reset' in q_norm and 'student' in q_norm and 'password' in q_norm)
+    ):
+        return _payload(
+            'You can reset student password from the Students pages.',
+            [
+                'Single student: `Students` -> `View Students` -> locate student -> `Reset Password`.',
+                'Bulk class reset: use `Reset Class Student Passwords` and select class.',
+                'Give the temporary/default password to student securely and require password change after login.',
+            ],
+            confidence=0.98,
+            unresolved=False,
+            next_question='Do you want single-student reset steps or class bulk-reset steps?'
+        )
+    if role == 'school_admin' and (
         any(token in q_norm for token in ('gender', 'sex'))
         and (
             any(token in q_norm for token in ('add student', 'add students', 'student intake', 'register student'))
@@ -2552,7 +3742,22 @@ def _assistant_build_response(role, question, teacher_scope=None, source_page=''
             unresolved=False,
             next_question='Do you want the exact clicks for Class Subjects setup?'
         )
-
+    if role == 'school_admin' and (
+        any(token in q_norm for token in ('change term', 'switch term', 'move to next term', 'next term', 'term transition', 'advance term', 'term rollover', 'term change'))
+        or ('new term wizard' in q_norm)
+    ):
+        return _payload(
+            'Use New Term Wizard for controlled term transition. It keeps the switch consistent across assignments and timetable context.',
+            [
+                'Open `Academics` group, then `New Term Wizard`.',
+                'Confirm target term and academic year once (no repeated re-entry per card).',
+                'Run rollover/copy options for assignments and verify timetable/subject setup.',
+                'After switch, validate publish locks and notifications for the new term.',
+            ],
+            confidence=0.98,
+            unresolved=False,
+            next_question='Do you want a full pre-switch checklist and post-switch validation checklist?'
+        )
     micro_hit = _assistant_match_micro_faq(role, q_norm)
     if micro_hit:
         return _payload(
@@ -2872,7 +4077,7 @@ def _assistant_build_response(role, question, teacher_scope=None, source_page=''
             [
                 'Use Add School and View Schools for tenant setup and operations control.',
                 'Use Reported Issues (`/view-reports`) for support queue actions (read/unread/delete).',
-                'Use Privacy Requests (`/super-admin/privacy-requests`) for data-rights requests (resolved/rejected + note).',
+                'Use Privacy Requests (`/super-admin/privacy-requests`) to finalize requests after school-admin approval.',
             ]
         )
 
@@ -2988,9 +4193,11 @@ def _assistant_call_openai(role, question, links, knowledge_context='', response
         f'Question: {question}\n'
         f'Known app context:\n{(knowledge_context or "No extra context.")}\n\n'
         f'Useful links:\n{links_text}\n\n'
-        'Return JSON with keys: answer (string), steps (array of up to 4 short strings). '
+        'Return JSON with keys: answer (string), steps (array of up to 6 short strings). '
+        'If response mode is ultra_simple, use very short words and max 2 short steps. '
         'If response mode is simple, use very plain language. '
         'If detailed, include extra clarity. '
+        'If checklist mode, output clear action checkpoints in steps. '
         'If local or pidgin, use easy Nigerian-style plain phrasing without slang excess. '
         'Keep answer under 120 words.'
     )
@@ -3095,6 +4302,9 @@ AUTH_BINDING_CHECK_INTERVAL_SECONDS = max(15, _env_int('AUTH_BINDING_CHECK_INTER
 _RATE_LIMIT_EVENTS = {}
 _RATE_LIMIT_LOCK = threading.Lock()
 _ASSISTANT_PAGE_GUIDANCE_CACHE = {'mtime': None, 'map': {}}
+_ASSISTANT_BPE_CACHE = {}
+_ASSISTANT_BPE_LOCK = threading.Lock()
+_ASSISTANT_TRANSFORMER_RUNTIME = {'loaded': False, 'model': None, 'meta': None, 'device': None, 'error': ''}
 
 def _rate_limit_consume(key, limit, window_seconds):
     """Sliding-window in-memory rate limit."""
@@ -3226,6 +4436,7 @@ def _is_transient_db_transport_error(exc):
         'broken pipe',
         'eof detected',
         'connection timed out',
+        'cursor already closed',
     )
     return any(m in text for m in markers)
 
@@ -3234,12 +4445,27 @@ def canonicalize_classname(value):
     cleaned = re.sub(r'[^A-Za-z0-9]+', '', (value or '').strip()).upper()
     if not cleaned:
         return ''
-    # Normalize common aliases for secondary only.
-    cleaned = re.sub(r'^JS', 'JSS', cleaned)
-    cleaned = re.sub(r'^JUNIOR', 'JSS', cleaned)
+    # Normalize common aliases for secondary-only classes.
+    # Handle long-form labels first (e.g., JUNIORSECONDARY1A / SENIORSECONDARY2B).
+    if cleaned.startswith('JUNIORSECONDARY'):
+        cleaned = 'JSS' + cleaned[len('JUNIORSECONDARY'):]
+    elif cleaned.startswith('JUNIORSEC'):
+        cleaned = 'JSS' + cleaned[len('JUNIORSEC'):]
+    elif cleaned.startswith('JUNIOR'):
+        cleaned = 'JSS' + cleaned[len('JUNIOR'):]
+    elif cleaned.startswith('SENIORSECONDARY'):
+        cleaned = 'SS' + cleaned[len('SENIORSECONDARY'):]
+    elif cleaned.startswith('SENIORSEC'):
+        cleaned = 'SS' + cleaned[len('SENIORSEC'):]
+    elif cleaned.startswith('SENIOR'):
+        cleaned = 'SS' + cleaned[len('SENIOR'):]
+
+    # Convert legacy JS* alias, but avoid corrupting valid JSS* inputs.
+    cleaned = re.sub(r'^JS(?!S)', 'JSS', cleaned)
+    # Convert SSS/SS forms to a shared SS base.
     cleaned = re.sub(r'^SSS', 'SS', cleaned)
-    cleaned = re.sub(r'^SS', 'SS', cleaned)
-    cleaned = re.sub(r'^SENIOR', 'SS', cleaned)
+    # Repair accidental over-expansion from older normalization logic (JSSS3 -> JSS3).
+    cleaned = re.sub(r'^JSSS', 'JSS', cleaned)
     return cleaned
 
 def is_secondary_classname(value):
@@ -3247,12 +4473,21 @@ def is_secondary_classname(value):
     cls = canonicalize_classname(value)
     if not cls:
         return False
-    return bool(re.fullmatch(r'(JSS|SS)\d+[A-Z]*', cls))
+    match = re.fullmatch(r'(JSS|SS)(\d)([A-Z]*)', cls)
+    if not match:
+        return False
+    level_num = int(match.group(2))
+    return 1 <= level_num <= 3
 
 def filter_secondary_classnames(classnames):
     """Return only JSS/SS classnames, sorted."""
+    normalized = _dedupe_keep_order([
+        canonicalize_classname(str(c).strip())
+        for c in (classnames or [])
+        if str(c).strip()
+    ])
     return sorted(
-        [c for c in (classnames or []) if is_secondary_classname(c)],
+        [c for c in normalized if is_secondary_classname(c)],
         key=lambda value: str(value).lower(),
     )
 
@@ -3972,8 +5207,22 @@ def normalize_promoted_db_value(value):
     return 1 if bool(value) else 0
 
 # Set up logging
-logging.basicConfig(filename='app.log', level=logging.INFO, 
-                    format='%(asctime)s - %(levelname)s - %(message)s')
+_LOG_DIR = os.path.join(os.path.dirname(__file__), 'logs')
+try:
+    os.makedirs(_LOG_DIR, exist_ok=True)
+except Exception:
+    _LOG_DIR = os.path.dirname(__file__)
+_LOG_PATH = os.path.join(_LOG_DIR, 'app.log')
+_LOG_HANDLER = RotatingFileHandler(_LOG_PATH, maxBytes=2 * 1024 * 1024, backupCount=5, encoding='utf-8')
+_LOG_HANDLER.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+_ROOT_LOGGER = logging.getLogger()
+_ROOT_LOGGER.setLevel(logging.INFO)
+_HAS_FILE_HANDLER = any(
+    isinstance(handler, RotatingFileHandler) and getattr(handler, 'baseFilename', '') == _LOG_PATH
+    for handler in _ROOT_LOGGER.handlers
+)
+if not _HAS_FILE_HANDLER:
+    _ROOT_LOGGER.addHandler(_LOG_HANDLER)
 if ALLOW_INSECURE_DEFAULTS:
     logging.warning("ALLOW_INSECURE_DEFAULTS is enabled. Development-only fallbacks may be active.")
 if STARTUP_FALLBACK_ENV_VARS:
@@ -4143,6 +5392,7 @@ def init_db():
                         current_term TEXT DEFAULT 'First Term',
                         operations_enabled INTEGER DEFAULT 1,
                         teacher_operations_enabled INTEGER DEFAULT 1,
+                        cbt_enabled INTEGER DEFAULT 1,
                         test_enabled INTEGER DEFAULT 1,
                         exam_enabled INTEGER DEFAULT 1,
                         max_tests INTEGER DEFAULT 3,
@@ -4185,6 +5435,7 @@ def init_db():
                     )""")
     safe_exec_ignore('ALTER TABLE schools ADD COLUMN operations_enabled INTEGER DEFAULT 1')
     safe_exec_ignore('ALTER TABLE schools ADD COLUMN teacher_operations_enabled INTEGER DEFAULT 1')
+    safe_exec_ignore('ALTER TABLE schools ADD COLUMN cbt_enabled INTEGER DEFAULT 1')
     # Backfill grade config columns for existing databases.
     safe_exec_ignore('ALTER TABLE schools ADD COLUMN grade_a_min INTEGER DEFAULT 70')
     safe_exec_ignore('ALTER TABLE schools ADD COLUMN grade_b_min INTEGER DEFAULT 60')
@@ -4730,6 +5981,14 @@ def init_db():
                         resolved_at TIMESTAMP,
                         source_page TEXT DEFAULT '',
                         source_ip TEXT DEFAULT '',
+                        request_payload_json TEXT DEFAULT '{}',
+                        allowed_action TEXT DEFAULT '',
+                        approved_by TEXT DEFAULT '',
+                        approved_at TIMESTAMP,
+                        applied_by TEXT DEFAULT '',
+                        applied_at TIMESTAMP,
+                        before_snapshot_json TEXT DEFAULT '{}',
+                        after_snapshot_json TEXT DEFAULT '{}',
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )""")
@@ -4966,6 +6225,149 @@ def init_db():
                         read_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         UNIQUE(school_id, message_id, parent_phone)
                     )""")
+    db_execute(c, """CREATE TABLE IF NOT EXISTS cbt_tests (
+                        id SERIAL PRIMARY KEY,
+                        test_id TEXT UNIQUE NOT NULL,
+                        school_id TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        instructions TEXT DEFAULT '',
+                        classname TEXT NOT NULL,
+                        subject TEXT NOT NULL,
+                        term TEXT NOT NULL,
+                        academic_year TEXT DEFAULT '',
+                        duration_minutes INTEGER NOT NULL DEFAULT 30,
+                        total_questions INTEGER NOT NULL DEFAULT 0,
+                        questions_to_answer INTEGER NOT NULL DEFAULT 0,
+                        total_marks REAL NOT NULL DEFAULT 0,
+                        status TEXT NOT NULL DEFAULT 'draft',
+                        assessment_type TEXT NOT NULL DEFAULT 'test',
+                        score_over REAL NOT NULL DEFAULT 20,
+                        test_slot INTEGER NOT NULL DEFAULT 1,
+                        strict_mode INTEGER NOT NULL DEFAULT 1,
+                        fullscreen_required INTEGER NOT NULL DEFAULT 1,
+                        tab_switch_limit INTEGER NOT NULL DEFAULT 3,
+                        block_clipboard INTEGER NOT NULL DEFAULT 1,
+                        created_by_teacher_id TEXT DEFAULT '',
+                        retrieved_at TIMESTAMP,
+                        retrieved_by TEXT DEFAULT '',
+                        created_by TEXT DEFAULT '',
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )""")
+    db_execute(c, """CREATE TABLE IF NOT EXISTS cbt_questions (
+                        id SERIAL PRIMARY KEY,
+                        school_id TEXT NOT NULL,
+                        test_id TEXT NOT NULL,
+                        question_no INTEGER NOT NULL,
+                        question_type TEXT NOT NULL DEFAULT 'mcq4',
+                        question_text TEXT NOT NULL,
+                        question_image_url TEXT DEFAULT '',
+                        option_a TEXT NOT NULL,
+                        option_b TEXT NOT NULL,
+                        option_c TEXT NOT NULL,
+                        option_d TEXT NOT NULL,
+                        correct_option TEXT NOT NULL DEFAULT 'A',
+                        correct_text TEXT DEFAULT '',
+                        accepted_answers TEXT DEFAULT '',
+                        points REAL NOT NULL DEFAULT 1,
+                        time_seconds INTEGER NOT NULL DEFAULT 60,
+                        explanation TEXT DEFAULT '',
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(school_id, test_id, question_no)
+                    )""")
+    db_execute(c, """CREATE TABLE IF NOT EXISTS cbt_attempts (
+                        id SERIAL PRIMARY KEY,
+                        attempt_id TEXT UNIQUE NOT NULL,
+                        school_id TEXT NOT NULL,
+                        test_id TEXT NOT NULL,
+                        student_id TEXT NOT NULL,
+                        classname TEXT DEFAULT '',
+                        subject TEXT DEFAULT '',
+                        term TEXT DEFAULT '',
+                        academic_year TEXT DEFAULT '',
+                        started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        submitted_at TIMESTAMP,
+                        status TEXT NOT NULL DEFAULT 'started',
+                        score REAL NOT NULL DEFAULT 0,
+                        total_marks REAL NOT NULL DEFAULT 0,
+                        total_questions INTEGER NOT NULL DEFAULT 0,
+                        answered_questions INTEGER NOT NULL DEFAULT 0,
+                        question_set_json TEXT DEFAULT '',
+                        draft_answers_json TEXT DEFAULT '',
+                        remaining_seconds INTEGER NOT NULL DEFAULT 0,
+                        last_activity_at TIMESTAMP,
+                        auto_submitted INTEGER NOT NULL DEFAULT 0,
+                        integrity_flagged INTEGER NOT NULL DEFAULT 0,
+                        integrity_flag_reason TEXT DEFAULT '',
+                        UNIQUE(school_id, test_id, student_id)
+                    )""")
+    db_execute(c, """CREATE TABLE IF NOT EXISTS cbt_attempt_answers (
+                        id SERIAL PRIMARY KEY,
+                        school_id TEXT NOT NULL,
+                        attempt_id TEXT NOT NULL,
+                        test_id TEXT NOT NULL,
+                        question_no INTEGER NOT NULL,
+                        selected_option TEXT DEFAULT '',
+                        is_correct INTEGER NOT NULL DEFAULT 0,
+                        points_awarded REAL NOT NULL DEFAULT 0,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(school_id, attempt_id, question_no)
+                    )""")
+    db_execute(c, """CREATE TABLE IF NOT EXISTS cbt_attempt_events (
+                        id SERIAL PRIMARY KEY,
+                        school_id TEXT NOT NULL,
+                        attempt_id TEXT NOT NULL,
+                        test_id TEXT NOT NULL,
+                        student_id TEXT NOT NULL,
+                        event_type TEXT NOT NULL,
+                        event_meta TEXT DEFAULT '',
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )""")
+    db_execute(c, """CREATE TABLE IF NOT EXISTS cbt_test_accommodations (
+                        id SERIAL PRIMARY KEY,
+                        school_id TEXT NOT NULL,
+                        test_id TEXT NOT NULL,
+                        student_id TEXT NOT NULL,
+                        extra_minutes INTEGER NOT NULL DEFAULT 0,
+                        extra_percent INTEGER NOT NULL DEFAULT 0,
+                        is_active INTEGER NOT NULL DEFAULT 1,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(school_id, test_id, student_id)
+                    )""")
+    safe_exec_ignore("ALTER TABLE cbt_tests ADD COLUMN instructions TEXT DEFAULT ''")
+    safe_exec_ignore("ALTER TABLE cbt_tests ADD COLUMN duration_minutes INTEGER NOT NULL DEFAULT 30")
+    safe_exec_ignore("ALTER TABLE cbt_tests ADD COLUMN total_questions INTEGER NOT NULL DEFAULT 0")
+    safe_exec_ignore("ALTER TABLE cbt_tests ADD COLUMN questions_to_answer INTEGER NOT NULL DEFAULT 0")
+    safe_exec_ignore("ALTER TABLE cbt_tests ADD COLUMN total_marks REAL NOT NULL DEFAULT 0")
+    safe_exec_ignore("ALTER TABLE cbt_tests ADD COLUMN status TEXT NOT NULL DEFAULT 'draft'")
+    safe_exec_ignore("ALTER TABLE cbt_tests ADD COLUMN assessment_type TEXT NOT NULL DEFAULT 'test'")
+    safe_exec_ignore("ALTER TABLE cbt_tests ADD COLUMN score_over REAL NOT NULL DEFAULT 20")
+    safe_exec_ignore("ALTER TABLE cbt_tests ADD COLUMN test_slot INTEGER NOT NULL DEFAULT 1")
+    safe_exec_ignore("ALTER TABLE cbt_tests ADD COLUMN strict_mode INTEGER NOT NULL DEFAULT 1")
+    safe_exec_ignore("ALTER TABLE cbt_tests ADD COLUMN fullscreen_required INTEGER NOT NULL DEFAULT 1")
+    safe_exec_ignore("ALTER TABLE cbt_tests ADD COLUMN tab_switch_limit INTEGER NOT NULL DEFAULT 3")
+    safe_exec_ignore("ALTER TABLE cbt_tests ADD COLUMN block_clipboard INTEGER NOT NULL DEFAULT 1")
+    safe_exec_ignore("ALTER TABLE cbt_tests ADD COLUMN created_by_teacher_id TEXT DEFAULT ''")
+    safe_exec_ignore("ALTER TABLE cbt_tests ADD COLUMN retrieved_at TIMESTAMP")
+    safe_exec_ignore("ALTER TABLE cbt_tests ADD COLUMN retrieved_by TEXT DEFAULT ''")
+    safe_exec_ignore("ALTER TABLE cbt_tests ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+    safe_exec_ignore("ALTER TABLE cbt_questions ADD COLUMN points REAL NOT NULL DEFAULT 1")
+    safe_exec_ignore("ALTER TABLE cbt_questions ADD COLUMN question_type TEXT NOT NULL DEFAULT 'mcq4'")
+    safe_exec_ignore("ALTER TABLE cbt_questions ADD COLUMN question_image_url TEXT DEFAULT ''")
+    safe_exec_ignore("ALTER TABLE cbt_questions ADD COLUMN correct_text TEXT DEFAULT ''")
+    safe_exec_ignore("ALTER TABLE cbt_questions ADD COLUMN accepted_answers TEXT DEFAULT ''")
+    safe_exec_ignore("ALTER TABLE cbt_questions ADD COLUMN time_seconds INTEGER NOT NULL DEFAULT 60")
+    safe_exec_ignore("ALTER TABLE cbt_questions ADD COLUMN explanation TEXT DEFAULT ''")
+    safe_exec_ignore("ALTER TABLE cbt_attempts ADD COLUMN answered_questions INTEGER NOT NULL DEFAULT 0")
+    safe_exec_ignore("ALTER TABLE cbt_attempts ADD COLUMN question_set_json TEXT DEFAULT ''")
+    safe_exec_ignore("ALTER TABLE cbt_attempts ADD COLUMN draft_answers_json TEXT DEFAULT ''")
+    safe_exec_ignore("ALTER TABLE cbt_attempts ADD COLUMN remaining_seconds INTEGER NOT NULL DEFAULT 0")
+    safe_exec_ignore("ALTER TABLE cbt_attempts ADD COLUMN last_activity_at TIMESTAMP")
+    safe_exec_ignore("ALTER TABLE cbt_attempts ADD COLUMN auto_submitted INTEGER NOT NULL DEFAULT 0")
+    safe_exec_ignore("ALTER TABLE cbt_attempts ADD COLUMN integrity_flagged INTEGER NOT NULL DEFAULT 0")
+    safe_exec_ignore("ALTER TABLE cbt_attempts ADD COLUMN integrity_flag_reason TEXT DEFAULT ''")
+    safe_exec_ignore("ALTER TABLE cbt_attempt_answers ADD COLUMN points_awarded REAL NOT NULL DEFAULT 0")
 
     # Create indexes
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)')
@@ -5026,6 +6428,16 @@ def init_db():
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_student_message_reads_lookup ON student_message_reads(school_id, student_id, message_id)')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_teacher_message_reads_lookup ON teacher_message_reads(school_id, teacher_id, message_id)')
     db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_parent_message_reads_lookup ON parent_message_reads(school_id, parent_phone, message_id)')
+    db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_cbt_tests_school_status_created ON cbt_tests(school_id, status, created_at DESC)')
+    db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_cbt_tests_school_scope ON cbt_tests(school_id, classname, term, academic_year)')
+    db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_cbt_tests_school_teacher_scope ON cbt_tests(school_id, created_by_teacher_id, created_at DESC)')
+    db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_cbt_questions_lookup ON cbt_questions(school_id, test_id, question_no)')
+    db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_cbt_attempts_school_student ON cbt_attempts(school_id, student_id, started_at DESC)')
+    db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_cbt_attempts_school_test ON cbt_attempts(school_id, test_id, started_at DESC)')
+    db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_cbt_attempt_answers_lookup ON cbt_attempt_answers(school_id, attempt_id, question_no)')
+    db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_cbt_attempt_events_lookup ON cbt_attempt_events(school_id, attempt_id, created_at DESC)')
+    db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_cbt_attempts_activity_lookup ON cbt_attempts(school_id, test_id, last_activity_at DESC)')
+    db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_cbt_accommodations_lookup ON cbt_test_accommodations(school_id, test_id, student_id)')
     db_execute(c, """CREATE TABLE IF NOT EXISTS sms_delivery_logs (
                         id SERIAL PRIMARY KEY,
                         school_id TEXT NOT NULL,
@@ -5375,30 +6787,55 @@ except Exception as exc:
 # Create super admin user (bootstrap-only, disabled for normal runtime startup).
 def create_super_admin():
     """Ensure super admin account exists; do not reset password on every startup."""
-    with db_connection(commit=True) as conn:
-        c = conn.cursor()
-        db_execute(c, 'SELECT username, role FROM users WHERE LOWER(username) = LOWER(?)', (SUPER_ADMIN_USERNAME,))
-        row = c.fetchone()
-        if not row:
-            if not SUPER_ADMIN_PASSWORD:
-                raise RuntimeError(
-                    "SUPER_ADMIN_PASSWORD is required to bootstrap the initial super admin account."
+    try:
+        with db_connection(commit=True) as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                'SELECT username, role FROM users WHERE LOWER(username) = LOWER(?)',
+                (SUPER_ADMIN_USERNAME,),
+            )
+            row = c.fetchone()
+            if not row:
+                if not SUPER_ADMIN_PASSWORD:
+                    logging.warning(
+                        "SUPER_ADMIN_PASSWORD is missing; skipping super admin bootstrap."
+                    )
+                    return
+                password_hash = generate_password_hash(SUPER_ADMIN_PASSWORD)
+                db_execute(
+                    c,
+                    """INSERT INTO users (username, password_hash, role, school_id) 
+                       VALUES (%s, %s, %s, %s)""",
+                    (SUPER_ADMIN_USERNAME, password_hash, 'super_admin', None),
                 )
-            password_hash = generate_password_hash(SUPER_ADMIN_PASSWORD)
-            db_execute(c, """INSERT INTO users (username, password_hash, role, school_id) 
-                           VALUES (%s, %s, %s, %s)""", (SUPER_ADMIN_USERNAME, password_hash, 'super_admin', None))
-            logging.info("Super admin user created: %s", SUPER_ADMIN_USERNAME)
-        else:
-            # Using DictCursor - access by column name instead of index
-            current_role = row['role'] if 'role' in row else None
-            # Safety: do not escalate a non-super account automatically.
-            if (current_role or '') != 'super_admin':
-                logging.warning(
-                    "SUPER_ADMIN_USERNAME '%s' exists with role '%s'; skipping automatic role escalation.",
-                    SUPER_ADMIN_USERNAME,
-                    current_role,
-                )
-        conn.commit()
+                logging.info("Super admin user created: %s", SUPER_ADMIN_USERNAME)
+            else:
+                # Using DictCursor - access by column name instead of index
+                current_role = row['role'] if 'role' in row else None
+                # Safety: do not escalate a non-super account automatically.
+                if (current_role or '') != 'super_admin':
+                    logging.warning(
+                        "SUPER_ADMIN_USERNAME '%s' exists with role '%s'; skipping automatic role escalation.",
+                        SUPER_ADMIN_USERNAME,
+                        current_role,
+                    )
+            conn.commit()
+    except Exception as exc:
+        msg = str(exc)
+        if 'relation "users" does not exist' in msg:
+            logging.warning(
+                "Users table not found during super admin bootstrap. "
+                "Run init_db or migrations, then restart."
+            )
+            return
+        if 'could not translate host name' in msg or 'could not connect' in msg:
+            logging.warning(
+                "Database connection failed during super admin bootstrap: %s", exc
+            )
+            return
+        logging.warning("Super admin bootstrap failed: %s", exc)
+        return
 
 if RUN_STARTUP_BOOTSTRAP:
     create_super_admin()
@@ -5485,11 +6922,17 @@ if os.environ.get('RESET_STUDENT_PASSWORDS_ON_STARTUP', '').strip().lower() in (
     )
     normalize_all_student_passwords(reset_school_id)
 
-def get_user(username):
-    """Fetch one user by username."""
+def get_user(username, return_meta=False):
+    """Fetch one user by username.
+
+    When return_meta=True, returns (user_dict_or_none, status) where status is:
+    - 'ok': user found
+    - 'not_found': user missing/empty username
+    - 'db_error': lookup failed due database issue
+    """
     uname = (username or '').strip()
     if not uname:
-        return None
+        return (None, 'not_found') if return_meta else None
 
     primary_query = (
         'SELECT username, password_hash, role, school_id, terms_accepted, password_changed_at '
@@ -5517,8 +6960,15 @@ def get_user(username):
         try:
             db_execute(c, primary_query, (uname,))
             return _row_to_user(c.fetchone(), has_password_changed_at=True)
-        except Exception:
+        except Exception as exc:
+            # Transport/cursor failures should be retried with a fresh connection.
+            if _is_transient_db_transport_error(exc):
+                raise
             # Backward compatibility for DBs that have not yet added users.password_changed_at.
+            # Only fallback when this specific schema mismatch occurs.
+            msg = (str(exc) or '').lower()
+            if ('password_changed_at' not in msg) and ('undefinedcolumn' not in msg):
+                raise
             try:
                 conn_obj.rollback()
             except Exception as exc:
@@ -5528,19 +6978,25 @@ def get_user(username):
 
     try:
         with db_connection() as conn:
-            return _query_user_once(conn)
+            user = _query_user_once(conn)
+            if return_meta:
+                return user, ('ok' if user else 'not_found')
+            return user
     except Exception as exc:
         # Transient transport faults (SSL drop/closed cursor) should not crash request middleware.
         if not _is_transient_db_transport_error(exc):
             logging.warning("get_user failed for %s: %s", uname, exc)
-            return None
+            return (None, 'db_error') if return_meta else None
         logging.warning("get_user transient DB error for %s, retrying once: %s", uname, exc)
         try:
             with db_connection() as conn_retry:
-                return _query_user_once(conn_retry)
+                user = _query_user_once(conn_retry)
+                if return_meta:
+                    return user, ('ok' if user else 'not_found')
+                return user
         except Exception as exc2:
             logging.warning("get_user retry failed for %s: %s", uname, exc2)
-            return None
+            return (None, 'db_error') if return_meta else None
 
 def is_default_student_password(password_hash):
     """Return True if a student hash still matches configured default password."""
@@ -5809,7 +7265,7 @@ def format_timestamp(ts):
     except Exception:
         return str(ts)
 
-def save_student_with_cursor(c, school_id, student_id, student_data):
+def save_student_with_cursor(c, school_id, student_id, student_data, school_for_stream=None):
     """Save one student using an existing DB cursor/transaction."""
     logging.info(f"save_student_with_cursor called: school_id={school_id}, student_id={student_id}")
     firstname = normalize_person_name(student_data.get('firstname', ''))
@@ -5820,7 +7276,35 @@ def save_student_with_cursor(c, school_id, student_id, student_data):
     subjects_str = json.dumps(subjects)
     scores_str = json.dumps(student_data.get('scores', {}))
     term = student_data.get('term', 'First Term')
-    stream = student_data.get('stream', 'Science')
+    classname_for_stream = student_data.get('classname', '')
+    school_ctx = school_for_stream if isinstance(school_for_stream, dict) else {}
+    if not school_ctx:
+        # Use the same transaction cursor for stream-mode lookup to avoid
+        # nested cross-connection calls during writes.
+        try:
+            db_execute(
+                c,
+                """SELECT ss1_stream_mode
+                   FROM schools
+                   WHERE school_id = ?
+                   LIMIT 1""",
+                (school_id,),
+            )
+            row = c.fetchone()
+            if row:
+                mode = row['ss1_stream_mode'] if hasattr(row, 'keys') else row[0]
+                school_ctx = {'ss1_stream_mode': (mode or 'separate')}
+        except Exception:
+            school_ctx = {}
+    stream_input = student_data.get('stream', 'N/A')
+    stream, stream_error = normalize_stream_for_class(
+        classname_for_stream,
+        stream_input,
+        school=school_ctx,
+    )
+    if stream_error:
+        # Keep invalid/legacy stream data from forcing a wrong default.
+        stream = 'N/A'
     first_year_class = student_data.get('first_year_class', student_data.get('classname', ''))
     number_of_subject = len(subjects)
     date_of_birth = (student_data.get('date_of_birth', '') or '').strip()
@@ -6355,6 +7839,27 @@ def is_valid_student_phone(phone):
         return True
     return is_valid_parent_phone(phone)
 
+def _is_missing_column_error(exc, column_name):
+    """Best-effort missing-column detection across DB adapters."""
+    text = str(exc or '').strip().lower()
+    col = (column_name or '').strip().lower()
+    if not text or not col:
+        return False
+    return ('does not exist' in text or 'no such column' in text) and col in text
+
+def _is_missing_table_or_column_error(exc):
+    text = str(exc or '').strip().lower()
+    if not text:
+        return False
+    markers = (
+        'does not exist',
+        'undefined table',
+        'undefinedcolumn',
+        'no such table',
+        'no such column',
+    )
+    return any(marker in text for marker in markers)
+
 def load_parent_notification_prefs(school_id, parent_phone, student_id):
     prefs = {}
     parent_phone = normalize_parent_phone(parent_phone)
@@ -6364,18 +7869,51 @@ def load_parent_notification_prefs(school_id, parent_phone, student_id):
         return prefs
     with db_connection() as conn:
         c = conn.cursor()
-        db_execute(
-            c,
-            """SELECT pref_key, pref_value
-               FROM parent_notification_prefs
-               WHERE school_id = ? AND parent_phone = ? AND student_id = ?""",
-            (school_id, parent_phone, student_id),
-        )
-        for row in c.fetchall() or []:
+        params = (school_id, parent_phone, student_id)
+        rows = []
+        try:
+            db_execute(
+                c,
+                """SELECT pref_key, enabled
+                   FROM parent_notification_prefs
+                   WHERE school_id = ? AND parent_phone = ? AND student_id = ?""",
+                params,
+            )
+            rows = c.fetchall() or []
+        except Exception as exc:
+            if _is_missing_column_error(exc, 'enabled'):
+                try:
+                    db_execute(
+                        c,
+                        """SELECT pref_key, pref_value
+                           FROM parent_notification_prefs
+                           WHERE school_id = ? AND parent_phone = ? AND student_id = ?""",
+                        params,
+                    )
+                    rows = c.fetchall() or []
+                except Exception as exc2:
+                    # Legacy fallback: if both enabled/pref_value are absent, keep keys
+                    # and default them to enabled.
+                    if _is_missing_column_error(exc2, 'pref_value'):
+                        db_execute(
+                            c,
+                            """SELECT pref_key
+                               FROM parent_notification_prefs
+                               WHERE school_id = ? AND parent_phone = ? AND student_id = ?""",
+                            params,
+                        )
+                        key_rows = c.fetchall() or []
+                        rows = [(row[0], '1') for row in key_rows]
+                    else:
+                        raise
+            else:
+                raise
+        for row in rows:
             key = (row[0] or '').strip()
             if not key:
                 continue
-            prefs[key] = 1 if int(row[1] or 0) else 0
+            raw = str(row[1] if len(row) > 1 else '').strip().lower()
+            prefs[key] = 0 if raw in {'0', 'false', 'no', 'off'} else 1
     return prefs
 
 def save_parent_notification_prefs(school_id, parent_phone, student_id, prefs):
@@ -6391,14 +7929,107 @@ def save_parent_notification_prefs(school_id, parent_phone, student_id, prefs):
             if not pref_key:
                 continue
             pref_val = 1 if bool(val) else 0
-            db_execute(
-                c,
-                """INSERT INTO parent_notification_prefs (school_id, parent_phone, student_id, pref_key, pref_value, updated_at)
-                   VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                   ON CONFLICT(school_id, parent_phone, student_id, pref_key)
-                   DO UPDATE SET pref_value = excluded.pref_value, updated_at = excluded.updated_at""",
-                (school_id, parent_phone, student_id, pref_key, pref_val),
-            )
+            try:
+                db_execute(
+                    c,
+                    """INSERT INTO parent_notification_prefs (school_id, parent_phone, student_id, pref_key, enabled, pref_value, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                       ON CONFLICT(school_id, parent_phone, student_id, pref_key)
+                       DO UPDATE SET enabled = excluded.enabled, pref_value = excluded.pref_value, updated_at = excluded.updated_at""",
+                    (school_id, parent_phone, student_id, pref_key, pref_val, str(pref_val)),
+                )
+            except Exception as exc:
+                # Handle older schema variants gracefully.
+                if _is_missing_column_error(exc, 'pref_value'):
+                    db_execute(
+                        c,
+                        """INSERT INTO parent_notification_prefs (school_id, parent_phone, student_id, pref_key, enabled, updated_at)
+                           VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                           ON CONFLICT(school_id, parent_phone, student_id, pref_key)
+                           DO UPDATE SET enabled = excluded.enabled, updated_at = excluded.updated_at""",
+                        (school_id, parent_phone, student_id, pref_key, pref_val),
+                    )
+                elif _is_missing_column_error(exc, 'enabled'):
+                    db_execute(
+                        c,
+                        """INSERT INTO parent_notification_prefs (school_id, parent_phone, student_id, pref_key, pref_value, updated_at)
+                           VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                           ON CONFLICT(school_id, parent_phone, student_id, pref_key)
+                           DO UPDATE SET pref_value = excluded.pref_value, updated_at = excluded.updated_at""",
+                        (school_id, parent_phone, student_id, pref_key, str(pref_val)),
+                    )
+                else:
+                    raise
+
+def _rename_teacher_identifier_across_tables(school_id, old_teacher_id, new_teacher_id):
+    sid = (school_id or '').strip()
+    old_id = (old_teacher_id or '').strip().lower()
+    new_id = (new_teacher_id or '').strip().lower()
+    if not sid or not old_id or not new_id:
+        raise ValueError('School ID and teacher IDs are required.')
+    if old_id == new_id:
+        return
+    if not is_valid_email(new_id):
+        raise ValueError('New teacher email/login must be a valid email.')
+    with db_connection(commit=True) as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """SELECT username
+               FROM users
+               WHERE LOWER(username) = LOWER(?) AND LOWER(role) = 'teacher' AND school_id = ?
+               LIMIT 1""",
+            (old_id, sid),
+        )
+        old_user = c.fetchone()
+        if not old_user:
+            raise ValueError('Teacher account not found for this school.')
+        db_execute(
+            c,
+            """SELECT username
+               FROM users
+               WHERE LOWER(username) = LOWER(?) AND LOWER(username) <> LOWER(?)
+               LIMIT 1""",
+            (new_id, old_id),
+        )
+        existing = c.fetchone()
+        if existing:
+            raise ValueError('The new teacher email/login is already in use.')
+
+        db_execute(
+            c,
+            """UPDATE users
+               SET username = ?
+               WHERE LOWER(username) = LOWER(?) AND LOWER(role) = 'teacher' AND school_id = ?""",
+            (new_id, old_id, sid),
+        )
+        if c.rowcount <= 0:
+            raise ValueError('Could not update teacher login.')
+
+        def exec_optional(sql, params):
+            db_execute(c, 'SAVEPOINT sp_teacher_rename')
+            try:
+                db_execute(c, sql, params)
+            except Exception as exc:
+                db_execute(c, 'ROLLBACK TO SAVEPOINT sp_teacher_rename')
+                if not _is_missing_table_or_column_error(exc):
+                    raise
+            finally:
+                db_execute(c, 'RELEASE SAVEPOINT sp_teacher_rename')
+
+        updates = [
+            ("UPDATE teachers SET user_id = ? WHERE school_id = ? AND LOWER(user_id) = LOWER(?)", (new_id, sid, old_id)),
+            ("UPDATE class_assignments SET teacher_id = ? WHERE school_id = ? AND LOWER(teacher_id) = LOWER(?)", (new_id, sid, old_id)),
+            ("UPDATE teacher_subject_assignments SET teacher_id = ? WHERE school_id = ? AND LOWER(teacher_id) = LOWER(?)", (new_id, sid, old_id)),
+            ("UPDATE result_publications SET teacher_id = ? WHERE school_id = ? AND LOWER(teacher_id) = LOWER(?)", (new_id, sid, old_id)),
+            ("UPDATE subject_score_submissions SET teacher_id = ? WHERE school_id = ? AND LOWER(teacher_id) = LOWER(?)", (new_id, sid, old_id)),
+            ("UPDATE teacher_message_reads SET teacher_id = ? WHERE school_id = ? AND LOWER(teacher_id) = LOWER(?)", (new_id, sid, old_id)),
+            ("UPDATE class_timetables SET teacher_id = ? WHERE school_id = ? AND LOWER(teacher_id) = LOWER(?)", (new_id, sid, old_id)),
+            ("UPDATE teacher_messages SET created_by = ? WHERE school_id = ? AND LOWER(created_by) = LOWER(?)", (new_id, sid, old_id)),
+            ("UPDATE student_messages SET created_by = ? WHERE school_id = ? AND LOWER(created_by) = LOWER(?)", (new_id, sid, old_id)),
+        ]
+        for sql, params in updates:
+            exec_optional(sql, params)
 
 def parent_pref_allows(prefs, context):
     ctx = (context or '').strip().lower()
@@ -6426,9 +8057,9 @@ def create_student_password_reset_request(school_id, student_id, reason='', requ
         db_execute(
             c,
             """INSERT INTO student_password_reset_requests
-               (school_id, student_id, requested_by, reason, status, requested_at)
-               VALUES (?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP)""",
-            (school_id, student_id, (requested_by or '').strip(), (reason or '').strip()[:800]),
+               (school_id, student_id, reason, status, requested_at)
+               VALUES (?, ?, ?, 'pending', CURRENT_TIMESTAMP)""",
+            (school_id, student_id, (reason or '').strip()[:800]),
         )
         db_execute(c, "SELECT lastval()")
         new_row = c.fetchone()
@@ -6446,7 +8077,7 @@ def load_student_password_reset_requests(school_id, status_filter=''):
             params.append(status_filter)
         db_execute(
             c,
-            f"""SELECT r.id, r.student_id, r.requested_by, r.reason, r.status, r.requested_at,
+            f"""SELECT r.id, r.student_id, r.reason, r.status, r.requested_at,
                        r.reviewed_at, r.reviewed_by, r.review_note, s.firstname, s.classname
                 FROM student_password_reset_requests r
                 LEFT JOIN students s ON s.school_id = r.school_id AND s.student_id = r.student_id
@@ -6460,15 +8091,14 @@ def load_student_password_reset_requests(school_id, status_filter=''):
         out.append({
             'id': row[0],
             'student_id': row[1],
-            'requested_by': row[2] or '',
-            'reason': row[3] or '',
-            'status': row[4] or '',
-            'requested_at': row[5],
-            'reviewed_at': row[6],
-            'reviewed_by': row[7] or '',
-            'review_note': row[8] or '',
-            'student_name': row[9] or '',
-            'classname': row[10] or '',
+            'reason': row[2] or '',
+            'status': row[3] or '',
+            'requested_at': row[4],
+            'reviewed_at': row[5],
+            'reviewed_by': row[6] or '',
+            'review_note': row[7] or '',
+            'student_name': row[8] or '',
+            'classname': row[9] or '',
         })
     return out
 
@@ -6530,7 +8160,7 @@ def add_student_subject_request(school_id, student_id, request_type, subjects, r
         db_execute(
             c,
             """INSERT INTO student_subject_requests
-               (school_id, student_id, request_type, subjects, reason, status, created_at)
+               (school_id, student_id, request_type, requested_subjects_json, note, status, created_at)
                VALUES (?, ?, ?, ?, ?, 'pending', CURRENT_TIMESTAMP)""",
             (school_id, student_id, (request_type or '').strip(), json.dumps(subjects or []), (reason or '').strip()[:800]),
         )
@@ -6550,7 +8180,7 @@ def load_student_subject_requests(school_id, status_filter='', student_id=''):
         c = conn.cursor()
         db_execute(
             c,
-            f"""SELECT r.id, r.student_id, r.request_type, r.subjects, r.reason, r.status,
+            f"""SELECT r.id, r.student_id, r.request_type, r.requested_subjects_json, r.note, r.status,
                        r.created_at, r.reviewed_at, r.reviewed_by, s.firstname, s.classname
                 FROM student_subject_requests r
                 LEFT JOIN students s ON s.school_id = r.school_id AND s.student_id = r.student_id
@@ -6737,6 +8367,22 @@ def parse_uploaded_profile_image(file_storage):
     encoded = base64.b64encode(raw).decode('ascii')
     return f'data:{mime};base64,{encoded}', ''
 
+
+def parse_uploaded_cbt_question_image(file_storage):
+    """
+    Validate and encode uploaded CBT question image as a data URL.
+    Returns (data_url, error_message). Empty file is treated as no upload.
+    """
+    if not file_storage:
+        return '', ''
+    filename = (file_storage.filename or '').strip()
+    if not filename:
+        return '', ''
+    data_url, err = parse_uploaded_profile_image(file_storage)
+    if err:
+        err = err.replace('Profile image', 'Question image').replace('profile image', 'question image')
+    return data_url, err
+
 def _extract_class_number(classname):
     normalized = re.sub(r'[^A-Za-z0-9]+', '', (classname or '')).upper()
     # Allow arm-suffixed classes like JSS1A / SS2B by taking the first numeric block.
@@ -6876,7 +8522,8 @@ def class_belongs_to_school_or_arm(school_id, classname, class_candidates=None):
         return False
     candidates = class_candidates or get_secondary_school_classnames(school_id) or []
     if not candidates:
-        return False
+        # Allow first-time setup for valid secondary classes even before records/configs exist.
+        return is_secondary_classname(cls)
     normalized = canonicalize_classname(cls)
     if normalized in {canonicalize_classname(c) for c in candidates if str(c).strip()}:
         return True
@@ -6887,7 +8534,9 @@ def class_belongs_to_school_or_arm(school_id, classname, class_candidates=None):
                 continue
             if class_arm_ranking_group(c, mode='together') == target_group:
                 return True
-    return False
+        return False
+    # Non-arm classes can be introduced directly if they are valid secondary classes.
+    return is_secondary_classname(normalized)
 
 
 def class_arm_variants_for_base(class_candidates, classname):
@@ -7255,6 +8904,1647 @@ def get_school_subject_catalog_map(school_id):
                     catalog[cls][bucket].append(norm)
                     existing.add(norm.lower())
     return catalog
+
+
+def ensure_cbt_schema():
+    """Create/upgrade Computer-Based Test (CBT) tables."""
+    try:
+        with db_connection(commit=True) as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """CREATE TABLE IF NOT EXISTS cbt_tests (
+                       id SERIAL PRIMARY KEY,
+                       test_id TEXT UNIQUE NOT NULL,
+                       school_id TEXT NOT NULL,
+                       title TEXT NOT NULL,
+                       instructions TEXT DEFAULT '',
+                       classname TEXT NOT NULL,
+                       subject TEXT NOT NULL,
+                       term TEXT NOT NULL,
+                       academic_year TEXT DEFAULT '',
+                       duration_minutes INTEGER NOT NULL DEFAULT 30,
+                       total_questions INTEGER NOT NULL DEFAULT 0,
+                       questions_to_answer INTEGER NOT NULL DEFAULT 0,
+                       total_marks REAL NOT NULL DEFAULT 0,
+                       status TEXT NOT NULL DEFAULT 'draft',
+                       assessment_type TEXT NOT NULL DEFAULT 'test',
+                       score_over REAL NOT NULL DEFAULT 20,
+                       test_slot INTEGER NOT NULL DEFAULT 1,
+                       strict_mode INTEGER NOT NULL DEFAULT 1,
+                       fullscreen_required INTEGER NOT NULL DEFAULT 1,
+                       tab_switch_limit INTEGER NOT NULL DEFAULT 3,
+                       block_clipboard INTEGER NOT NULL DEFAULT 1,
+                       created_by_teacher_id TEXT DEFAULT '',
+                       retrieved_at TIMESTAMP,
+                       retrieved_by TEXT DEFAULT '',
+                       created_by TEXT DEFAULT '',
+                       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                   )""",
+            )
+            db_execute(
+                c,
+                """CREATE TABLE IF NOT EXISTS cbt_questions (
+                       id SERIAL PRIMARY KEY,
+                       school_id TEXT NOT NULL,
+                       test_id TEXT NOT NULL,
+                       question_no INTEGER NOT NULL,
+                       question_type TEXT NOT NULL DEFAULT 'mcq4',
+                       question_text TEXT NOT NULL,
+                       question_image_url TEXT DEFAULT '',
+                       option_a TEXT NOT NULL,
+                       option_b TEXT NOT NULL,
+                       option_c TEXT NOT NULL,
+                       option_d TEXT NOT NULL,
+                       correct_option TEXT NOT NULL DEFAULT 'A',
+                       correct_text TEXT DEFAULT '',
+                       accepted_answers TEXT DEFAULT '',
+                       points REAL NOT NULL DEFAULT 1,
+                       time_seconds INTEGER NOT NULL DEFAULT 60,
+                       explanation TEXT DEFAULT '',
+                       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                       UNIQUE(school_id, test_id, question_no)
+                   )""",
+            )
+            db_execute(
+                c,
+                """CREATE TABLE IF NOT EXISTS cbt_attempts (
+                       id SERIAL PRIMARY KEY,
+                       attempt_id TEXT UNIQUE NOT NULL,
+                       school_id TEXT NOT NULL,
+                       test_id TEXT NOT NULL,
+                       student_id TEXT NOT NULL,
+                       classname TEXT DEFAULT '',
+                       subject TEXT DEFAULT '',
+                       term TEXT DEFAULT '',
+                       academic_year TEXT DEFAULT '',
+                       started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                       submitted_at TIMESTAMP,
+                       status TEXT NOT NULL DEFAULT 'started',
+                       score REAL NOT NULL DEFAULT 0,
+                       total_marks REAL NOT NULL DEFAULT 0,
+                       total_questions INTEGER NOT NULL DEFAULT 0,
+                       answered_questions INTEGER NOT NULL DEFAULT 0,
+                       question_set_json TEXT DEFAULT '',
+                       draft_answers_json TEXT DEFAULT '',
+                       remaining_seconds INTEGER NOT NULL DEFAULT 0,
+                       last_activity_at TIMESTAMP,
+                       auto_submitted INTEGER NOT NULL DEFAULT 0,
+                       integrity_flagged INTEGER NOT NULL DEFAULT 0,
+                       integrity_flag_reason TEXT DEFAULT '',
+                       UNIQUE(school_id, test_id, student_id)
+                   )""",
+            )
+            db_execute(
+                c,
+                """CREATE TABLE IF NOT EXISTS cbt_attempt_answers (
+                       id SERIAL PRIMARY KEY,
+                       school_id TEXT NOT NULL,
+                       attempt_id TEXT NOT NULL,
+                       test_id TEXT NOT NULL,
+                       question_no INTEGER NOT NULL,
+                       selected_option TEXT DEFAULT '',
+                       is_correct INTEGER NOT NULL DEFAULT 0,
+                       points_awarded REAL NOT NULL DEFAULT 0,
+                       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                       UNIQUE(school_id, attempt_id, question_no)
+                   )""",
+            )
+            db_execute(
+                c,
+                """CREATE TABLE IF NOT EXISTS cbt_attempt_events (
+                       id SERIAL PRIMARY KEY,
+                       school_id TEXT NOT NULL,
+                       attempt_id TEXT NOT NULL,
+                       test_id TEXT NOT NULL,
+                       student_id TEXT NOT NULL,
+                       event_type TEXT NOT NULL,
+                       event_meta TEXT DEFAULT '',
+                       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                   )""",
+            )
+            db_execute(
+                c,
+                """CREATE TABLE IF NOT EXISTS cbt_test_accommodations (
+                       id SERIAL PRIMARY KEY,
+                       school_id TEXT NOT NULL,
+                       test_id TEXT NOT NULL,
+                       student_id TEXT NOT NULL,
+                       extra_minutes INTEGER NOT NULL DEFAULT 0,
+                       extra_percent INTEGER NOT NULL DEFAULT 0,
+                       is_active INTEGER NOT NULL DEFAULT 1,
+                       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                       UNIQUE(school_id, test_id, student_id)
+                   )""",
+            )
+            db_execute(c, "ALTER TABLE cbt_tests ADD COLUMN IF NOT EXISTS instructions TEXT DEFAULT ''")
+            db_execute(c, "ALTER TABLE cbt_tests ADD COLUMN IF NOT EXISTS duration_minutes INTEGER NOT NULL DEFAULT 30")
+            db_execute(c, "ALTER TABLE cbt_tests ADD COLUMN IF NOT EXISTS total_questions INTEGER NOT NULL DEFAULT 0")
+            db_execute(c, "ALTER TABLE cbt_tests ADD COLUMN IF NOT EXISTS questions_to_answer INTEGER NOT NULL DEFAULT 0")
+            db_execute(c, "ALTER TABLE cbt_tests ADD COLUMN IF NOT EXISTS total_marks REAL NOT NULL DEFAULT 0")
+            db_execute(c, "ALTER TABLE cbt_tests ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'draft'")
+            db_execute(c, "ALTER TABLE cbt_tests ADD COLUMN IF NOT EXISTS assessment_type TEXT NOT NULL DEFAULT 'test'")
+            db_execute(c, "ALTER TABLE cbt_tests ADD COLUMN IF NOT EXISTS score_over REAL NOT NULL DEFAULT 20")
+            db_execute(c, "ALTER TABLE cbt_tests ADD COLUMN IF NOT EXISTS test_slot INTEGER NOT NULL DEFAULT 1")
+            db_execute(c, "ALTER TABLE cbt_tests ADD COLUMN IF NOT EXISTS strict_mode INTEGER NOT NULL DEFAULT 1")
+            db_execute(c, "ALTER TABLE cbt_tests ADD COLUMN IF NOT EXISTS fullscreen_required INTEGER NOT NULL DEFAULT 1")
+            db_execute(c, "ALTER TABLE cbt_tests ADD COLUMN IF NOT EXISTS tab_switch_limit INTEGER NOT NULL DEFAULT 3")
+            db_execute(c, "ALTER TABLE cbt_tests ADD COLUMN IF NOT EXISTS block_clipboard INTEGER NOT NULL DEFAULT 1")
+            db_execute(c, "ALTER TABLE cbt_tests ADD COLUMN IF NOT EXISTS created_by_teacher_id TEXT DEFAULT ''")
+            db_execute(c, "ALTER TABLE cbt_tests ADD COLUMN IF NOT EXISTS retrieved_at TIMESTAMP")
+            db_execute(c, "ALTER TABLE cbt_tests ADD COLUMN IF NOT EXISTS retrieved_by TEXT DEFAULT ''")
+            db_execute(c, "ALTER TABLE cbt_tests ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+            db_execute(c, "ALTER TABLE cbt_questions ADD COLUMN IF NOT EXISTS points REAL NOT NULL DEFAULT 1")
+            db_execute(c, "ALTER TABLE cbt_questions ADD COLUMN IF NOT EXISTS question_type TEXT NOT NULL DEFAULT 'mcq4'")
+            db_execute(c, "ALTER TABLE cbt_questions ADD COLUMN IF NOT EXISTS question_image_url TEXT DEFAULT ''")
+            db_execute(c, "ALTER TABLE cbt_questions ADD COLUMN IF NOT EXISTS correct_text TEXT DEFAULT ''")
+            db_execute(c, "ALTER TABLE cbt_questions ADD COLUMN IF NOT EXISTS accepted_answers TEXT DEFAULT ''")
+            db_execute(c, "ALTER TABLE cbt_questions ADD COLUMN IF NOT EXISTS time_seconds INTEGER NOT NULL DEFAULT 60")
+            db_execute(c, "ALTER TABLE cbt_questions ADD COLUMN IF NOT EXISTS explanation TEXT DEFAULT ''")
+            db_execute(c, "ALTER TABLE cbt_attempts ADD COLUMN IF NOT EXISTS answered_questions INTEGER NOT NULL DEFAULT 0")
+            db_execute(c, "ALTER TABLE cbt_attempts ADD COLUMN IF NOT EXISTS question_set_json TEXT DEFAULT ''")
+            db_execute(c, "ALTER TABLE cbt_attempts ADD COLUMN IF NOT EXISTS draft_answers_json TEXT DEFAULT ''")
+            db_execute(c, "ALTER TABLE cbt_attempts ADD COLUMN IF NOT EXISTS remaining_seconds INTEGER NOT NULL DEFAULT 0")
+            db_execute(c, "ALTER TABLE cbt_attempts ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMP")
+            db_execute(c, "ALTER TABLE cbt_attempts ADD COLUMN IF NOT EXISTS auto_submitted INTEGER NOT NULL DEFAULT 0")
+            db_execute(c, "ALTER TABLE cbt_attempts ADD COLUMN IF NOT EXISTS integrity_flagged INTEGER NOT NULL DEFAULT 0")
+            db_execute(c, "ALTER TABLE cbt_attempts ADD COLUMN IF NOT EXISTS integrity_flag_reason TEXT DEFAULT ''")
+            db_execute(c, "ALTER TABLE cbt_attempt_answers ADD COLUMN IF NOT EXISTS points_awarded REAL NOT NULL DEFAULT 0")
+            db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_cbt_tests_school_status_created ON cbt_tests(school_id, status, created_at DESC)')
+            db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_cbt_tests_school_scope ON cbt_tests(school_id, classname, term, academic_year)')
+            db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_cbt_tests_school_teacher_scope ON cbt_tests(school_id, created_by_teacher_id, created_at DESC)')
+            db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_cbt_questions_lookup ON cbt_questions(school_id, test_id, question_no)')
+            db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_cbt_attempts_school_student ON cbt_attempts(school_id, student_id, started_at DESC)')
+            db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_cbt_attempts_school_test ON cbt_attempts(school_id, test_id, started_at DESC)')
+            db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_cbt_attempt_answers_lookup ON cbt_attempt_answers(school_id, attempt_id, question_no)')
+            db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_cbt_attempt_events_lookup ON cbt_attempt_events(school_id, attempt_id, created_at DESC)')
+            db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_cbt_attempts_activity_lookup ON cbt_attempts(school_id, test_id, last_activity_at DESC)')
+            db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_cbt_accommodations_lookup ON cbt_test_accommodations(school_id, test_id, student_id)')
+        return True
+    except Exception as exc:
+        logging.warning("Failed to ensure CBT schema: %s", exc)
+        return False
+
+
+def _normalize_cbt_option(value):
+    text = (value or '').strip().upper()
+    return text if text in {'A', 'B', 'C', 'D'} else ''
+
+
+def _normalize_cbt_question_type(value):
+    qtype = (value or '').strip().lower()
+    if qtype in {'mcq4', 'true_false', 'fill_blank'}:
+        return qtype
+    return 'mcq4'
+
+
+def _normalize_fill_blank_answer(value):
+    return re.sub(r'\s+', ' ', (value or '').strip().lower())
+
+
+def _normalize_true_false_choice(value):
+    text = (value or '').strip().upper()
+    if text in {'A', 'TRUE', 'T'}:
+        return 'A'
+    if text in {'B', 'FALSE', 'F'}:
+        return 'B'
+    return ''
+
+
+def _normalize_cbt_status(value):
+    status = (value or '').strip().lower()
+    if status not in {'draft', 'published', 'closed'}:
+        status = 'draft'
+    return status
+
+
+def _normalize_cbt_assessment_type(value):
+    assessment_type = (value or '').strip().lower()
+    return 'exam' if assessment_type == 'exam' else 'test'
+
+
+def _normalize_cbt_question_image_url(value):
+    raw = (value or '').strip()
+    if not raw:
+        return ''
+    if raw.lower().startswith('data:image/'):
+        if len(raw) > 3_000_000:
+            raise ValueError('Question image payload is too large. Keep image size under 2MB.')
+        return raw
+    if re.match(r'^https?://', raw, flags=re.IGNORECASE):
+        return raw[:2000]
+    raise ValueError('Question image must be an http/https URL or uploaded image.')
+
+
+def _normalize_cbt_questions_to_answer(value):
+    return max(0, min(500, safe_int(value, 0)))
+
+
+def _parse_cbt_question_set(raw_value):
+    payload = raw_value
+    if isinstance(raw_value, str):
+        text = raw_value.strip()
+        if not text:
+            return []
+        try:
+            payload = json.loads(text)
+        except Exception:
+            return []
+    if not isinstance(payload, list):
+        return []
+    out = []
+    seen = set()
+    for item in payload:
+        q_no = safe_int(item, 0)
+        if q_no <= 0 or q_no in seen:
+            continue
+        seen.add(q_no)
+        out.append(q_no)
+    return out
+
+
+def _parse_cbt_integrity_events(raw_value, max_events=250):
+    text = (raw_value or '').strip()
+    if not text:
+        return []
+    try:
+        payload = json.loads(text)
+    except Exception:
+        return []
+    if not isinstance(payload, list):
+        return []
+    out = []
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        event_type = re.sub(r'[^a-z0-9_\-]+', '', (item.get('type', '') or '').strip().lower())[:64]
+        if not event_type:
+            continue
+        ts = (item.get('ts', '') or '').strip()[:64]
+        detail = (item.get('detail', '') or '').strip()[:240]
+        out.append({'type': event_type, 'ts': ts, 'detail': detail})
+        if len(out) >= max(1, min(int(max_events or 250), 1000)):
+            break
+    return out
+
+
+def _cbt_test_integrity_policy(test_row):
+    row = test_row if isinstance(test_row, dict) else {}
+    return {
+        'strict_mode': 1 if safe_int(row.get('strict_mode', 1), 1) else 0,
+        'fullscreen_required': 1 if safe_int(row.get('fullscreen_required', 1), 1) else 0,
+        'tab_switch_limit': max(0, min(30, safe_int(row.get('tab_switch_limit', 3), 3))),
+        'block_clipboard': 1 if safe_int(row.get('block_clipboard', 1), 1) else 0,
+    }
+
+
+def _cbt_integrity_flag_from_counts(test_row, event_counts):
+    counts = event_counts if isinstance(event_counts, dict) else {}
+    policy = _cbt_test_integrity_policy(test_row)
+    tab_hidden = max(0, safe_int(counts.get('tab_hidden', 0), 0))
+    blur_count = max(0, safe_int(counts.get('window_blur', 0), 0))
+    fullscreen_exit = max(0, safe_int(counts.get('fullscreen_exit', 0), 0))
+    fullscreen_denied = max(0, safe_int(counts.get('fullscreen_denied', 0), 0))
+    clipboard_blocks = (
+        max(0, safe_int(counts.get('paste_blocked', 0), 0))
+        + max(0, safe_int(counts.get('copy_blocked', 0), 0))
+        + max(0, safe_int(counts.get('cut_blocked', 0), 0))
+    )
+    focus_leaves = tab_hidden + blur_count
+    score, _level = _cbt_integrity_score_from_event_counts(counts)
+    reasons = []
+    if policy.get('strict_mode'):
+        if policy.get('fullscreen_required') and (fullscreen_exit >= 2 or fullscreen_denied >= 2):
+            reasons.append('Repeated fullscreen violations')
+        limit = safe_int(policy.get('tab_switch_limit', 3), 3)
+        if limit >= 0 and focus_leaves > limit:
+            reasons.append(f'Focus/tab left {focus_leaves}x (limit {limit})')
+        if policy.get('block_clipboard') and clipboard_blocks >= 3:
+            reasons.append('Repeated blocked copy/paste actions')
+    if score >= 24:
+        reasons.append('High integrity risk score')
+    flagged = 1 if reasons else 0
+    reason_text = '; '.join(reasons)[:240]
+    return flagged, reason_text
+
+
+def _parse_fill_blank_candidates(correct_text='', accepted_answers=''):
+    candidates = []
+    seed = []
+    if str(correct_text or '').strip():
+        seed.append(correct_text)
+    if str(accepted_answers or '').strip():
+        seed.extend(re.split(r'[\n;|]+', str(accepted_answers or '')))
+    seen = set()
+    for raw in seed:
+        normalized = _normalize_fill_blank_answer(raw)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        candidates.append(normalized)
+    return candidates
+
+
+def _load_cbt_draft_answers(raw_value):
+    text = (raw_value or '').strip()
+    if not text:
+        return {}
+    try:
+        payload = json.loads(text)
+    except Exception:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    out = {}
+    for key, value in payload.items():
+        q_no = safe_int(key, 0)
+        if q_no <= 0:
+            continue
+        out[q_no] = (value or '')
+    return out
+
+
+def _build_cbt_draft_answers_map(raw_answers, qrows):
+    out = {}
+    if not isinstance(raw_answers, dict):
+        raw_answers = {}
+    for q in (qrows or []):
+        q_no = safe_int(q.get('question_no', 0), 0)
+        if q_no <= 0:
+            continue
+        qtype = _normalize_cbt_question_type(q.get('question_type', 'mcq4'))
+        raw_value = raw_answers.get(f'q_{q_no}', raw_answers.get(str(q_no), raw_answers.get(q_no, '')))
+        if qtype == 'fill_blank':
+            val = (raw_value or '').strip()[:500]
+        elif qtype == 'true_false':
+            val = _normalize_true_false_choice(raw_value)
+        else:
+            val = _normalize_cbt_option(raw_value)
+        if val:
+            out[q_no] = val
+    return out
+
+
+def _merge_attempt_answer_maps(submitted_map, draft_map):
+    merged = {}
+    if isinstance(draft_map, dict):
+        for q_no, value in draft_map.items():
+            q_i = safe_int(q_no, 0)
+            if q_i <= 0:
+                continue
+            merged[q_i] = {'selected_option': (value or '').strip()}
+    if isinstance(submitted_map, dict):
+        for q_no, value in submitted_map.items():
+            q_i = safe_int(q_no, 0)
+            if q_i <= 0:
+                continue
+            merged[q_i] = value
+    return merged
+
+
+def _cbt_duration_seconds_from_questions(test_row, selected_questions, extra_minutes=0, extra_percent=0):
+    per_question_time_total = 0
+    for q in (selected_questions or []):
+        per_question_time_total += max(5, min(1800, safe_int(q.get('time_seconds', 60), 60)))
+    base_seconds = max(
+        60,
+        per_question_time_total or (safe_int((test_row or {}).get('duration_minutes', 30), 30) * 60),
+    )
+    pct = max(0, min(300, safe_int(extra_percent, 0)))
+    mins = max(0, min(240, safe_int(extra_minutes, 0)))
+    bonus = int(round(base_seconds * (pct / 100.0))) + (mins * 60)
+    total = base_seconds + bonus
+    return max(60, min(total, 24 * 3600))
+
+
+def get_cbt_test_accommodation(school_id, test_id, student_id):
+    if not ensure_cbt_schema():
+        return {'extra_minutes': 0, 'extra_percent': 0, 'is_active': 0}
+    with db_connection() as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """SELECT extra_minutes, extra_percent, is_active
+               FROM cbt_test_accommodations
+               WHERE school_id = ? AND test_id = ? AND student_id = ?
+               LIMIT 1""",
+            (school_id, test_id, student_id),
+        )
+        row = c.fetchone()
+    if not row:
+        return {'extra_minutes': 0, 'extra_percent': 0, 'is_active': 0}
+    return {
+        'extra_minutes': max(0, min(240, safe_int(row['extra_minutes'], 0))),
+        'extra_percent': max(0, min(300, safe_int(row['extra_percent'], 0))),
+        'is_active': 1 if safe_int(row.get('is_active', 0), 0) else 0,
+    }
+
+
+def save_cbt_test_accommodation(school_id, test_id, student_id, extra_minutes=0, extra_percent=0, is_active=1):
+    if not ensure_cbt_schema():
+        return 0
+    mins = max(0, min(240, safe_int(extra_minutes, 0)))
+    pct = max(0, min(300, safe_int(extra_percent, 0)))
+    active = 1 if safe_int(is_active, 0) else 0
+    with db_connection(commit=True) as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """INSERT INTO cbt_test_accommodations
+               (school_id, test_id, student_id, extra_minutes, extra_percent, is_active, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+               ON CONFLICT(school_id, test_id, student_id)
+               DO UPDATE SET
+                 extra_minutes = EXCLUDED.extra_minutes,
+                 extra_percent = EXCLUDED.extra_percent,
+                 is_active = EXCLUDED.is_active,
+                 updated_at = CURRENT_TIMESTAMP""",
+            (school_id, test_id, student_id, mins, pct, active),
+        )
+        return int(c.rowcount or 0)
+
+
+def _cbt_integrity_score_from_event_counts(event_counts):
+    weights = {
+        'fullscreen_exit': 6,
+        'fullscreen_denied': 5,
+        'tab_hidden': 4,
+        'window_blur': 3,
+        'paste_blocked': 4,
+        'copy_blocked': 3,
+        'cut_blocked': 3,
+        'contextmenu_blocked': 2,
+    }
+    score = 0
+    if not isinstance(event_counts, dict):
+        event_counts = {}
+    for event_type, count in event_counts.items():
+        c = max(0, safe_int(count, 0))
+        if c <= 0:
+            continue
+        score += weights.get(str(event_type or '').strip().lower(), 1) * c
+    if score >= 40:
+        level = 'critical'
+    elif score >= 24:
+        level = 'high'
+    elif score >= 10:
+        level = 'medium'
+    else:
+        level = 'low'
+    return score, level
+
+
+def load_cbt_integrity_summary(school_id, test_id, test_row=None):
+    if not ensure_cbt_schema():
+        return {}
+    with db_connection() as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """SELECT attempt_id, event_type, COUNT(*) AS cnt
+               FROM cbt_attempt_events
+               WHERE school_id = ? AND test_id = ?
+               GROUP BY attempt_id, event_type""",
+            (school_id, test_id),
+        )
+        rows = c.fetchall() or []
+    grouped = {}
+    for row in rows:
+        attempt_id = (row.get('attempt_id') or '').strip()
+        if not attempt_id:
+            continue
+        etype = (row.get('event_type') or '').strip().lower()
+        if not etype:
+            continue
+        grouped.setdefault(attempt_id, {})
+        grouped[attempt_id][etype] = grouped[attempt_id].get(etype, 0) + safe_int(row.get('cnt', 0), 0)
+    out = {}
+    for attempt_id, counts in grouped.items():
+        total = sum(max(0, safe_int(v, 0)) for v in counts.values())
+        score, level = _cbt_integrity_score_from_event_counts(counts)
+        top_flags = sorted(counts.items(), key=lambda item: safe_int(item[1], 0), reverse=True)[:3]
+        flagged, flagged_reason = _cbt_integrity_flag_from_counts(test_row, counts)
+        out[attempt_id] = {
+            'events_count': total,
+            'risk_score': score,
+            'risk_level': level,
+            'event_counts': counts,
+            'top_flags': top_flags,
+            'flagged': flagged,
+            'flagged_reason': flagged_reason,
+        }
+    return out
+
+
+def _log_cbt_attempt_events_with_cursor(c, school_id, attempt_id, test_id, student_id, events):
+    rows = events or []
+    if not rows:
+        return 0
+    inserted = 0
+    for evt in rows:
+        meta = {'ts': evt.get('ts', ''), 'detail': evt.get('detail', '')}
+        db_execute(
+            c,
+            """INSERT INTO cbt_attempt_events
+               (school_id, attempt_id, test_id, student_id, event_type, event_meta, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
+            (
+                school_id,
+                attempt_id,
+                test_id,
+                student_id,
+                (evt.get('type', '') or '').strip()[:64],
+                json.dumps(meta)[:1200],
+            ),
+        )
+        inserted += 1
+    return inserted
+
+
+def _refresh_cbt_attempt_integrity_flag_with_cursor(c, school_id, attempt_id, test_row):
+    aid = (attempt_id or '').strip()
+    if not aid:
+        return (0, '')
+    db_execute(c, "ALTER TABLE cbt_attempts ADD COLUMN IF NOT EXISTS integrity_flagged INTEGER NOT NULL DEFAULT 0")
+    db_execute(c, "ALTER TABLE cbt_attempts ADD COLUMN IF NOT EXISTS integrity_flag_reason TEXT DEFAULT ''")
+    db_execute(
+        c,
+        """SELECT event_type, COUNT(*) AS cnt
+           FROM cbt_attempt_events
+           WHERE school_id = ? AND attempt_id = ?
+           GROUP BY event_type""",
+        (school_id, aid),
+    )
+    rows = c.fetchall() or []
+    counts = {}
+    for row in rows:
+        event_type = (row.get('event_type') or '').strip().lower()
+        if not event_type:
+            continue
+        counts[event_type] = counts.get(event_type, 0) + max(0, safe_int(row.get('cnt', 0), 0))
+    flagged, reason_text = _cbt_integrity_flag_from_counts(test_row, counts)
+    db_execute(
+        c,
+        """UPDATE cbt_attempts
+           SET integrity_flagged = ?,
+               integrity_flag_reason = ?
+           WHERE school_id = ? AND attempt_id = ?""",
+        (flagged, reason_text, school_id, aid),
+    )
+    return flagged, reason_text
+
+
+def _ensure_attempt_question_set_with_cursor(c, school_id, test_row, attempt_row, qrows=None):
+    """Ensure each attempt has a stable shuffled question set."""
+    if qrows is None:
+        db_execute(
+            c,
+            """SELECT question_no, points
+               FROM cbt_questions
+               WHERE school_id = ? AND test_id = ?
+               ORDER BY question_no ASC""",
+            (school_id, test_row['test_id']),
+        )
+        qrows = c.fetchall() or []
+    rows = [dict(row) if not isinstance(row, dict) else row for row in (qrows or [])]
+    pool = []
+    pool_map = {}
+    for row in rows:
+        q_no = safe_int(row.get('question_no', 0), 0)
+        if q_no <= 0 or q_no in pool_map:
+            continue
+        pool.append(q_no)
+        pool_map[q_no] = row
+    if not pool:
+        raise ValueError('This CBT has no questions yet.')
+
+    configured = _normalize_cbt_questions_to_answer(test_row.get('questions_to_answer', 0))
+    desired = configured if configured > 0 else len(pool)
+    desired = max(1, min(desired, len(pool)))
+
+    existing = _parse_cbt_question_set((attempt_row or {}).get('question_set_json', ''))
+    existing_valid = [q_no for q_no in existing if q_no in pool_map]
+    if existing_valid:
+        if existing_valid != existing:
+            db_execute(
+                c,
+                """UPDATE cbt_attempts
+                   SET question_set_json = ?
+                   WHERE school_id = ? AND attempt_id = ?""",
+                (json.dumps(existing_valid), school_id, attempt_row['attempt_id']),
+            )
+        return existing_valid, [pool_map[q_no] for q_no in existing_valid]
+
+    selected = pool[:] if desired >= len(pool) else random.sample(pool, desired)
+    random.shuffle(selected)
+    selected_total_marks = sum(max(0.0, safe_float(pool_map[q_no].get('points', 0), 0.0)) for q_no in selected)
+    db_execute(
+        c,
+        """UPDATE cbt_attempts
+           SET question_set_json = ?,
+               total_questions = ?,
+               total_marks = ?
+           WHERE school_id = ? AND attempt_id = ?""",
+        (json.dumps(selected), len(selected), selected_total_marks, school_id, attempt_row['attempt_id']),
+    )
+    attempt_row['question_set_json'] = json.dumps(selected)
+    return selected, [pool_map[q_no] for q_no in selected]
+
+
+def _next_cbt_identifier_with_cursor(c, table_name, column_name, prefix):
+    for _ in range(40):
+        candidate = f"{prefix}-{datetime.now().strftime('%y%m%d%H%M%S')}-{secrets.token_hex(3)}".upper()
+        db_execute(c, f"SELECT 1 FROM {table_name} WHERE {column_name} = ? LIMIT 1", (candidate,))
+        if not c.fetchone():
+            return candidate
+    return f"{prefix}-{secrets.token_hex(8)}".upper()
+
+
+def _cbt_collect_subjects_for_class_config(config):
+    config = config or {}
+    values = (
+        (config.get('core_subjects') or [])
+        + (config.get('science_subjects') or [])
+        + (config.get('art_subjects') or [])
+        + (config.get('commercial_subjects') or [])
+        + (config.get('optional_subjects') or [])
+    )
+    return _dedupe_keep_order([normalize_subject_name(item) for item in values if str(item).strip()])
+
+
+def _cbt_class_subject_options(school_id):
+    class_options = get_secondary_school_classnames(school_id) or []
+    class_subject_options = {}
+    all_subjects = []
+    catalog = get_school_subject_catalog_map(school_id) or {}
+    for classname in class_options:
+        config = get_class_subject_config(school_id, classname) or {}
+        subjects = _cbt_collect_subjects_for_class_config(config)
+        if not subjects:
+            cat = catalog.get(canonicalize_classname(classname), {})
+            subjects = _dedupe_keep_order([
+                normalize_subject_name(item)
+                for bucket in ('core', 'science', 'art', 'commercial', 'optional')
+                for item in (cat.get(bucket) or [])
+                if str(item).strip()
+            ])
+        class_subject_options[classname] = sorted(set(subjects), key=lambda x: str(x).lower())
+        all_subjects.extend(class_subject_options[classname])
+    all_subjects = sorted(set(all_subjects), key=lambda x: str(x).lower())
+    return class_options, class_subject_options, all_subjects
+
+
+def _cbt_class_matches_student(test_classname, student_classname):
+    test_key = canonicalize_classname(test_classname)
+    student_key = canonicalize_classname(student_classname)
+    if not test_key or not student_key:
+        return False
+    if test_key == student_key:
+        return True
+    return class_arm_ranking_group(test_key, mode='together') == class_arm_ranking_group(student_key, mode='together')
+
+
+def _cbt_student_offered_subject_keys(school_id, student):
+    offered = normalize_subjects_list((student or {}).get('subjects', []))
+    if not offered:
+        config = get_class_subject_config(school_id, (student or {}).get('classname', '')) or {}
+        offered = _cbt_collect_subjects_for_class_config(config)
+    return {normalize_subject_name(item).lower() for item in (offered or []) if str(item).strip()}
+
+
+def _student_can_take_cbt_test(school_id, student, test_row):
+    if not student:
+        return False, 'Student data not found.'
+    if not test_row:
+        return False, 'CBT test not found.'
+    status = (test_row.get('status') or '').strip().lower()
+    if status != 'published':
+        return False, 'This CBT is not available to students yet.'
+    if not _cbt_class_matches_student(test_row.get('classname', ''), student.get('classname', '')):
+        return False, 'This CBT is not assigned to your class.'
+    offered_subject_keys = _cbt_student_offered_subject_keys(school_id, student)
+    subject_key = normalize_subject_name(test_row.get('subject', '')).lower()
+    if subject_key and offered_subject_keys and subject_key not in offered_subject_keys:
+        return False, 'This CBT is not for your offered subjects.'
+    return True, ''
+
+
+def _cbt_recalculate_totals_with_cursor(c, school_id, test_id):
+    db_execute(
+        c,
+        """SELECT COUNT(*), COALESCE(SUM(points), 0)
+           FROM cbt_questions
+           WHERE school_id = ? AND test_id = ?""",
+        (school_id, test_id),
+    )
+    row = c.fetchone()
+    total_questions = int(row[0] or 0) if row else 0
+    total_marks = float(row[1] or 0) if row else 0.0
+    db_execute(
+        c,
+        """UPDATE cbt_tests
+           SET total_questions = ?, total_marks = ?, updated_at = CURRENT_TIMESTAMP
+           WHERE school_id = ? AND test_id = ?""",
+        (total_questions, total_marks, school_id, test_id),
+    )
+    return total_questions, total_marks
+
+
+def get_cbt_test(school_id, test_id):
+    if not ensure_cbt_schema():
+        return None
+    with db_connection() as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """SELECT test_id, school_id, title, instructions, classname, subject, term, academic_year,
+                      duration_minutes, total_questions, questions_to_answer, total_marks, status,
+                      assessment_type, score_over, test_slot,
+                      strict_mode, fullscreen_required, tab_switch_limit, block_clipboard,
+                      created_by_teacher_id,
+                      retrieved_at, retrieved_by,
+                      created_by, created_at, updated_at
+               FROM cbt_tests
+               WHERE school_id = ? AND test_id = ?
+               LIMIT 1""",
+            (school_id, test_id),
+        )
+        row = c.fetchone()
+    if not row:
+        return None
+    return dict(row)
+
+
+def list_cbt_tests_for_school(school_id, limit=300):
+    if not ensure_cbt_schema():
+        return []
+    with db_connection() as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """SELECT test_id, title, instructions, classname, subject, term, academic_year,
+                      duration_minutes, total_questions, questions_to_answer, total_marks, status,
+                      assessment_type, score_over, test_slot,
+                      strict_mode, fullscreen_required, tab_switch_limit, block_clipboard,
+                      created_by_teacher_id,
+                      retrieved_at, retrieved_by,
+                      created_by, created_at, updated_at
+               FROM cbt_tests
+               WHERE school_id = ?
+               ORDER BY created_at DESC
+               LIMIT ?""",
+            (school_id, max(1, min(int(limit or 300), 800))),
+        )
+        rows = c.fetchall() or []
+    return [dict(row) for row in rows]
+
+
+def create_cbt_test(
+    school_id,
+    title,
+    classname,
+    subject,
+    term,
+    academic_year='',
+    duration_minutes=30,
+    instructions='',
+    created_by='',
+    assessment_type='test',
+    score_over=20,
+    test_slot=1,
+    questions_to_answer=0,
+    strict_mode=1,
+    fullscreen_required=1,
+    tab_switch_limit=3,
+    block_clipboard=1,
+    created_by_teacher_id='',
+):
+    if not ensure_cbt_schema():
+        raise ValueError('CBT schema is unavailable.')
+    title_text = (title or '').strip()
+    if not title_text:
+        raise ValueError('Test title is required.')
+    class_key = canonicalize_classname(classname)
+    if not class_key:
+        raise ValueError('Class is required.')
+    subject_name = normalize_subject_name(subject)
+    if not subject_name:
+        raise ValueError('Subject is required.')
+    term_name = (term or '').strip()
+    if term_name not in {'First Term', 'Second Term', 'Third Term'}:
+        raise ValueError('Select a valid term.')
+    year = (academic_year or '').strip()
+    minutes = max(5, min(240, safe_int(duration_minutes, 30)))
+    normalized_assessment_type = _normalize_cbt_assessment_type(assessment_type)
+    normalized_score_over = max(1.0, min(100.0, safe_float(score_over, 20.0)))
+    normalized_test_slot = max(1, min(10, safe_int(test_slot, 1)))
+    normalized_questions_to_answer = _normalize_cbt_questions_to_answer(questions_to_answer)
+    normalized_strict_mode = 1 if safe_int(strict_mode, 1) else 0
+    normalized_fullscreen_required = 1 if safe_int(fullscreen_required, 1) else 0
+    normalized_tab_switch_limit = max(0, min(30, safe_int(tab_switch_limit, 3)))
+    normalized_block_clipboard = 1 if safe_int(block_clipboard, 1) else 0
+    with db_connection(commit=True) as conn:
+        c = conn.cursor()
+        test_id = _next_cbt_identifier_with_cursor(c, 'cbt_tests', 'test_id', 'CBT')
+        db_execute(
+            c,
+            """INSERT INTO cbt_tests
+               (test_id, school_id, title, instructions, classname, subject, term, academic_year,
+                duration_minutes, total_questions, questions_to_answer, total_marks, status,
+                assessment_type, score_over, test_slot,
+                strict_mode, fullscreen_required, tab_switch_limit, block_clipboard,
+                created_by_teacher_id,
+                created_by, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 0, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)""",
+            (
+                test_id,
+                school_id,
+                title_text[:180],
+                (instructions or '').strip()[:2000],
+                class_key,
+                subject_name[:120],
+                term_name,
+                year[:32],
+                minutes,
+                normalized_questions_to_answer,
+                normalized_assessment_type,
+                normalized_score_over,
+                normalized_test_slot,
+                normalized_strict_mode,
+                normalized_fullscreen_required,
+                normalized_tab_switch_limit,
+                normalized_block_clipboard,
+                (created_by_teacher_id or '').strip()[:120],
+                (created_by or '').strip()[:120],
+            ),
+        )
+    return test_id
+
+
+def list_cbt_questions(school_id, test_id):
+    if not ensure_cbt_schema():
+        return []
+    with db_connection() as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """SELECT question_no, question_text, option_a, option_b, option_c, option_d,
+                      question_type, question_image_url, correct_option, correct_text, accepted_answers, points, time_seconds, explanation
+               FROM cbt_questions
+               WHERE school_id = ? AND test_id = ?
+               ORDER BY question_no ASC""",
+            (school_id, test_id),
+        )
+        rows = c.fetchall() or []
+    return [dict(row) for row in rows]
+
+
+def get_cbt_attempt_counts(school_id, test_id):
+    if not ensure_cbt_schema():
+        return {'total': 0, 'submitted': 0}
+    with db_connection() as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """SELECT COUNT(*),
+                      COALESCE(SUM(CASE WHEN status = 'submitted' THEN 1 ELSE 0 END), 0)
+               FROM cbt_attempts
+               WHERE school_id = ? AND test_id = ?""",
+            (school_id, test_id),
+        )
+        row = c.fetchone()
+    return {
+        'total': int(row[0] or 0) if row else 0,
+        'submitted': int(row[1] or 0) if row else 0,
+    }
+
+
+def add_cbt_question(
+    school_id,
+    test_id,
+    question_text,
+    question_image_url,
+    option_a,
+    option_b,
+    option_c,
+    option_d,
+    correct_option,
+    question_type='mcq4',
+    correct_text='',
+    accepted_answers='',
+    points=1.0,
+    time_seconds=60,
+    explanation='',
+):
+    if not ensure_cbt_schema():
+        raise ValueError('CBT schema is unavailable.')
+    test = get_cbt_test(school_id, test_id)
+    if not test:
+        raise ValueError('Test not found.')
+    if (test.get('status') or '').strip().lower() == 'published':
+        raise ValueError('Set test to draft before editing questions.')
+    q_text = (question_text or '').strip()
+    if not q_text:
+        raise ValueError('Question text is required.')
+    normalized_image_url = _normalize_cbt_question_image_url(question_image_url)
+    qtype = _normalize_cbt_question_type(question_type)
+    options = {'A': '', 'B': '', 'C': '', 'D': ''}
+    correct = ''
+    normalized_correct_text = ''
+    normalized_accepted_answers = ''
+    if qtype == 'fill_blank':
+        normalized_correct_text = (correct_text or '').strip()
+        if not normalized_correct_text:
+            raise ValueError('Correct fill-in answer is required for Fill in the Gap.')
+        alt_values = []
+        for part in re.split(r'[\n;|]+', (accepted_answers or '').strip()):
+            item = part.strip()
+            if item and item.lower() != normalized_correct_text.lower() and item.lower() not in {v.lower() for v in alt_values}:
+                alt_values.append(item)
+        normalized_accepted_answers = ' | '.join(alt_values)[:2000]
+        options = {'A': '-', 'B': '-', 'C': '-', 'D': '-'}
+        correct = 'A'
+    elif qtype == 'true_false':
+        options = {
+            'A': (option_a or '').strip() or 'True',
+            'B': (option_b or '').strip() or 'False',
+            'C': '-',
+            'D': '-',
+        }
+        correct = _normalize_true_false_choice(correct_option)
+        if not correct:
+            raise ValueError('Correct answer must be True (A) or False (B) for True/False.')
+    else:
+        options = {
+            'A': (option_a or '').strip(),
+            'B': (option_b or '').strip(),
+            'C': (option_c or '').strip(),
+            'D': (option_d or '').strip(),
+        }
+        if not all(options.values()):
+            raise ValueError('All options A-D are required for multiple choice questions.')
+        correct = _normalize_cbt_option(correct_option)
+        if not correct:
+            raise ValueError('Correct option must be A, B, C, or D.')
+    point_val = max(0.25, min(100.0, safe_float(points, 1.0)))
+    time_val = max(5, min(1800, safe_int(time_seconds, 60)))
+    with db_connection(commit=True) as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            "SELECT COALESCE(MAX(question_no), 0) FROM cbt_questions WHERE school_id = ? AND test_id = ?",
+            (school_id, test_id),
+        )
+        row = c.fetchone()
+        next_no = (int(row[0] or 0) if row else 0) + 1
+        db_execute(
+            c,
+            """INSERT INTO cbt_questions
+               (school_id, test_id, question_no, question_type, question_text, question_image_url, option_a, option_b, option_c, option_d,
+                correct_option, correct_text, accepted_answers, points, time_seconds, explanation, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
+            (
+                school_id,
+                test_id,
+                next_no,
+                qtype,
+                q_text[:2500],
+                normalized_image_url,
+                options['A'][:1000],
+                options['B'][:1000],
+                options['C'][:1000],
+                options['D'][:1000],
+                correct,
+                normalized_correct_text[:500],
+                normalized_accepted_answers,
+                point_val,
+                time_val,
+                (explanation or '').strip()[:1500],
+            ),
+        )
+        _cbt_recalculate_totals_with_cursor(c, school_id, test_id)
+
+
+def delete_cbt_question(school_id, test_id, question_no):
+    if not ensure_cbt_schema():
+        return 0
+    test = get_cbt_test(school_id, test_id)
+    if not test:
+        return 0
+    if (test.get('status') or '').strip().lower() == 'published':
+        return 0
+    q_no = safe_int(question_no, 0)
+    if q_no <= 0:
+        return 0
+    with db_connection(commit=True) as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """DELETE FROM cbt_questions
+               WHERE school_id = ? AND test_id = ? AND question_no = ?""",
+            (school_id, test_id, q_no),
+        )
+        deleted = int(c.rowcount or 0)
+        if deleted:
+            db_execute(
+                c,
+                """SELECT id, question_no
+                   FROM cbt_questions
+                   WHERE school_id = ? AND test_id = ?
+                   ORDER BY question_no ASC""",
+                (school_id, test_id),
+            )
+            rows = c.fetchall() or []
+            for idx, row in enumerate(rows, start=1):
+                if safe_int(row['question_no'], 0) != idx:
+                    db_execute(
+                        c,
+                        "UPDATE cbt_questions SET question_no = ? WHERE id = ?",
+                        (idx, row['id']),
+                    )
+            _cbt_recalculate_totals_with_cursor(c, school_id, test_id)
+        return deleted
+
+
+def set_cbt_test_status(school_id, test_id, status):
+    if not ensure_cbt_schema():
+        raise ValueError('CBT schema is unavailable.')
+    new_status = _normalize_cbt_status(status)
+    with db_connection(commit=True) as conn:
+        c = conn.cursor()
+        if new_status == 'published':
+            total_questions, _total_marks = _cbt_recalculate_totals_with_cursor(c, school_id, test_id)
+            if total_questions <= 0:
+                raise ValueError('Add at least one question before publishing this test.')
+            db_execute(
+                c,
+                """SELECT COALESCE(questions_to_answer, 0)
+                   FROM cbt_tests
+                   WHERE school_id = ? AND test_id = ?
+                   LIMIT 1""",
+                (school_id, test_id),
+            )
+            row = c.fetchone()
+            configured_questions = _normalize_cbt_questions_to_answer((row[0] if row else 0))
+            if configured_questions <= 0:
+                configured_questions = total_questions
+            if configured_questions > total_questions:
+                raise ValueError(
+                    f'Questions to answer ({configured_questions}) cannot be greater than '
+                    f'total question pool ({total_questions}).'
+                )
+            db_execute(
+                c,
+                """UPDATE cbt_tests
+                   SET questions_to_answer = ?, updated_at = CURRENT_TIMESTAMP
+                   WHERE school_id = ? AND test_id = ?""",
+                (configured_questions, school_id, test_id),
+            )
+        db_execute(
+            c,
+            """UPDATE cbt_tests
+               SET status = ?, updated_at = CURRENT_TIMESTAMP
+               WHERE school_id = ? AND test_id = ?""",
+            (new_status, school_id, test_id),
+        )
+        return int(c.rowcount or 0)
+
+
+def _ensure_student_cbt_attempt(school_id, test_row, student_id):
+    with db_connection(commit=True) as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """SELECT attempt_id, status, score, total_marks, total_questions, answered_questions,
+                      question_set_json, draft_answers_json, remaining_seconds, last_activity_at,
+                      started_at, submitted_at, auto_submitted, integrity_flagged, integrity_flag_reason
+               FROM cbt_attempts
+               WHERE school_id = ? AND test_id = ? AND student_id = ?
+               LIMIT 1""",
+            (school_id, test_row['test_id'], student_id),
+        )
+        row = c.fetchone()
+        if row:
+            return dict(row)
+        attempt_id = _next_cbt_identifier_with_cursor(c, 'cbt_attempts', 'attempt_id', 'ATT')
+        configured_questions = _normalize_cbt_questions_to_answer(test_row.get('questions_to_answer', 0))
+        expected_questions = configured_questions if configured_questions > 0 else safe_int(test_row.get('total_questions', 0), 0)
+        db_execute(
+            c,
+            """INSERT INTO cbt_attempts
+               (attempt_id, school_id, test_id, student_id, classname, subject, term, academic_year,
+                started_at, status, score, total_marks, total_questions, answered_questions,
+                question_set_json, draft_answers_json, remaining_seconds, last_activity_at, auto_submitted,
+                integrity_flagged, integrity_flag_reason)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 'started', 0, ?, ?, 0, '', '', 0, CURRENT_TIMESTAMP, 0, 0, '')""",
+            (
+                attempt_id,
+                school_id,
+                test_row['test_id'],
+                student_id,
+                (test_row.get('classname') or '').strip(),
+                (test_row.get('subject') or '').strip(),
+                (test_row.get('term') or '').strip(),
+                (test_row.get('academic_year') or '').strip(),
+                safe_float(test_row.get('total_marks', 0), 0.0),
+                expected_questions,
+            ),
+        )
+        db_execute(
+            c,
+            """SELECT attempt_id, status, score, total_marks, total_questions, answered_questions,
+                      question_set_json, draft_answers_json, remaining_seconds, last_activity_at,
+                      started_at, submitted_at, auto_submitted, integrity_flagged, integrity_flag_reason
+               FROM cbt_attempts
+               WHERE school_id = ? AND attempt_id = ?
+               LIMIT 1""",
+            (school_id, attempt_id),
+        )
+        created = c.fetchone()
+    return dict(created) if created else None
+
+
+def get_student_cbt_attempt(school_id, test_id, student_id):
+    if not ensure_cbt_schema():
+        return None
+    with db_connection() as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """SELECT attempt_id, status, score, total_marks, total_questions, answered_questions,
+                      question_set_json, draft_answers_json, remaining_seconds, last_activity_at,
+                      started_at, submitted_at, auto_submitted, integrity_flagged, integrity_flag_reason
+               FROM cbt_attempts
+               WHERE school_id = ? AND test_id = ? AND student_id = ?
+               LIMIT 1""",
+            (school_id, test_id, student_id),
+        )
+        row = c.fetchone()
+    return dict(row) if row else None
+
+
+def list_student_cbt_answers(school_id, attempt_id):
+    if not ensure_cbt_schema():
+        return {}
+    with db_connection() as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """SELECT question_no, selected_option, is_correct, points_awarded
+               FROM cbt_attempt_answers
+               WHERE school_id = ? AND attempt_id = ?""",
+            (school_id, attempt_id),
+        )
+        rows = c.fetchall() or []
+    out = {}
+    for row in rows:
+        out[safe_int(row['question_no'], 0)] = {
+            'selected_option': (row['selected_option'] or '').strip().upper(),
+            'is_correct': bool(safe_int(row['is_correct'], 0)),
+            'points_awarded': safe_float(row['points_awarded'], 0.0),
+        }
+    return out
+
+
+def submit_student_cbt_attempt(school_id, test_row, student_id, answers_map, auto_submitted=False):
+    if not ensure_cbt_schema():
+        raise ValueError('CBT schema is unavailable.')
+    if not test_row:
+        raise ValueError('CBT test not found.')
+    with db_connection(commit=True) as conn:
+        c = conn.cursor()
+        attempt = _ensure_student_cbt_attempt(school_id, test_row, student_id)
+        if not attempt:
+            raise ValueError('Could not start CBT attempt.')
+        integrity_events = _parse_cbt_integrity_events(
+            answers_map.get('integrity_events_json', answers_map.get('_integrity_events_json', ''))
+        )
+        if (attempt.get('status') or '').strip().lower() == 'submitted':
+            if integrity_events:
+                _log_cbt_attempt_events_with_cursor(
+                    c,
+                    school_id,
+                    attempt.get('attempt_id', ''),
+                    test_row.get('test_id', ''),
+                    student_id,
+                    integrity_events,
+                )
+                _refresh_cbt_attempt_integrity_flag_with_cursor(
+                    c,
+                    school_id,
+                    attempt.get('attempt_id', ''),
+                    test_row,
+                )
+            return attempt
+        db_execute(
+            c,
+            """SELECT question_no, question_type, correct_option, correct_text, accepted_answers, points
+               FROM cbt_questions
+               WHERE school_id = ? AND test_id = ?
+               ORDER BY question_no ASC""",
+            (school_id, test_row['test_id']),
+        )
+        qrows = [dict(row) for row in (c.fetchall() or [])]
+        if not qrows:
+            raise ValueError('This CBT has no questions yet.')
+        _selected_qnos, selected_qrows = _ensure_attempt_question_set_with_cursor(
+            c,
+            school_id,
+            test_row,
+            attempt,
+            qrows=qrows,
+        )
+        if not selected_qrows:
+            raise ValueError('This CBT has no question set configured for this attempt.')
+        draft_answers_map = _load_cbt_draft_answers(attempt.get('draft_answers_json', ''))
+        db_execute(
+            c,
+            "DELETE FROM cbt_attempt_answers WHERE school_id = ? AND attempt_id = ?",
+            (school_id, attempt['attempt_id']),
+        )
+        score = 0.0
+        answered = 0
+        total_questions = 0
+        total_marks = 0.0
+        for q in selected_qrows:
+            q_no = safe_int(q['question_no'], 0)
+            if q_no <= 0:
+                continue
+            total_questions += 1
+            point_val = max(0.0, safe_float(q['points'], 0.0))
+            total_marks += point_val
+            qtype = _normalize_cbt_question_type(q.get('question_type', 'mcq4'))
+            raw_selected = answers_map.get(
+                f"q_{q_no}",
+                answers_map.get(str(q_no), answers_map.get(q_no, draft_answers_map.get(q_no, ''))),
+            )
+            selected = ''
+            is_correct = 0
+            if qtype == 'fill_blank':
+                selected = (raw_selected or '').strip()[:500]
+                if selected:
+                    accepted_candidates = _parse_fill_blank_candidates(
+                        q.get('correct_text', ''),
+                        q.get('accepted_answers', ''),
+                    )
+                    got = _normalize_fill_blank_answer(selected)
+                    is_correct = 1 if got and got in set(accepted_candidates) else 0
+            elif qtype == 'true_false':
+                selected = _normalize_true_false_choice(raw_selected)
+                expected_choice = _normalize_true_false_choice(q.get('correct_option', ''))
+                is_correct = 1 if selected and expected_choice and selected == expected_choice else 0
+            else:
+                selected = _normalize_cbt_option(raw_selected)
+                is_correct = 1 if selected and selected == _normalize_cbt_option(q.get('correct_option', '')) else 0
+            if selected:
+                answered += 1
+            points_awarded = point_val if is_correct else 0.0
+            score += points_awarded
+            db_execute(
+                c,
+                """INSERT INTO cbt_attempt_answers
+                   (school_id, attempt_id, test_id, question_no, selected_option, is_correct, points_awarded, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                   ON CONFLICT(school_id, attempt_id, question_no)
+                   DO UPDATE SET
+                     selected_option = EXCLUDED.selected_option,
+                     is_correct = EXCLUDED.is_correct,
+                     points_awarded = EXCLUDED.points_awarded""",
+                (
+                    school_id,
+                    attempt['attempt_id'],
+                    test_row['test_id'],
+                    q_no,
+                    selected,
+                    is_correct,
+                    points_awarded,
+                ),
+            )
+        db_execute(
+            c,
+            """UPDATE cbt_attempts
+               SET status = 'submitted',
+                   submitted_at = CURRENT_TIMESTAMP,
+                   score = ?,
+                   total_marks = ?,
+                   total_questions = ?,
+                   answered_questions = ?,
+                   draft_answers_json = '',
+                   remaining_seconds = 0,
+                   last_activity_at = CURRENT_TIMESTAMP,
+                   auto_submitted = ?,
+                   classname = ?,
+                   subject = ?,
+                   term = ?,
+                   academic_year = ?
+               WHERE school_id = ? AND attempt_id = ?""",
+            (
+                score,
+                total_marks,
+                total_questions,
+                answered,
+                1 if auto_submitted else 0,
+                (test_row.get('classname') or '').strip(),
+                (test_row.get('subject') or '').strip(),
+                (test_row.get('term') or '').strip(),
+                (test_row.get('academic_year') or '').strip(),
+                school_id,
+                attempt['attempt_id'],
+            ),
+        )
+        if integrity_events:
+            _log_cbt_attempt_events_with_cursor(
+                c,
+                school_id,
+                attempt.get('attempt_id', ''),
+                test_row.get('test_id', ''),
+                student_id,
+                integrity_events,
+            )
+        _refresh_cbt_attempt_integrity_flag_with_cursor(
+            c,
+            school_id,
+            attempt.get('attempt_id', ''),
+            test_row,
+        )
+        db_execute(
+            c,
+            """SELECT attempt_id, status, score, total_marks, total_questions, answered_questions,
+                      question_set_json, draft_answers_json, remaining_seconds, last_activity_at,
+                      started_at, submitted_at, auto_submitted, integrity_flagged, integrity_flag_reason
+               FROM cbt_attempts
+               WHERE school_id = ? AND attempt_id = ? LIMIT 1""",
+            (school_id, attempt['attempt_id']),
+        )
+        done = c.fetchone()
+    done_row = dict(done) if done else None
+    if done_row:
+        synced, sync_msg = _apply_cbt_attempt_to_score_sheet(
+            school_id=school_id,
+            test_row=test_row,
+            student_id=student_id,
+            attempt_row=done_row,
+        )
+        if not synced:
+            logging.warning(
+                "CBT score sync skipped/failed school_id=%s test_id=%s student_id=%s reason=%s",
+                school_id,
+                (test_row or {}).get('test_id', ''),
+                student_id,
+                sync_msg,
+            )
+    return done_row
+
+
+def _cbt_test_owned_by_teacher(test_row, teacher_id):
+    row = test_row or {}
+    owner = (row.get('created_by_teacher_id') or '').strip().lower()
+    legacy_owner = (row.get('created_by') or '').strip().lower()
+    tid = (teacher_id or '').strip().lower()
+    if not tid:
+        return False
+    return owner == tid or (not owner and legacy_owner == tid)
+
+
+def _cbt_teacher_class_subject_options(school_id, teacher_id, term, academic_year):
+    rows = get_teacher_subject_assignments(
+        school_id,
+        teacher_id=teacher_id,
+        term=term,
+        academic_year=academic_year,
+    )
+    class_subject_options = {}
+    for row in rows:
+        classname = canonicalize_classname(row.get('classname', ''))
+        subject = normalize_subject_name(row.get('subject', ''))
+        if not classname or not subject:
+            continue
+        class_subject_options.setdefault(classname, [])
+        if subject.lower() not in {s.lower() for s in class_subject_options[classname]}:
+            class_subject_options[classname].append(subject)
+    class_options = sorted(class_subject_options.keys(), key=lambda x: str(x).lower())
+    for classname in class_options:
+        class_subject_options[classname] = sorted(
+            class_subject_options.get(classname, []),
+            key=lambda x: str(x).lower(),
+        )
+    return class_options, class_subject_options
+
+
+def _cbt_scale_score(raw_score, raw_total, score_over):
+    total = safe_float(raw_total, 0.0)
+    if total <= 0:
+        return 0.0
+    over = max(1.0, min(100.0, safe_float(score_over, 20.0)))
+    scaled = (safe_float(raw_score, 0.0) / total) * over
+    if not math.isfinite(scaled):
+        scaled = 0.0
+    return max(0.0, min(over, round(scaled, 2)))
+
+
+def _split_cbt_test_score_pair(total_score):
+    """
+    Split one CBT test score into two parts.
+    - If whole-number score is divisible by 2: equal split.
+    - If whole-number score is not divisible by 2: unequal split (e.g. 15 -> 7 and 8).
+    - For decimal scores: split to 2dp while preserving sum.
+    """
+    total = max(0.0, round(safe_float(total_score, 0.0), 2))
+    if abs(total - round(total)) <= 1e-9:
+        whole = int(round(total))
+        if whole % 2 == 0:
+            half = round(whole / 2.0, 2)
+            return half, half
+        lower = whole // 2
+        upper = whole - lower
+        return float(lower), float(upper)
+    first = round(total / 2.0, 2)
+    second = round(total - first, 2)
+    return first, second
+
+
+def _cbt_target_test_slots(primary_slot, max_tests):
+    """
+    Prefer [primary, next] so Test 1 overflows into Test 2.
+    If primary is last slot, use previous slot as secondary.
+    """
+    slot = max(1, min(int(primary_slot or 1), max(1, int(max_tests or 1))))
+    max_slots = max(1, int(max_tests or 1))
+    if max_slots <= 1:
+        return [slot]
+    if slot < max_slots:
+        return [slot, slot + 1]
+    return [slot, max(1, slot - 1)]
+
+
+def _apply_cbt_attempt_to_score_sheet(school_id, test_row, student_id, attempt_row):
+    """Map submitted CBT score into student score sheet using test/exam target."""
+    school = get_school(school_id) or {}
+    student = load_student(school_id, student_id)
+    if not student:
+        return False, 'student_not_found'
+
+    test_term = (test_row.get('term') or '').strip()
+    test_year = (test_row.get('academic_year') or '').strip()
+    current_term = get_current_term(school)
+    current_year = (school.get('academic_year') or '').strip()
+    if test_term and test_term != current_term:
+        return False, f'term_mismatch:{test_term}:{current_term}'
+    if test_year and current_year and test_year != current_year:
+        return False, f'year_mismatch:{test_year}:{current_year}'
+
+    offered_subjects = normalize_subjects_list(student.get('subjects', []))
+    offered_subject_map = {normalize_subject_name(s).lower(): s for s in offered_subjects}
+    subject_name = normalize_subject_name(test_row.get('subject', ''))
+    subject_key = offered_subject_map.get(subject_name.lower(), '')
+    if not subject_key:
+        return False, 'subject_not_offered'
+
+    scores = student.get('scores', {}) if isinstance(student.get('scores', {}), dict) else {}
+    subject_scores = scores.get(subject_key, {}) if isinstance(scores.get(subject_key, {}), dict) else {}
+    grade_cfg = get_grade_config(school_id)
+    assessment_type = _normalize_cbt_assessment_type(test_row.get('assessment_type', 'test'))
+    score_over = max(1.0, min(100.0, safe_float(test_row.get('score_over', 20), 20.0)))
+    scaled_score = _cbt_scale_score(attempt_row.get('score', 0), attempt_row.get('total_marks', 0), score_over)
+
+    if assessment_type == 'test':
+        if not school.get('test_enabled', 1):
+            return False, 'test_component_disabled'
+        max_tests = max(1, min(safe_int(school.get('max_tests', 3), 3), 10))
+        test_slot = max(1, min(max_tests, safe_int(test_row.get('test_slot', 1), 1)))
+        test_total_max = max(0.0, safe_float(school.get('test_score_max', 30), 30.0))
+        per_test_cap = (test_total_max / max_tests) if max_tests > 0 else test_total_max
+        target_slots = _cbt_target_test_slots(test_slot, max_tests)
+
+        # Default: write only to selected slot.
+        assigned_by_slot = {test_slot: max(0.0, min(per_test_cap, scaled_score))}
+
+        # Requested behavior: when one-slot cap is exceeded, split into two test slots
+        # instead of truncating to slot cap.
+        if per_test_cap > 0 and scaled_score > per_test_cap and len(target_slots) >= 2:
+            first_slot, second_slot = target_slots[0], target_slots[1]
+            if scaled_score <= (per_test_cap * 2.0) + 1e-9:
+                part_a, part_b = _split_cbt_test_score_pair(scaled_score)
+                # Safety clamp (should already fit because scaled_score <= 2*cap).
+                part_a = max(0.0, min(per_test_cap, round(part_a, 2)))
+                part_b = max(0.0, min(per_test_cap, round(part_b, 2)))
+                # Preserve total as much as possible after clamp.
+                target_total = round(max(0.0, scaled_score), 2)
+                current_total = round(part_a + part_b, 2)
+                if current_total < target_total:
+                    gap = min(round(target_total - current_total, 2), round(per_test_cap - part_b, 2))
+                    if gap > 0:
+                        part_b = round(part_b + gap, 2)
+                assigned_by_slot = {
+                    first_slot: part_a,
+                    second_slot: part_b,
+                }
+            else:
+                # For larger scores, spread sequentially across available slots (no truncation by one slot).
+                ordered_slots = [test_slot] + [i for i in range(1, max_tests + 1) if i != test_slot]
+                remaining = round(max(0.0, scaled_score), 2)
+                assigned_by_slot = {}
+                for slot_no in ordered_slots:
+                    if remaining <= 0:
+                        break
+                    take = round(min(per_test_cap, remaining), 2)
+                    assigned_by_slot[slot_no] = take
+                    remaining = round(remaining - take, 2)
+
+        for slot_no, value in assigned_by_slot.items():
+            slot_key = f'test_{int(slot_no)}'
+            subject_scores[slot_key] = max(0.0, min(per_test_cap, safe_float(value, 0.0)))
+
+        running_total = 0.0
+        for i in range(1, max_tests + 1):
+            key = f'test_{i}'
+            val = max(0.0, min(per_test_cap, safe_float(subject_scores.get(key, 0), 0.0)))
+            if not math.isfinite(val) or val < 0:
+                val = 0.0
+            subject_scores[key] = val
+            running_total += val
+        if running_total > test_total_max:
+            overflow = running_total - test_total_max
+            # Reduce overflow from the slots we just assigned first, then fallback to selected slot.
+            for slot_no in reversed(list(assigned_by_slot.keys())):
+                key = f'test_{int(slot_no)}'
+                cur_val = max(0.0, safe_float(subject_scores.get(key, 0), 0.0))
+                if cur_val <= 0:
+                    continue
+                cut = min(cur_val, overflow)
+                subject_scores[key] = round(max(0.0, cur_val - cut), 2)
+                overflow = round(max(0.0, overflow - cut), 2)
+                if overflow <= 0:
+                    break
+            if overflow > 0:
+                slot_key = f'test_{test_slot}'
+                subject_scores[slot_key] = round(max(0.0, safe_float(subject_scores.get(slot_key, 0), 0.0) - overflow), 2)
+            running_total = 0.0
+            for i in range(1, max_tests + 1):
+                running_total += safe_float(subject_scores.get(f'test_{i}', 0), 0.0)
+        subject_scores['total_test'] = max(0.0, min(test_total_max, running_total))
+    else:
+        if not school.get('exam_enabled', 1):
+            return False, 'exam_component_disabled'
+        exam_config = get_assessment_config_for_class(school_id, student.get('classname', ''))
+        exam_mode = (exam_config.get('exam_mode') or 'separate').strip().lower()
+        exam_max = max(0.0, safe_float(exam_config.get('exam_score_max', 70), 70.0))
+        exam_score_value = max(0.0, min(exam_max, scaled_score))
+        if exam_mode == 'combined':
+            subject_scores['objective'] = 0.0
+            subject_scores['theory'] = 0.0
+            subject_scores['exam_score'] = exam_score_value
+            subject_scores['total_exam'] = exam_score_value
+            subject_scores['exam_mode'] = 'combined'
+        else:
+            objective_max = max(0.0, safe_float(exam_config.get('objective_max', 30), 30.0))
+            theory_max = max(0.0, safe_float(exam_config.get('theory_max', 40), 40.0))
+            objective = min(objective_max, exam_score_value)
+            theory = min(theory_max, max(0.0, exam_score_value - objective))
+            subject_scores['objective'] = objective
+            subject_scores['theory'] = theory
+            subject_scores['exam_score'] = exam_score_value
+            subject_scores['total_exam'] = objective + theory
+            subject_scores['exam_mode'] = 'separate'
+
+    subject_scores['overall_mark'] = subject_overall_mark(subject_scores)
+    if subject_scores['overall_mark'] > 100:
+        subject_scores['overall_mark'] = 100.0
+    subject_scores['total_score'] = subject_scores['overall_mark']
+    subject_scores['grade'] = grade_from_score(subject_scores['overall_mark'], grade_cfg)
+    if not (subject_scores.get('subject_teacher_comment') or '').strip():
+        title = (test_row.get('title') or '').strip()
+        kind = assessment_type.title()
+        subject_scores['subject_teacher_comment'] = f'CBT {kind} synced: {title}'[:300]
+    subject_scores['entry_confirmed'] = 1
+    subject_scores['entry_confirmed_v2'] = 1
+
+    scores[subject_key] = subject_scores
+    student['scores'] = scores
+    if test_term:
+        student['term'] = test_term
+    save_student(school_id, student_id, student)
+    return True, 'ok'
+
+
+def mark_cbt_test_retrieved(school_id, test_id, retrieved_by=''):
+    if not ensure_cbt_schema():
+        return 0
+    with db_connection(commit=True) as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """UPDATE cbt_tests
+               SET status = 'closed',
+                   retrieved_at = CURRENT_TIMESTAMP,
+                   retrieved_by = ?,
+                   updated_at = CURRENT_TIMESTAMP
+               WHERE school_id = ? AND test_id = ?""",
+            ((retrieved_by or '').strip()[:120], school_id, test_id),
+        )
+        return int(c.rowcount or 0)
 
 def save_class_subject_config(
     school_id,
@@ -8688,6 +11978,195 @@ def get_school_admin_invite(token):
 def _mark_school_admin_invite_used_with_cursor(c, token):
     db_execute(c, 'UPDATE school_admin_invites SET used_at = ? WHERE token = ?', (datetime.now(), (token or '').strip()))
 
+PRIVACY_REQUEST_POLICY = {
+    'export_data': {
+        'label': 'Data Export',
+        'allowed_action': 'manual_export',
+        'required_fields': ('target_scope',),
+    },
+    'delete_data': {
+        'label': 'Data Deletion',
+        'allowed_action': 'manual_delete',
+        'required_fields': ('target_scope',),
+    },
+    'parent_phone_change': {
+        'label': 'Parent Phone Change',
+        'allowed_action': 'apply_parent_phone',
+        'required_fields': ('student_id', 'parent_slot', 'new_parent_phone'),
+    },
+    'student_email_change': {
+        'label': 'Student Email Change',
+        'allowed_action': 'apply_student_email',
+        'required_fields': ('student_id', 'new_student_email'),
+    },
+    'student_name_change': {
+        'label': 'Student Name Change',
+        'allowed_action': 'apply_student_name',
+        'required_fields': ('student_id', 'new_student_name'),
+    },
+    'student_dob_change': {
+        'label': 'Student Date of Birth Change',
+        'allowed_action': 'apply_student_dob',
+        'required_fields': ('student_id', 'new_student_dob'),
+    },
+    'teacher_contact_change': {
+        'label': 'Teacher Contact Change',
+        'allowed_action': 'apply_teacher_contact',
+        'required_fields': ('teacher_id',),
+    },
+}
+
+PRIVACY_STATUS_TRANSITIONS = {
+    'pending': {'approved', 'rejected'},
+    'approved': {'resolved', 'rejected'},
+    'resolved': set(),
+    'rejected': set(),
+}
+
+def _normalize_privacy_request_type(request_type):
+    raw = (request_type or '').strip().lower()
+    alias_map = {
+        'export': 'export_data',
+        'delete': 'delete_data',
+    }
+    raw = alias_map.get(raw, raw)
+    return raw if raw in PRIVACY_REQUEST_POLICY else ''
+
+def _privacy_request_allowed_action(request_type):
+    meta = PRIVACY_REQUEST_POLICY.get((request_type or '').strip().lower(), {})
+    return (meta.get('allowed_action') or '').strip()
+
+def get_privacy_request_type_options():
+    return [{'value': key, 'label': value.get('label', key)} for key, value in PRIVACY_REQUEST_POLICY.items()]
+
+def _build_privacy_request_payload_from_form(form):
+    return {
+        'target_scope': (form.get('target_scope') or '').strip(),
+        'student_id': (form.get('student_id') or '').strip(),
+        'teacher_id': (form.get('teacher_id') or '').strip().lower(),
+        'parent_slot': (form.get('parent_slot') or '').strip(),
+        'new_parent_phone': normalize_parent_phone(form.get('new_parent_phone', '')),
+        'new_student_email': (form.get('new_student_email') or '').strip().lower(),
+        'new_student_name': normalize_person_name(form.get('new_student_name', '')),
+        'new_student_dob': (form.get('new_student_dob') or '').strip(),
+        'new_teacher_phone': (form.get('new_teacher_phone') or '').strip(),
+        'new_teacher_email': (form.get('new_teacher_email') or '').strip().lower(),
+    }
+
+def _validate_privacy_request_payload(request_type, payload):
+    kind = _normalize_privacy_request_type(request_type)
+    if not kind:
+        raise ValueError('Invalid request type.')
+    meta = PRIVACY_REQUEST_POLICY.get(kind, {})
+    clean = dict(payload or {})
+    for field in meta.get('required_fields', ()):
+        if not str(clean.get(field) or '').strip():
+            raise ValueError(f'{field.replace("_", " ").title()} is required.')
+
+    if kind in {'export_data', 'delete_data'}:
+        scope = (clean.get('target_scope') or '').strip().lower()
+        if scope not in {'all_school', 'student_only', 'teacher_only', 'parent_only'}:
+            raise ValueError('Target scope must be one of: all_school, student_only, teacher_only, parent_only.')
+        clean['target_scope'] = scope
+
+    if kind == 'parent_phone_change':
+        if clean.get('parent_slot') not in {'1', '2'}:
+            raise ValueError('Parent slot must be 1 or 2.')
+        if not is_valid_parent_phone(clean.get('new_parent_phone', '')):
+            raise ValueError('Enter a valid parent phone number.')
+
+    if kind == 'student_email_change':
+        if not is_valid_email(clean.get('new_student_email', '')):
+            raise ValueError('Enter a valid student email.')
+
+    if kind == 'student_name_change':
+        if not normalize_person_name(clean.get('new_student_name', '')):
+            raise ValueError('Enter a valid student name.')
+        clean['new_student_name'] = normalize_person_name(clean.get('new_student_name', ''))
+
+    if kind == 'student_dob_change':
+        parsed = _parse_iso_date(clean.get('new_student_dob', ''))
+        if not parsed:
+            raise ValueError('Student date of birth must be in YYYY-MM-DD format.')
+        if parsed > date.today():
+            raise ValueError('Student date of birth cannot be in the future.')
+        clean['new_student_dob'] = parsed.strftime('%Y-%m-%d')
+
+    if kind == 'teacher_contact_change':
+        new_phone = (clean.get('new_teacher_phone') or '').strip()
+        new_email = (clean.get('new_teacher_email') or '').strip().lower()
+        if not new_phone and not new_email:
+            raise ValueError('Provide new teacher phone or new teacher email/login.')
+        if new_phone and not is_valid_parent_phone(new_phone):
+            raise ValueError('Enter a valid teacher phone number.')
+        if new_email and not is_valid_email(new_email):
+            raise ValueError('Enter a valid teacher email/login.')
+        clean['new_teacher_email'] = new_email
+        clean['new_teacher_phone'] = new_phone
+
+    return clean
+
+def _json_load_object(value):
+    raw = (value or '').strip() if isinstance(value, str) else value
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw) if isinstance(raw, str) else raw
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+def get_privacy_data_request(request_id):
+    rid = (request_id or '').strip()
+    if not rid or not ensure_privacy_request_schema():
+        return None
+    with db_connection() as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """SELECT request_id, role, user_id, school_id, request_type, subject_line, details, status,
+                      resolution_note, resolved_by, resolved_at, source_page, source_ip, created_at, updated_at,
+                      request_payload_json, allowed_action, approved_by, approved_at, applied_by, applied_at,
+                      school_review_status, school_review_note, school_reviewed_by, school_reviewed_at,
+                      before_snapshot_json, after_snapshot_json
+               FROM privacy_data_requests
+               WHERE request_id = ?
+               LIMIT 1""",
+            (rid,),
+        )
+        row = c.fetchone()
+    if not row:
+        return None
+    return {
+        'request_id': (row[0] or '').strip(),
+        'role': (row[1] or '').strip(),
+        'user_id': (row[2] or '').strip(),
+        'school_id': (row[3] or '').strip(),
+        'request_type': (row[4] or '').strip(),
+        'subject_line': (row[5] or '').strip(),
+        'details': (row[6] or '').strip(),
+        'status': (row[7] or '').strip(),
+        'resolution_note': (row[8] or '').strip(),
+        'resolved_by': (row[9] or '').strip(),
+        'resolved_at': row[10],
+        'source_page': (row[11] or '').strip(),
+        'source_ip': (row[12] or '').strip(),
+        'created_at': row[13],
+        'updated_at': row[14],
+        'request_payload': _json_load_object(row[15] or '{}'),
+        'allowed_action': (row[16] or '').strip(),
+        'approved_by': (row[17] or '').strip(),
+        'approved_at': row[18],
+        'applied_by': (row[19] or '').strip(),
+        'applied_at': row[20],
+        'school_review_status': (row[21] or '').strip().lower() or 'pending',
+        'school_review_note': (row[22] or '').strip(),
+        'school_reviewed_by': (row[23] or '').strip(),
+        'school_reviewed_at': row[24],
+        'before_snapshot': _json_load_object(row[25] or '{}'),
+        'after_snapshot': _json_load_object(row[26] or '{}'),
+    }
+
 
 def ensure_privacy_request_schema():
     """Ensure privacy/compliance request table exists."""
@@ -8711,9 +12190,69 @@ def ensure_privacy_request_schema():
                        resolved_at TIMESTAMP,
                        source_page TEXT DEFAULT '',
                        source_ip TEXT DEFAULT '',
+                       request_payload_json TEXT DEFAULT '{}',
+                       allowed_action TEXT DEFAULT '',
+                       approved_by TEXT DEFAULT '',
+                       approved_at TIMESTAMP,
+                       applied_by TEXT DEFAULT '',
+                       applied_at TIMESTAMP,
+                       school_review_status TEXT DEFAULT 'pending',
+                       school_review_note TEXT DEFAULT '',
+                       school_reviewed_by TEXT DEFAULT '',
+                       school_reviewed_at TIMESTAMP,
+                       before_snapshot_json TEXT DEFAULT '{}',
+                       after_snapshot_json TEXT DEFAULT '{}',
                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                    )""",
+            )
+            db_execute(c, "ALTER TABLE privacy_data_requests ADD COLUMN IF NOT EXISTS request_payload_json TEXT DEFAULT '{}'")
+            db_execute(c, "ALTER TABLE privacy_data_requests ADD COLUMN IF NOT EXISTS allowed_action TEXT DEFAULT ''")
+            db_execute(c, "ALTER TABLE privacy_data_requests ADD COLUMN IF NOT EXISTS approved_by TEXT DEFAULT ''")
+            db_execute(c, "ALTER TABLE privacy_data_requests ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP")
+            db_execute(c, "ALTER TABLE privacy_data_requests ADD COLUMN IF NOT EXISTS applied_by TEXT DEFAULT ''")
+            db_execute(c, "ALTER TABLE privacy_data_requests ADD COLUMN IF NOT EXISTS applied_at TIMESTAMP")
+            db_execute(c, "ALTER TABLE privacy_data_requests ADD COLUMN IF NOT EXISTS school_review_status TEXT DEFAULT 'pending'")
+            db_execute(c, "ALTER TABLE privacy_data_requests ADD COLUMN IF NOT EXISTS school_review_note TEXT DEFAULT ''")
+            db_execute(c, "ALTER TABLE privacy_data_requests ADD COLUMN IF NOT EXISTS school_reviewed_by TEXT DEFAULT ''")
+            db_execute(c, "ALTER TABLE privacy_data_requests ADD COLUMN IF NOT EXISTS school_reviewed_at TIMESTAMP")
+            db_execute(c, "ALTER TABLE privacy_data_requests ADD COLUMN IF NOT EXISTS before_snapshot_json TEXT DEFAULT '{}'")
+            db_execute(c, "ALTER TABLE privacy_data_requests ADD COLUMN IF NOT EXISTS after_snapshot_json TEXT DEFAULT '{}'")
+            db_execute(
+                c,
+                """UPDATE privacy_data_requests
+                   SET request_type = CASE
+                        WHEN LOWER(COALESCE(request_type, '')) = 'export' THEN 'export_data'
+                        WHEN LOWER(COALESCE(request_type, '')) = 'delete' THEN 'delete_data'
+                        ELSE request_type
+                   END""",
+            )
+            db_execute(c, "UPDATE privacy_data_requests SET request_payload_json = '{}' WHERE COALESCE(request_payload_json, '') = ''")
+            db_execute(c, "UPDATE privacy_data_requests SET school_review_status = 'pending' WHERE COALESCE(school_review_status, '') = ''")
+            db_execute(
+                c,
+                """UPDATE privacy_data_requests
+                   SET school_review_status = CASE
+                        WHEN LOWER(COALESCE(status, '')) IN ('approved', 'resolved') THEN 'approved'
+                        WHEN LOWER(COALESCE(status, '')) = 'rejected' THEN 'rejected'
+                        ELSE COALESCE(school_review_status, 'pending')
+                   END
+                   WHERE COALESCE(school_review_status, '') IN ('', 'pending')""",
+            )
+            db_execute(
+                c,
+                """UPDATE privacy_data_requests
+                   SET allowed_action = CASE
+                        WHEN LOWER(COALESCE(request_type, '')) = 'export_data' THEN 'manual_export'
+                        WHEN LOWER(COALESCE(request_type, '')) = 'delete_data' THEN 'manual_delete'
+                        WHEN LOWER(COALESCE(request_type, '')) = 'parent_phone_change' THEN 'apply_parent_phone'
+                        WHEN LOWER(COALESCE(request_type, '')) = 'student_email_change' THEN 'apply_student_email'
+                        WHEN LOWER(COALESCE(request_type, '')) = 'student_name_change' THEN 'apply_student_name'
+                        WHEN LOWER(COALESCE(request_type, '')) = 'student_dob_change' THEN 'apply_student_dob'
+                        WHEN LOWER(COALESCE(request_type, '')) = 'teacher_contact_change' THEN 'apply_teacher_contact'
+                        ELSE COALESCE(allowed_action, '')
+                   END
+                   WHERE COALESCE(allowed_action, '') = ''""",
             )
             db_execute(
                 c,
@@ -8742,12 +12281,29 @@ def _next_privacy_request_id_with_cursor(c):
 
 
 def create_privacy_data_request(role, user_id, school_id, request_type, subject_line='', details='', source_page='', source_ip=''):
-    """Create one privacy request (export/delete/correction)."""
+    """Backward-compatible create helper; prefer create_controlled_privacy_data_request."""
+    kind = _normalize_privacy_request_type(request_type)
+    fallback_payload = {}
+    if kind in {'export_data', 'delete_data'}:
+        fallback_payload['target_scope'] = 'all_school'
+    return create_controlled_privacy_data_request(
+        role=role,
+        user_id=user_id,
+        school_id=school_id,
+        request_type=kind,
+        subject_line=subject_line,
+        details=details,
+        source_page=source_page,
+        source_ip=source_ip,
+        payload=fallback_payload,
+    )
+
+def create_controlled_privacy_data_request(role, user_id, school_id, request_type, subject_line='', details='', source_page='', source_ip='', payload=None):
     if not ensure_privacy_request_schema():
         raise ValueError('Privacy request service is unavailable.')
-    kind = (request_type or '').strip().lower()
-    if kind not in {'export', 'delete', 'correction'}:
-        raise ValueError('Request type must be export, delete, or correction.')
+    kind = _normalize_privacy_request_type(request_type)
+    if not kind:
+        raise ValueError('Request type is not supported.')
     role_name = (role or '').strip().lower()[:40]
     uid = (user_id or '').strip().lower()[:120]
     sid = (school_id or '').strip()[:40]
@@ -8755,6 +12311,12 @@ def create_privacy_data_request(role, user_id, school_id, request_type, subject_
     body = (details or '').strip()
     if not body:
         raise ValueError('Please provide request details.')
+    validated_payload = _validate_privacy_request_payload(kind, payload or {})
+    allowed_action = _privacy_request_allowed_action(kind)
+    school_review_status = 'approved' if role_name == 'super_admin' else 'pending'
+    school_review_note = 'Auto-approved (submitted by super admin).' if school_review_status == 'approved' else ''
+    school_reviewed_by = uid if school_review_status == 'approved' else ''
+    school_reviewed_at = datetime.now() if school_review_status == 'approved' else None
     with db_connection(commit=True) as conn:
         c = conn.cursor()
         req_id = _next_privacy_request_id_with_cursor(c)
@@ -8763,8 +12325,10 @@ def create_privacy_data_request(role, user_id, school_id, request_type, subject_
             c,
             """INSERT INTO privacy_data_requests
                (request_id, role, user_id, school_id, request_type, subject_line, details,
-                status, source_page, source_ip, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)""",
+                status, source_page, source_ip, request_payload_json, allowed_action,
+                school_review_status, school_review_note, school_reviewed_by, school_reviewed_at,
+                created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 req_id,
                 role_name,
@@ -8775,6 +12339,12 @@ def create_privacy_data_request(role, user_id, school_id, request_type, subject_
                 body[:4000],
                 (source_page or '').strip()[:240],
                 (source_ip or '').strip()[:80],
+                json.dumps(validated_payload, ensure_ascii=True),
+                allowed_action,
+                school_review_status,
+                school_review_note[:2000],
+                school_reviewed_by[:120],
+                school_reviewed_at,
                 now,
                 now,
             ),
@@ -8796,7 +12366,7 @@ def list_privacy_data_requests(status_filter='', text_filter='', page=1, per_pag
         per_page = 50
     offset = (page - 1) * per_page
     status_value = (status_filter or '').strip().lower()
-    if status_value not in {'pending', 'resolved', 'rejected', ''}:
+    if status_value not in {'pending', 'approved', 'resolved', 'rejected', ''}:
         status_value = ''
     q = (text_filter or '').strip().lower()
     where_parts = []
@@ -8814,7 +12384,10 @@ def list_privacy_data_requests(status_filter='', text_filter='', page=1, per_pag
     where_sql = f"WHERE {' AND '.join(where_parts)}" if where_parts else ''
     base_select = (
         "SELECT request_id, role, user_id, school_id, request_type, subject_line, details, status, "
-        "resolution_note, resolved_by, resolved_at, source_page, source_ip, created_at, updated_at "
+        "resolution_note, resolved_by, resolved_at, source_page, source_ip, created_at, updated_at, "
+        "request_payload_json, allowed_action, approved_by, approved_at, applied_by, applied_at, "
+        "school_review_status, school_review_note, school_reviewed_by, school_reviewed_at, "
+        "before_snapshot_json, after_snapshot_json "
         f"FROM privacy_data_requests {where_sql} "
         "ORDER BY created_at DESC LIMIT ? OFFSET ?"
     )
@@ -8845,34 +12418,295 @@ def list_privacy_data_requests(status_filter='', text_filter='', page=1, per_pag
                 'source_ip': (row[12] or '').strip(),
                 'created_at': format_timestamp(row[13]),
                 'updated_at': format_timestamp(row[14]),
+                'request_payload': _json_load_object(row[15] or '{}'),
+                'allowed_action': (row[16] or '').strip(),
+                'approved_by': (row[17] or '').strip(),
+                'approved_at': format_timestamp(row[18]),
+                'applied_by': (row[19] or '').strip(),
+                'applied_at': format_timestamp(row[20]),
+                'school_review_status': (row[21] or '').strip().lower() or 'pending',
+                'school_review_note': (row[22] or '').strip(),
+                'school_reviewed_by': (row[23] or '').strip(),
+                'school_reviewed_at': format_timestamp(row[24]),
+                'before_snapshot': _json_load_object(row[25] or '{}'),
+                'after_snapshot': _json_load_object(row[26] or '{}'),
             }
         )
     if include_total:
         return payload, total_rows
     return payload
 
+def list_privacy_data_requests_for_school(school_id, queue_filter='pending_school', text_filter='', page=1, per_page=50, include_total=False):
+    if not ensure_privacy_request_schema():
+        return ([], 0) if include_total else []
+    sid = (school_id or '').strip()
+    if not sid:
+        return ([], 0) if include_total else []
+    try:
+        page = max(1, int(page))
+    except Exception:
+        page = 1
+    try:
+        per_page = max(1, min(200, int(per_page)))
+    except Exception:
+        per_page = 50
+    offset = (page - 1) * per_page
+    q_filter = (queue_filter or '').strip().lower()
+    if q_filter not in {'pending_school', 'pending_super', 'approved', 'resolved', 'rejected', 'all'}:
+        q_filter = 'pending_school'
+    q = (text_filter or '').strip().lower()
+    where_parts = ['school_id = ?']
+    params = [sid]
+    if q_filter == 'pending_school':
+        where_parts.append("status = 'pending'")
+        where_parts.append("COALESCE(school_review_status, 'pending') = 'pending'")
+    elif q_filter == 'pending_super':
+        where_parts.append("status = 'pending'")
+        where_parts.append("COALESCE(school_review_status, 'pending') = 'approved'")
+    elif q_filter == 'approved':
+        where_parts.append("status = 'approved'")
+    elif q_filter == 'resolved':
+        where_parts.append("status = 'resolved'")
+    elif q_filter == 'rejected':
+        where_parts.append("status = 'rejected'")
+    if q:
+        like_q = f'%{q}%'
+        where_parts.append(
+            "(LOWER(request_id) LIKE ? OR LOWER(user_id) LIKE ? OR LOWER(COALESCE(subject_line,'')) LIKE ? "
+            "OR LOWER(details) LIKE ?)"
+        )
+        params.extend([like_q, like_q, like_q, like_q])
+    where_sql = f"WHERE {' AND '.join(where_parts)}"
+    sql = (
+        "SELECT request_id, role, user_id, school_id, request_type, subject_line, details, status, "
+        "resolution_note, resolved_by, resolved_at, source_page, source_ip, created_at, updated_at, "
+        "request_payload_json, allowed_action, approved_by, approved_at, applied_by, applied_at, "
+        "school_review_status, school_review_note, school_reviewed_by, school_reviewed_at, "
+        "before_snapshot_json, after_snapshot_json "
+        f"FROM privacy_data_requests {where_sql} "
+        "ORDER BY created_at DESC LIMIT ? OFFSET ?"
+    )
+    total_rows = 0
+    with db_connection() as conn:
+        c = conn.cursor()
+        if include_total:
+            db_execute(c, f"SELECT COUNT(*) FROM privacy_data_requests {where_sql}", tuple(params))
+            total_rows = int((c.fetchone() or [0])[0] or 0)
+        db_execute(c, sql, tuple(list(params) + [per_page, offset]))
+        rows = c.fetchall() or []
+    payload = []
+    for row in rows:
+        payload.append(
+            {
+                'request_id': (row[0] or '').strip(),
+                'role': (row[1] or '').strip(),
+                'user_id': (row[2] or '').strip(),
+                'school_id': (row[3] or '').strip(),
+                'request_type': (row[4] or '').strip(),
+                'subject_line': (row[5] or '').strip(),
+                'details': (row[6] or '').strip(),
+                'status': (row[7] or '').strip(),
+                'resolution_note': (row[8] or '').strip(),
+                'resolved_by': (row[9] or '').strip(),
+                'resolved_at': format_timestamp(row[10]),
+                'source_page': (row[11] or '').strip(),
+                'source_ip': (row[12] or '').strip(),
+                'created_at': format_timestamp(row[13]),
+                'updated_at': format_timestamp(row[14]),
+                'request_payload': _json_load_object(row[15] or '{}'),
+                'allowed_action': (row[16] or '').strip(),
+                'approved_by': (row[17] or '').strip(),
+                'approved_at': format_timestamp(row[18]),
+                'applied_by': (row[19] or '').strip(),
+                'applied_at': format_timestamp(row[20]),
+                'school_review_status': (row[21] or '').strip().lower() or 'pending',
+                'school_review_note': (row[22] or '').strip(),
+                'school_reviewed_by': (row[23] or '').strip(),
+                'school_reviewed_at': format_timestamp(row[24]),
+                'before_snapshot': _json_load_object(row[25] or '{}'),
+                'after_snapshot': _json_load_object(row[26] or '{}'),
+            }
+        )
+    if include_total:
+        return payload, total_rows
+    return payload
 
-def resolve_privacy_data_request(request_id, status='resolved', note='', actor=''):
-    """Resolve or reject a privacy data request."""
+def review_privacy_data_request_by_school_admin(request_id, school_id, decision='approved', note='', actor=''):
+    rid = (request_id or '').strip()
+    sid = (school_id or '').strip()
+    state = (decision or '').strip().lower()
+    note_text = (note or '').strip()
+    if not rid:
+        raise ValueError('Request ID is required.')
+    if not sid:
+        raise ValueError('School ID is required.')
+    if state not in {'approved', 'rejected'}:
+        raise ValueError('Decision must be approved or rejected.')
+    if len(note_text) < 8:
+        raise ValueError('Provide a clear review note (minimum 8 characters).')
+    req = get_privacy_data_request(rid)
+    if not req:
+        raise ValueError('Privacy request not found.')
+    if (req.get('school_id') or '').strip() != sid:
+        raise ValueError('You can only review requests from your school.')
+    if (req.get('status') or '').strip().lower() != 'pending':
+        raise ValueError('Only pending requests can be reviewed.')
+    current_school_review = (req.get('school_review_status') or '').strip().lower() or 'pending'
+    if current_school_review != 'pending':
+        raise ValueError('This request has already been reviewed by school admin.')
+    with db_connection(commit=True) as conn:
+        c = conn.cursor()
+        now = datetime.now()
+        if state == 'approved':
+            db_execute(
+                c,
+                """UPDATE privacy_data_requests
+                   SET school_review_status = 'approved',
+                       school_review_note = ?,
+                       school_reviewed_by = ?,
+                       school_reviewed_at = ?,
+                       updated_at = ?
+                   WHERE request_id = ? AND school_id = ? AND status = 'pending'""",
+                (note_text[:2000], (actor or '').strip()[:120], now, now, rid, sid),
+            )
+        else:
+            db_execute(
+                c,
+                """UPDATE privacy_data_requests
+                   SET status = 'rejected',
+                       school_review_status = 'rejected',
+                       school_review_note = ?,
+                       school_reviewed_by = ?,
+                       school_reviewed_at = ?,
+                       resolution_note = ?,
+                       resolved_by = ?,
+                       resolved_at = ?,
+                       updated_at = ?
+                   WHERE request_id = ? AND school_id = ? AND status = 'pending'""",
+                (
+                    note_text[:2000],
+                    (actor or '').strip()[:120],
+                    now,
+                    f'School admin rejected request: {note_text[:1800]}',
+                    (actor or '').strip()[:120],
+                    now,
+                    now,
+                    rid,
+                    sid,
+                ),
+            )
+        if c.rowcount <= 0:
+            raise ValueError('Request could not be updated. Refresh and retry.')
+
+def update_privacy_data_request_status(request_id, status='approved', note='', actor=''):
     rid = (request_id or '').strip()
     if not rid:
         raise ValueError('Request ID is required.')
-    state = (status or '').strip().lower()
-    if state not in {'resolved', 'rejected'}:
-        raise ValueError('Status must be resolved or rejected.')
+    target_state = (status or '').strip().lower()
+    if target_state not in {'approved', 'resolved', 'rejected'}:
+        raise ValueError('Status must be approved, resolved, or rejected.')
+    note_text = (note or '').strip()
+    if len(note_text) < 8:
+        raise ValueError('Provide a clear note (minimum 8 characters).')
     if not ensure_privacy_request_schema():
         raise ValueError('Privacy request service is unavailable.')
+    current = get_privacy_data_request(rid)
+    if not current:
+        raise ValueError('Privacy request not found.')
+    current_status = (current.get('status') or '').strip().lower() or 'pending'
+    allowed = PRIVACY_STATUS_TRANSITIONS.get(current_status, set())
+    if target_state not in allowed:
+        raise ValueError(f'Cannot move request from {current_status} to {target_state}.')
+    school_review_status = (current.get('school_review_status') or '').strip().lower() or 'pending'
+    if target_state in {'approved', 'resolved'} and school_review_status != 'approved':
+        raise ValueError('School admin approval is required before super admin approval/apply.')
     with db_connection(commit=True) as conn:
         c = conn.cursor()
+        now = datetime.now()
+        if target_state == 'approved':
+            db_execute(
+                c,
+                """UPDATE privacy_data_requests
+                   SET status = 'approved',
+                       resolution_note = ?,
+                       approved_by = ?,
+                       approved_at = ?,
+                       updated_at = ?
+                   WHERE request_id = ?""",
+                (note_text[:2000], (actor or '').strip()[:120], now, now, rid),
+            )
+        else:
+            db_execute(
+                c,
+                """UPDATE privacy_data_requests
+                   SET status = ?,
+                       resolution_note = ?,
+                       resolved_by = ?,
+                       resolved_at = ?,
+                       updated_at = ?
+                   WHERE request_id = ?""",
+                (target_state, note_text[:2000], (actor or '').strip()[:120], now, now, rid),
+            )
+        if c.rowcount <= 0:
+            raise ValueError('Privacy request not found.')
+
+def assert_privacy_request_applicable(request_id, expected_action):
+    row = get_privacy_data_request(request_id)
+    if not row:
+        raise ValueError('Privacy request not found.')
+    if (row.get('status') or '').strip().lower() != 'approved':
+        raise ValueError('Request must be approved before applying changes.')
+    if (row.get('school_review_status') or '').strip().lower() != 'approved':
+        raise ValueError('School admin approval is required before applying changes.')
+    allowed_action = (row.get('allowed_action') or '').strip()
+    if expected_action and allowed_action != expected_action:
+        raise ValueError('This request type cannot be resolved with this action.')
+    return row
+
+def complete_privacy_request_apply(request_id, actor, note, before_snapshot=None, after_snapshot=None):
+    rid = (request_id or '').strip()
+    if not rid:
+        raise ValueError('Request ID is required.')
+    note_text = (note or '').strip()
+    if len(note_text) < 8:
+        raise ValueError('Provide a clear apply note (minimum 8 characters).')
+    before_payload = before_snapshot if isinstance(before_snapshot, dict) else {}
+    after_payload = after_snapshot if isinstance(after_snapshot, dict) else {}
+    with db_connection(commit=True) as conn:
+        c = conn.cursor()
+        now = datetime.now()
         db_execute(
             c,
             """UPDATE privacy_data_requests
-               SET status = ?, resolution_note = ?, resolved_by = ?, resolved_at = ?, updated_at = ?
-               WHERE request_id = ?""",
-            (state, (note or '').strip()[:2000], (actor or '').strip()[:120], datetime.now(), datetime.now(), rid),
+               SET status = 'resolved',
+                   resolution_note = ?,
+                   resolved_by = ?,
+                   resolved_at = ?,
+                   applied_by = ?,
+                   applied_at = ?,
+                   before_snapshot_json = ?,
+                   after_snapshot_json = ?,
+                   updated_at = ?
+               WHERE request_id = ? AND status = 'approved'""",
+            (
+                note_text[:2000],
+                (actor or '').strip()[:120],
+                now,
+                (actor or '').strip()[:120],
+                now,
+                json.dumps(before_payload, ensure_ascii=True),
+                json.dumps(after_payload, ensure_ascii=True),
+                now,
+                rid,
+            ),
         )
         if c.rowcount <= 0:
-            raise ValueError('Privacy request not found.')
+            raise ValueError('Request is not in approved state for apply.')
+
+
+def resolve_privacy_data_request(request_id, status='resolved', note='', actor=''):
+    """Backward-compatible wrapper for status updates."""
+    update_privacy_data_request_status(request_id=request_id, status=status, note=note, actor=actor)
 
 
 def count_privacy_data_requests(status_filter='pending'):
@@ -8880,11 +12714,32 @@ def count_privacy_data_requests(status_filter='pending'):
     if not ensure_privacy_request_schema():
         return 0
     status_value = (status_filter or '').strip().lower()
-    if status_value not in {'pending', 'resolved', 'rejected'}:
+    if status_value not in {'pending', 'approved', 'resolved', 'rejected'}:
         status_value = 'pending'
     with db_connection() as conn:
         c = conn.cursor()
         db_execute(c, 'SELECT COUNT(*) FROM privacy_data_requests WHERE status = ?', (status_value,))
+        row = c.fetchone()
+    return int((row or [0])[0] or 0)
+
+def count_school_pending_privacy_reviews(school_id):
+    """Count school privacy requests waiting for school-admin review."""
+    sid = (school_id or '').strip()
+    if not sid:
+        return 0
+    if not ensure_privacy_request_schema():
+        return 0
+    with db_connection() as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """SELECT COUNT(*)
+               FROM privacy_data_requests
+               WHERE school_id = ?
+                 AND status = 'pending'
+                 AND COALESCE(school_review_status, 'pending') = 'pending'""",
+            (sid,),
+        )
         row = c.fetchone()
     return int((row or [0])[0] or 0)
 
@@ -8998,6 +12853,15 @@ def normalize_school_access_status(value, default='trial_free'):
     return raw if raw in SCHOOL_ACCESS_STATUSES else fallback
 
 
+def normalize_school_cbt_enabled(value, default=1):
+    raw = str(value or '').strip().lower()
+    if raw in {'1', 'true', 'yes', 'on', 'enabled'}:
+        return 1
+    if raw in {'0', 'false', 'no', 'off', 'disabled'}:
+        return 0
+    return 1 if safe_int(default, 1) else 0
+
+
 def normalize_school_leadership_title(value, default='principal'):
     raw = (value or '').strip().lower()
     fallback = (default or 'principal').strip().lower()
@@ -9018,6 +12882,7 @@ def ensure_school_access_schema():
     try:
         with db_connection(commit=True) as conn:
             c = conn.cursor()
+            db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS cbt_enabled INTEGER DEFAULT 1")
             db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS access_status TEXT DEFAULT 'trial_free'")
             db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS trial_start_date TEXT")
             db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS trial_end_date TEXT")
@@ -9085,12 +12950,16 @@ def get_total_teacher_count(school_id, include_archived=False):
     if not sid:
         return 0
     has_archive_cols = teachers_has_archive_columns()
-    with db_connection() as conn:
-        c = conn.cursor()
-        archived_where = ' AND COALESCE(is_archived, 0) = 0' if (has_archive_cols and not include_archived) else ''
-        db_execute(c, f'SELECT COUNT(*) FROM teachers WHERE school_id = ?{archived_where}', (sid,))
-        row = c.fetchone()
-        return int((row or [0])[0] or 0)
+    try:
+        with db_connection() as conn:
+            c = conn.cursor()
+            archived_where = ' AND COALESCE(is_archived, 0) = 0' if (has_archive_cols and not include_archived) else ''
+            db_execute(c, f'SELECT COUNT(*) FROM teachers WHERE school_id = ?{archived_where}', (sid,))
+            row = c.fetchone()
+            return int((row or [0])[0] or 0)
+    except Exception as exc:
+        _log_suppressed_exception('get_total_teacher_count', exc)
+        return 0
 
 
 def ensure_school_plan_capacity(school_id, add_students=0, add_teachers=0):
@@ -9319,6 +13188,7 @@ def _school_row_to_dict(row):
         'current_term': row['current_term'],
         'operations_enabled': row['operations_enabled'] if 'operations_enabled' in row.keys() else 1,
         'teacher_operations_enabled': row['teacher_operations_enabled'] if 'teacher_operations_enabled' in row.keys() else 1,
+        'cbt_enabled': normalize_school_cbt_enabled(row['cbt_enabled'] if 'cbt_enabled' in row.keys() else 1),
         'test_enabled': row['test_enabled'],
         'exam_enabled': row['exam_enabled'],
         'max_tests': row['max_tests'],
@@ -9444,6 +13314,7 @@ def get_all_schools():
                 'current_term': row['current_term'],
                 'operations_enabled': row['operations_enabled'] if 'operations_enabled' in row.keys() else 1,
                 'teacher_operations_enabled': row['teacher_operations_enabled'] if 'teacher_operations_enabled' in row.keys() else 1,
+                'cbt_enabled': normalize_school_cbt_enabled(row['cbt_enabled'] if 'cbt_enabled' in row.keys() else 1),
                 'show_positions': row['show_positions'] if 'show_positions' in row.keys() else 1,
                 'class_arm_ranking_mode': row['class_arm_ranking_mode'] if 'class_arm_ranking_mode' in row.keys() else 'separate',
                 'combine_third_term_results': row['combine_third_term_results'] if 'combine_third_term_results' in row.keys() else 0,
@@ -9495,8 +13366,9 @@ def get_school_admin_username(school_id):
 
 def update_school_admin_account(school_id, new_username, new_password=''):
     """Update existing school admin username/password, or create one if missing."""
+    normalized_school_id = str((school_id or '')).strip()
     new_username = (new_username or '').strip().lower()
-    if not school_id or not new_username:
+    if not normalized_school_id or not new_username:
         raise ValueError('School ID and school admin email are required.')
     if not is_valid_email(new_username):
         raise ValueError('School admin username must be a valid email address.')
@@ -9507,11 +13379,13 @@ def update_school_admin_account(school_id, new_username, new_password=''):
 
     with db_connection(commit=True) as conn:
         c = conn.cursor()
-        current_admin = get_school_admin_username(school_id)
+        current_admin = get_school_admin_username(normalized_school_id)
 
         # Username conflict check.
         existing = get_user(new_username)
-        if existing and (existing.get('role') != 'school_admin' or existing.get('school_id') != school_id):
+        existing_role = (existing.get('role') or '').strip().lower() if existing else ''
+        existing_school_id = str((existing.get('school_id') or '')).strip() if existing else ''
+        if existing and (existing_role != 'school_admin' or existing_school_id != normalized_school_id):
             raise ValueError(f'Username "{new_username}" is already used by another account.')
 
         if current_admin:
@@ -9521,7 +13395,7 @@ def update_school_admin_account(school_id, new_username, new_password=''):
                     c,
                     """UPDATE users SET username = ?, school_id = ?, role = 'school_admin'
                        WHERE LOWER(username) = LOWER(?) AND role = 'school_admin' AND CAST(school_id AS TEXT) = ?""",
-                    (new_username, school_id, current_admin, school_id)
+                    (new_username, normalized_school_id, current_admin, normalized_school_id)
                 )
             # Update password only if provided.
             if (new_password or '').strip():
@@ -9534,7 +13408,7 @@ def update_school_admin_account(school_id, new_username, new_password=''):
             # No current admin user for this school: create one.
             if not (new_password or '').strip():
                 raise ValueError('Provide a password to create school admin account.')
-            upsert_user(new_username, hash_password(new_password.strip()), 'school_admin', school_id)
+            upsert_user(new_username, hash_password(new_password.strip()), 'school_admin', normalized_school_id)
 
 def update_school_settings_with_cursor(c, school_id, settings):
     """Update school settings using an existing DB cursor."""
@@ -9617,6 +13491,70 @@ def _suggest_next_term_year(current_term, current_year):
     if idx < 2:
         return order[idx + 1], year
     return 'First Term', _increment_academic_year(year)
+
+
+def build_term_rollover_readiness(school_id, current_term, current_year):
+    """Build rollover readiness summary for school admin safety checks."""
+    sid = (school_id or '').strip()
+    term = (current_term or '').strip()
+    year = (current_year or '').strip()
+    summary = {
+        'total_classes': 0,
+        'published_classes': 0,
+        'pending_review_classes': 0,
+        'unpublished_classes': 0,
+        'ready': True,
+        'blocking_reason': '',
+        'unpublished_classnames': [],
+    }
+    if not sid or not term:
+        summary['ready'] = False
+        summary['blocking_reason'] = 'Current term is not set.'
+        return summary
+    try:
+        assignments = get_class_assignments(sid)
+        rows = get_school_publication_statuses(
+            sid,
+            term,
+            year,
+            assignments=assignments,
+        ) or []
+    except Exception as exc:
+        logging.warning("Failed to build term rollover readiness for %s: %s", sid, exc)
+        summary['ready'] = False
+        summary['blocking_reason'] = 'Readiness check unavailable right now.'
+        return summary
+
+    total_classes = len(rows)
+    published_classes = 0
+    pending_review_classes = 0
+    unpublished = []
+    for row in rows:
+        is_published = bool(row.get('is_published', False))
+        approval_status = (row.get('approval_status') or '').strip().lower()
+        if is_published:
+            published_classes += 1
+            continue
+        classname = (row.get('classname') or '').strip()
+        if classname:
+            unpublished.append(classname)
+        if approval_status == 'submitted':
+            pending_review_classes += 1
+
+    unpublished = sorted(_dedupe_keep_order(unpublished), key=lambda v: str(v).lower())
+    summary.update({
+        'total_classes': int(total_classes or 0),
+        'published_classes': int(published_classes or 0),
+        'pending_review_classes': int(pending_review_classes or 0),
+        'unpublished_classes': int(max(0, (total_classes - published_classes))),
+        'unpublished_classnames': unpublished,
+    })
+    if summary['pending_review_classes'] > 0:
+        summary['ready'] = False
+        summary['blocking_reason'] = (
+            f"{summary['pending_review_classes']} class result submission(s) are pending admin review."
+        )
+    return summary
 
 def update_school_settings(school_id, settings):
     """Update school settings."""
@@ -9924,6 +13862,7 @@ def update_school_access_policy_with_cursor(
     plan_max_teachers=0,
     plan_storage_quota_mb=0,
     plan_features_json='{}',
+    cbt_enabled=None,
     updated_by='',
 ):
     """Update super-admin controlled access lifecycle for one school using an existing cursor."""
@@ -9945,6 +13884,7 @@ def update_school_access_policy_with_cursor(
     db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS plan_max_teachers INTEGER DEFAULT 0")
     db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS plan_storage_quota_mb INTEGER DEFAULT 0")
     db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS plan_features_json TEXT DEFAULT '{}'")
+    db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS cbt_enabled INTEGER DEFAULT 1")
     db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS access_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
     db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS access_updated_by TEXT DEFAULT ''")
 
@@ -9952,7 +13892,7 @@ def update_school_access_policy_with_cursor(
         c,
         """SELECT access_status, trial_start_date, trial_end_date, subscription_plan, subscription_start_date,
                   subscription_end_date, payment_due_date, payment_grace_days, payment_reference, access_note,
-                  plan_max_students, plan_max_teachers, plan_storage_quota_mb, plan_features_json
+                  plan_max_students, plan_max_teachers, plan_storage_quota_mb, plan_features_json, cbt_enabled
            FROM schools
            WHERE school_id = ?
            LIMIT 1""",
@@ -9976,6 +13916,11 @@ def update_school_access_policy_with_cursor(
     plan_teachers = _normalize_non_negative_int(plan_max_teachers, 0, 100000)
     plan_storage_mb = _normalize_non_negative_int(plan_storage_quota_mb, 0, 1000000)
     plan_features = _normalize_plan_features_json(plan_features_json)
+    cbt_enabled_value = (
+        normalize_school_cbt_enabled(cbt_enabled, default=1)
+        if cbt_enabled is not None and str(cbt_enabled).strip() != ''
+        else normalize_school_cbt_enabled(old_row[14] if len(old_row) > 14 else 1, default=1)
+    )
 
     trial_start_dt = _parse_iso_date(trial_start) if trial_start else None
     trial_end_dt = _parse_iso_date(trial_end) if trial_end else None
@@ -10019,6 +13964,7 @@ def update_school_access_policy_with_cursor(
                payment_due_date = ?, payment_grace_days = ?,
                payment_reference = ?, access_note = ?,
                plan_max_students = ?, plan_max_teachers = ?, plan_storage_quota_mb = ?, plan_features_json = ?,
+               cbt_enabled = ?,
                access_updated_at = ?, access_updated_by = ?
            WHERE school_id = ?""",
         (
@@ -10036,6 +13982,7 @@ def update_school_access_policy_with_cursor(
             plan_teachers,
             plan_storage_mb,
             plan_features,
+            cbt_enabled_value,
             datetime.now(),
             (updated_by or '').strip(),
             sid,
@@ -10057,6 +14004,7 @@ def update_school_access_policy_with_cursor(
         'plan_max_teachers': _normalize_non_negative_int(old_row[11], 0, 100000),
         'plan_storage_quota_mb': _normalize_non_negative_int(old_row[12], 0, 1000000),
         'plan_features_json': _normalize_plan_features_json(old_row[13] or '{}'),
+        'cbt_enabled': normalize_school_cbt_enabled(old_row[14] if len(old_row) > 14 else 1, default=1),
     }
     new_payload = {
         'access_status': status_value,
@@ -10073,6 +14021,7 @@ def update_school_access_policy_with_cursor(
         'plan_max_teachers': plan_teachers,
         'plan_storage_quota_mb': plan_storage_mb,
         'plan_features_json': plan_features,
+        'cbt_enabled': cbt_enabled_value,
     }
     db_execute(
         c,
@@ -10121,6 +14070,7 @@ def update_school_access_policy(
     plan_max_teachers=0,
     plan_storage_quota_mb=0,
     plan_features_json='{}',
+    cbt_enabled=None,
     updated_by='',
 ):
     """Update super-admin controlled access lifecycle for one school."""
@@ -10148,6 +14098,7 @@ def update_school_access_policy(
             plan_max_teachers=plan_max_teachers,
             plan_storage_quota_mb=plan_storage_quota_mb,
             plan_features_json=plan_features_json,
+            cbt_enabled=cbt_enabled,
             updated_by=updated_by,
         )
     invalidate_school_cache(sid)
@@ -10305,12 +14256,14 @@ def ensure_extended_features_schema():
                        used_llm INTEGER NOT NULL DEFAULT 0,
                        confidence REAL DEFAULT 0.0,
                        unresolved INTEGER NOT NULL DEFAULT 0,
+                       answer_version TEXT DEFAULT '',
                        response_mode TEXT DEFAULT 'standard',
                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                    )""",
             )
             db_execute(c, "ALTER TABLE assistant_query_logs ADD COLUMN IF NOT EXISTS confidence REAL DEFAULT 0.0")
             db_execute(c, "ALTER TABLE assistant_query_logs ADD COLUMN IF NOT EXISTS unresolved INTEGER NOT NULL DEFAULT 0")
+            db_execute(c, "ALTER TABLE assistant_query_logs ADD COLUMN IF NOT EXISTS answer_version TEXT DEFAULT ''")
             db_execute(c, "ALTER TABLE assistant_query_logs ADD COLUMN IF NOT EXISTS response_mode TEXT DEFAULT 'standard'")
             db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_assistant_query_logs_school_created ON assistant_query_logs(school_id, created_at DESC)')
             db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_assistant_query_logs_role_created ON assistant_query_logs(role, created_at DESC)')
@@ -10358,6 +14311,34 @@ def ensure_extended_features_schema():
                    )""",
             )
             db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_assistant_user_prefs_lookup ON assistant_user_preferences(school_id, role, user_id, pref_key)')
+            db_execute(
+                c,
+                """CREATE TABLE IF NOT EXISTS assistant_local_qa (
+                       id SERIAL PRIMARY KEY,
+                       school_id TEXT DEFAULT '',
+                       role TEXT NOT NULL DEFAULT '',
+                       source_page TEXT DEFAULT '',
+                       question_norm TEXT NOT NULL,
+                       question_example TEXT DEFAULT '',
+                       answer TEXT DEFAULT '',
+                       steps_json TEXT DEFAULT '[]',
+                       helpful_count INTEGER NOT NULL DEFAULT 0,
+                       not_helpful_count INTEGER NOT NULL DEFAULT 0,
+                       usage_count INTEGER NOT NULL DEFAULT 0,
+                       last_used_at TIMESTAMP,
+                       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                       UNIQUE(school_id, role, source_page, question_norm)
+                   )""",
+            )
+            db_execute(c, "ALTER TABLE assistant_local_qa ADD COLUMN IF NOT EXISTS steps_json TEXT DEFAULT '[]'")
+            db_execute(c, "ALTER TABLE assistant_local_qa ADD COLUMN IF NOT EXISTS helpful_count INTEGER NOT NULL DEFAULT 0")
+            db_execute(c, "ALTER TABLE assistant_local_qa ADD COLUMN IF NOT EXISTS not_helpful_count INTEGER NOT NULL DEFAULT 0")
+            db_execute(c, "ALTER TABLE assistant_local_qa ADD COLUMN IF NOT EXISTS usage_count INTEGER NOT NULL DEFAULT 0")
+            db_execute(c, "ALTER TABLE assistant_local_qa ADD COLUMN IF NOT EXISTS last_used_at TIMESTAMP")
+            db_execute(c, "ALTER TABLE assistant_local_qa ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+            db_execute(c, "UPDATE assistant_local_qa SET school_id = '' WHERE school_id IS NULL")
+            db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_assistant_local_qa_lookup ON assistant_local_qa(school_id, role, source_page, updated_at DESC)')
             db_execute(
                 c,
                 """CREATE TABLE IF NOT EXISTS app_settings (
@@ -10463,6 +14444,28 @@ def ensure_extended_features_schema():
                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                        UNIQUE(school_id, parent_phone, student_id, pref_key)
                    )""",
+            )
+            # Backward/forward compatibility:
+            # - newer schema uses `enabled` (INTEGER 0/1)
+            # - some older code paths read/write `pref_value` (TEXT)
+            # Keep both columns available and synchronized.
+            db_execute(c, "ALTER TABLE parent_notification_prefs ADD COLUMN IF NOT EXISTS enabled INTEGER NOT NULL DEFAULT 1")
+            db_execute(c, "ALTER TABLE parent_notification_prefs ADD COLUMN IF NOT EXISTS pref_value TEXT DEFAULT ''")
+            db_execute(
+                c,
+                """UPDATE parent_notification_prefs
+                   SET pref_value = CASE
+                        WHEN COALESCE(pref_value, '') = '' THEN CAST(COALESCE(enabled, 1) AS TEXT)
+                        ELSE pref_value
+                   END""",
+            )
+            db_execute(
+                c,
+                """UPDATE parent_notification_prefs
+                   SET enabled = CASE
+                        WHEN LOWER(COALESCE(pref_value, '1')) IN ('0', 'false', 'no', 'off') THEN 0
+                        ELSE 1
+                   END""",
             )
             db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_parent_prefs_lookup ON parent_notification_prefs(school_id, parent_phone, student_id, pref_key)')
             db_execute(
@@ -10906,7 +14909,7 @@ def record_login_audit(username, role, school_id, endpoint, success, reason=''):
     except Exception as exc:
         _log_suppressed_exception('record_login_audit', exc)
 
-def log_assistant_query(role, question, source_page='', used_llm=False, confidence=0.0, unresolved=False, response_mode='standard'):
+def log_assistant_query(role, question, source_page='', used_llm=False, confidence=0.0, unresolved=False, response_mode='standard', answer_version=''):
     if not ensure_extended_features_schema():
         return
     role_name = (role or '').strip().lower()
@@ -10923,6 +14926,7 @@ def log_assistant_query(role, question, source_page='', used_llm=False, confiden
     mode = (response_mode or 'standard').strip().lower()
     if mode not in APP_ASSISTANT_RESPONSE_MODES:
         mode = 'standard'
+    version = (answer_version or APP_ASSISTANT_ANSWER_VERSION or '').strip()[:60]
     try:
         conf_val = float(confidence or 0.0)
     except Exception:
@@ -10934,8 +14938,8 @@ def log_assistant_query(role, question, source_page='', used_llm=False, confiden
             db_execute(
                 c,
                 """INSERT INTO assistant_query_logs
-                   (school_id, role, user_id, question, source_page, used_llm, confidence, unresolved, response_mode, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
+                   (school_id, role, user_id, question, source_page, used_llm, confidence, unresolved, answer_version, response_mode, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
                 (
                     school_id or None,
                     role_name,
@@ -10945,6 +14949,7 @@ def log_assistant_query(role, question, source_page='', used_llm=False, confiden
                     1 if used_llm else 0,
                     conf_val,
                     1 if unresolved else 0,
+                    version,
                     mode,
                 ),
             )
@@ -10981,6 +14986,409 @@ def log_assistant_feedback(role, question, answer, helpful, source_page=''):
             )
     except Exception as exc:
         _log_suppressed_exception('log_assistant_feedback', exc)
+
+def _assistant_local_qa_record_usage(role, question_norm, source_page=''):
+    role_name = (role or '').strip().lower()
+    if role_name not in {'super_admin', 'school_admin', 'teacher', 'student', 'parent'}:
+        return
+    q_norm = _assistant_normalize_text(question_norm)
+    if not q_norm:
+        return
+    page_key = _assistant_clean_source_page(source_page)
+    school_id = (session.get('school_id') or '').strip()
+    if role_name == 'super_admin':
+        school_id = ''
+    try:
+        with db_connection(commit=True) as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """UPDATE assistant_local_qa
+                   SET usage_count = COALESCE(usage_count, 0) + 1,
+                       last_used_at = CURRENT_TIMESTAMP,
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE COALESCE(school_id, '') = COALESCE(?, '')
+                     AND LOWER(role) = ?
+                     AND COALESCE(source_page, '') = COALESCE(?, '')
+                     AND question_norm = ?""",
+                (school_id, role_name, page_key, q_norm),
+            )
+    except Exception as exc:
+        _log_suppressed_exception('_assistant_local_qa_record_usage', exc)
+
+def _assistant_lookup_local_qa(role, question, source_page=''):
+    role_name = (role or '').strip().lower()
+    if role_name not in {'super_admin', 'school_admin', 'teacher', 'student', 'parent'}:
+        return None
+    q_norm = _assistant_normalize_text(question)
+    if len(q_norm) < 4:
+        return None
+    if not ensure_extended_features_schema():
+        return None
+    page_key = _assistant_clean_source_page(source_page)
+    school_id = (session.get('school_id') or '').strip()
+    if role_name == 'super_admin':
+        school_id = ''
+    merges = _assistant_get_bpe_merges(role_name, school_id=school_id, source_page=page_key)
+    q_pieces = _assistant_bpe_piece_set(q_norm, merges) if merges else set()
+    try:
+        with db_connection() as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """SELECT source_page, question_norm, answer, steps_json,
+                          helpful_count, not_helpful_count
+                   FROM assistant_local_qa
+                   WHERE COALESCE(school_id, '') = COALESCE(?, '')
+                     AND LOWER(role) = ?
+                     AND (COALESCE(source_page, '') = '' OR COALESCE(source_page, '') = COALESCE(?, ''))
+                     AND COALESCE(helpful_count, 0) > COALESCE(not_helpful_count, 0)
+                   ORDER BY
+                     CASE WHEN COALESCE(source_page, '') = COALESCE(?, '') THEN 1 ELSE 0 END DESC,
+                     (COALESCE(helpful_count, 0) - COALESCE(not_helpful_count, 0)) DESC,
+                     updated_at DESC
+                   LIMIT 80""",
+                (school_id, role_name, page_key, page_key),
+            )
+            rows = c.fetchall() or []
+    except Exception as exc:
+        _log_suppressed_exception('_assistant_lookup_local_qa', exc)
+        return None
+
+    q_tokens = set(q_norm.split())
+    best_row = None
+    best_score = 0.0
+    for row in rows:
+        row_page = str((row[0] or '')).strip()
+        row_q = _assistant_normalize_text(row[1] or '')
+        if not row_q:
+            continue
+        ratio = difflib.SequenceMatcher(None, q_norm, row_q).ratio()
+        row_tokens = set(row_q.split())
+        overlap = (len(q_tokens & row_tokens) / max(1, len(q_tokens | row_tokens)))
+        bpe_overlap = 0.0
+        if q_pieces and merges:
+            row_pieces = _assistant_bpe_piece_set(row_q, merges)
+            if row_pieces:
+                bpe_overlap = len(q_pieces & row_pieces) / max(1, len(q_pieces | row_pieces))
+        score = (ratio * 0.62) + (overlap * 0.23) + (bpe_overlap * 0.15)
+        if row_q == q_norm:
+            score += 0.12
+        elif row_q in q_norm or q_norm in row_q:
+            score += 0.06
+        if row_page and page_key and row_page == page_key:
+            score += 0.05
+        if score > best_score:
+            best_score = score
+            best_row = row
+
+    if not best_row or best_score < APP_ASSISTANT_LOCAL_QA_MATCH_CUTOFF:
+        return None
+
+    helpful_count = int(best_row[4] or 0)
+    not_helpful_count = int(best_row[5] or 0)
+    quality_bonus = max(0.0, min(0.08, (helpful_count - not_helpful_count) * 0.01))
+    confidence = max(0.62, min(0.97, 0.73 + ((best_score - APP_ASSISTANT_LOCAL_QA_MATCH_CUTOFF) * 0.7) + quality_bonus))
+    hit = {
+        'answer': str((best_row[2] or '')).strip(),
+        'steps': _assistant_parse_steps_json(best_row[3] or '[]'),
+        'question_norm': _assistant_normalize_text(best_row[1] or ''),
+        'source_page': str((best_row[0] or '')).strip(),
+        'confidence': round(confidence, 3),
+    }
+    _assistant_local_qa_record_usage(role_name, hit.get('question_norm') or '', source_page=hit.get('source_page') or page_key)
+    return hit
+
+def _assistant_learn_from_feedback(role, question, answer, helpful, source_page=''):
+    role_name = (role or '').strip().lower()
+    if role_name not in {'super_admin', 'school_admin', 'teacher', 'student', 'parent'}:
+        return False
+    if not ensure_extended_features_schema():
+        return False
+    q_norm = _assistant_normalize_text(question)
+    ans = str(answer or '').strip()
+    if len(q_norm) < 6 or not ans:
+        return False
+    page_key = _assistant_clean_source_page(source_page)
+    school_id = (session.get('school_id') or '').strip()
+    if role_name == 'super_admin':
+        school_id = ''
+
+    # Extract short actionable lines if the answer has explicit list-like rows.
+    lines = [ln.strip() for ln in re.split(r'[\r\n]+', ans) if ln.strip()]
+    step_rows = []
+    for ln in lines:
+        cleaned = re.sub(r'^\s*(?:[-*]|\d+[.)])\s*', '', ln).strip()
+        if cleaned and cleaned != ln:
+            step_rows.append(cleaned[:180])
+        if len(step_rows) >= 4:
+            break
+    steps_json = json.dumps(step_rows[:4], ensure_ascii=False)
+
+    try:
+        with db_connection(commit=True) as conn:
+            c = conn.cursor()
+            if helpful:
+                db_execute(
+                    c,
+                    """INSERT INTO assistant_local_qa
+                       (school_id, role, source_page, question_norm, question_example, answer, steps_json,
+                        helpful_count, not_helpful_count, usage_count, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, 1, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                       ON CONFLICT (school_id, role, source_page, question_norm)
+                       DO UPDATE SET
+                          question_example = EXCLUDED.question_example,
+                          answer = EXCLUDED.answer,
+                          steps_json = EXCLUDED.steps_json,
+                          helpful_count = assistant_local_qa.helpful_count + 1,
+                          updated_at = CURRENT_TIMESTAMP""",
+                    (school_id, role_name, page_key, q_norm, str(question or '').strip()[:500], ans[:1400], steps_json),
+                )
+            else:
+                db_execute(
+                    c,
+                    """UPDATE assistant_local_qa
+                       SET not_helpful_count = COALESCE(not_helpful_count, 0) + 1,
+                           updated_at = CURRENT_TIMESTAMP
+                       WHERE COALESCE(school_id, '') = COALESCE(?, '')
+                         AND LOWER(role) = ?
+                         AND COALESCE(source_page, '') = COALESCE(?, '')
+                         AND question_norm = ?""",
+                    (school_id, role_name, page_key, q_norm),
+                )
+        if helpful and (int(time.time()) % 11 == 0):
+            _assistant_prune_local_qa(role_name, school_id=school_id)
+        return True
+    except Exception as exc:
+        _log_suppressed_exception('_assistant_learn_from_feedback', exc)
+        return False
+
+def _assistant_prune_local_qa(role, school_id=''):
+    role_name = (role or '').strip().lower()
+    if role_name not in {'super_admin', 'school_admin', 'teacher', 'student', 'parent'}:
+        return
+    if not ensure_extended_features_schema():
+        return
+    sid = (school_id or '').strip()
+    try:
+        with db_connection(commit=True) as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """DELETE FROM assistant_local_qa
+                   WHERE COALESCE(school_id, '') = COALESCE(?, '')
+                     AND LOWER(role) = ?
+                     AND updated_at < (CURRENT_TIMESTAMP - (? || ' days')::interval)
+                     AND COALESCE(helpful_count, 0) <= COALESCE(not_helpful_count, 0)
+                     AND COALESCE(usage_count, 0) = 0""",
+                (sid, role_name, str(APP_ASSISTANT_LOCAL_QA_RETENTION_DAYS)),
+            )
+            db_execute(
+                c,
+                """DELETE FROM assistant_local_qa
+                   WHERE id IN (
+                       SELECT id FROM assistant_local_qa
+                       WHERE COALESCE(school_id, '') = COALESCE(?, '')
+                         AND LOWER(role) = ?
+                       ORDER BY
+                         (COALESCE(helpful_count, 0) - COALESCE(not_helpful_count, 0)) DESC,
+                         COALESCE(usage_count, 0) DESC,
+                         updated_at DESC
+                       OFFSET ?
+                   )""",
+                (sid, role_name, int(APP_ASSISTANT_LOCAL_QA_MAX_ROWS_PER_ROLE)),
+            )
+    except Exception as exc:
+        _log_suppressed_exception('_assistant_prune_local_qa', exc)
+
+def _assistant_transformer_load_runtime(force_reload=False):
+    runtime = _ASSISTANT_TRANSFORMER_RUNTIME
+    if runtime.get('loaded') and not force_reload:
+        return runtime
+    runtime['loaded'] = True
+    runtime['model'] = None
+    runtime['meta'] = None
+    runtime['device'] = None
+    runtime['error'] = ''
+    artifact_dir = (APP_ASSISTANT_TRANSFORMER_ARTIFACT_DIR or 'local_ai/artifacts').strip()
+    try:
+        from local_ai import assistant_transformer as at
+        if not at.torch_ready():
+            runtime['error'] = 'torch_not_available'
+            return runtime
+        model, meta, device = at.load_transformer(artifact_dir)
+        runtime['model'] = model
+        runtime['meta'] = meta
+        runtime['device'] = device
+    except Exception as exc:
+        runtime['error'] = str(exc)
+    return runtime
+
+def _assistant_transformer_predict(role, question, source_page=''):
+    if not APP_ASSISTANT_TRANSFORMER_ENABLED:
+        return None
+    q = str(question or '').strip()
+    if len(q) < 4:
+        return None
+    runtime = _assistant_transformer_load_runtime(force_reload=False)
+    if not runtime.get('model') or not runtime.get('meta'):
+        return None
+    try:
+        from local_ai import assistant_transformer as at
+        preds = at.predict_transformer(
+            runtime['model'],
+            runtime['meta'],
+            runtime['device'],
+            role=role,
+            question=q,
+            source_page=source_page,
+            top_k=3,
+        )
+        if not preds:
+            return None
+        best = preds[0]
+        conf = float(best.get('confidence') or 0.0)
+        if conf < APP_ASSISTANT_TRANSFORMER_MIN_CONFIDENCE:
+            return None
+        role_match = (best.get('role') or '').strip().lower()
+        if role_match and role_match != (role or '').strip().lower():
+            return None
+        return {
+            'answer': str(best.get('answer') or '').strip(),
+            'steps': [str(s).strip() for s in (best.get('steps') or []) if str(s).strip()][:6],
+            'confidence': round(conf, 3),
+            'label': str(best.get('label') or '').strip(),
+            'source_page': str(best.get('source_page') or '').strip(),
+        }
+    except Exception as exc:
+        _log_suppressed_exception('_assistant_transformer_predict', exc)
+        return None
+
+def build_assistant_transformer_samples(school_id=''):
+    sid = (school_id or '').strip()
+    samples = []
+    for role_name, rows in (APP_ASSISTANT_ROLE_KB or {}).items():
+        role = (role_name or '').strip().lower()
+        if role not in {'super_admin', 'school_admin', 'teacher', 'student', 'parent'}:
+            continue
+        for item in (rows or []):
+            topic = str(item.get('topic') or '').strip() or 'topic'
+            title = str(item.get('title') or '').strip()
+            summary = str(item.get('summary') or '').strip()
+            steps = [str(s).strip() for s in (item.get('steps') or []) if str(s).strip()][:6]
+            label = f'kb::{role}::{topic}'
+            answer = (f'{title}: {summary}' if title and summary else (summary or title or 'Guidance available.')).strip()
+            seed_texts = []
+            if title:
+                seed_texts.append(title)
+                seed_texts.append(f'what is {title} used for')
+                seed_texts.append(f'how do i use {title}')
+            if summary:
+                seed_texts.append(summary)
+            for kw in (item.get('keywords') or []):
+                kw_text = str(kw or '').strip()
+                if kw_text:
+                    seed_texts.append(kw_text)
+                    seed_texts.append(f'how to {kw_text}')
+            for text in seed_texts:
+                norm = _assistant_normalize_text(text)
+                if norm:
+                    samples.append({
+                        'role': role,
+                        'source_page': '',
+                        'text': text,
+                        'label': label,
+                        'answer': answer,
+                        'steps': list(steps),
+                    })
+    # Blend high-quality learned local QA entries.
+    if ensure_extended_features_schema():
+        try:
+            with db_connection() as conn:
+                c = conn.cursor()
+                db_execute(
+                    c,
+                    """SELECT COALESCE(school_id, ''), role, COALESCE(source_page, ''), question_norm,
+                              question_example, answer, steps_json, helpful_count, not_helpful_count
+                       FROM assistant_local_qa
+                       WHERE COALESCE(helpful_count, 0) > COALESCE(not_helpful_count, 0)
+                         AND (COALESCE(school_id, '') = COALESCE(?, '') OR COALESCE(school_id, '') = '')
+                       ORDER BY (COALESCE(helpful_count, 0) - COALESCE(not_helpful_count, 0)) DESC,
+                                COALESCE(usage_count, 0) DESC,
+                                updated_at DESC
+                       LIMIT 2500""",
+                    (sid,),
+                )
+                rows = c.fetchall() or []
+            for row in rows:
+                role = str((row[1] or '')).strip().lower()
+                if role not in {'super_admin', 'school_admin', 'teacher', 'student', 'parent'}:
+                    continue
+                page = str((row[2] or '')).strip()
+                qn = str((row[3] or '')).strip()
+                qx = str((row[4] or '')).strip()
+                ans = str((row[5] or '')).strip()
+                steps = _assistant_parse_steps_json(row[6] or '[]')
+                if not qn or not ans:
+                    continue
+                label_hash = hashlib.sha1(f'{role}|{page}|{qn}'.encode('utf-8')).hexdigest()[:16]
+                label = f'qa::{role}::{label_hash}'
+                samples.append({
+                    'role': role,
+                    'source_page': page,
+                    'text': qx or qn,
+                    'label': label,
+                    'answer': ans,
+                    'steps': steps,
+                })
+        except Exception as exc:
+            _log_suppressed_exception('build_assistant_transformer_samples_localqa', exc)
+    # De-duplicate by role+source_page+text+label
+    dedup = []
+    seen = set()
+    for row in samples:
+        key = (
+            (row.get('role') or '').strip().lower(),
+            (row.get('source_page') or '').strip().lower(),
+            _assistant_normalize_text(row.get('text') or ''),
+            (row.get('label') or '').strip(),
+        )
+        if key in seen or not key[2]:
+            continue
+        seen.add(key)
+        dedup.append(row)
+    return dedup
+
+def train_local_assistant_transformer(school_id='', epochs=12, batch_size=32):
+    try:
+        from local_ai import assistant_transformer as at
+    except Exception as exc:
+        return {'ok': False, 'error': f'local_ai module import failed: {exc}'}
+    if not at.torch_ready():
+        return {'ok': False, 'error': 'PyTorch not available. Install torch locally before training.'}
+    rows = build_assistant_transformer_samples(school_id=school_id)
+    if len(rows) < 30:
+        return {'ok': False, 'error': f'Not enough training samples ({len(rows)}).'}
+    try:
+        result = at.train_transformer(
+            rows,
+            artifact_dir=APP_ASSISTANT_TRANSFORMER_ARTIFACT_DIR,
+            epochs=max(1, int(epochs or 12)),
+            batch_size=max(8, int(batch_size or 32)),
+            max_len=64,
+            d_model=64,
+            nhead=2,
+            num_layers=1,
+            ff_dim=128,
+        )
+        _assistant_transformer_load_runtime(force_reload=True)
+        result['ok'] = True
+        result['sample_count'] = len(rows)
+        return result
+    except KeyboardInterrupt:
+        return {'ok': False, 'error': 'Training interrupted. Re-run with fewer epochs (for example 2-4).', 'sample_count': len(rows)}
+    except Exception as exc:
+        return {'ok': False, 'error': str(exc), 'sample_count': len(rows)}
 
 def _assistant_memory_user_context(role=''):
     role_name = (role or _current_role() or '').strip().lower()
@@ -11680,6 +16088,40 @@ def get_backup_health_summary(school_id, days=30):
     return summary
 
 
+def get_recent_auto_backup_snapshots(school_id, limit=6):
+    sid = (school_id or '').strip()
+    if not sid or not ensure_extended_features_schema():
+        return []
+    try:
+        lim = max(1, min(int(limit or 6), 30))
+    except Exception:
+        lim = 6
+    out = []
+    try:
+        with db_connection() as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """SELECT id, trigger_reason, backup_size_bytes, created_at
+                   FROM school_auto_backups
+                   WHERE school_id = ?
+                   ORDER BY created_at DESC
+                   LIMIT ?""",
+                (sid, lim),
+            )
+            for row in (c.fetchall() or []):
+                out.append({
+                    'id': int(row[0] or 0),
+                    'trigger_reason': (row[1] or '').strip() or 'schedule',
+                    'backup_size_bytes': int(row[2] or 0),
+                    'created_at': format_timestamp(row[3]),
+                })
+    except Exception as exc:
+        _log_suppressed_exception('get_recent_auto_backup_snapshots', exc)
+        return []
+    return out
+
+
 def create_auto_backup_snapshot(school_id, trigger_reason='schedule'):
     sid = (school_id or '').strip()
     if not sid:
@@ -11797,12 +16239,305 @@ def get_assistant_prompt_boosts(school_id, role='', days=45, limit=3, source_pag
     except Exception:
         return []
 
-def get_assistant_usage_summary(school_id, days=30):
+def _assistant_scope_filters(role='', user_id=''):
+    role_name = (role or '').strip().lower()
+    user_name = (user_id or '').strip().lower()
+    clauses = []
+    params = []
+    if role_name in {'super_admin', 'school_admin', 'teacher', 'student', 'parent'}:
+        clauses.append('AND LOWER(role) = ?')
+        params.append(role_name)
+    if user_name:
+        clauses.append('AND LOWER(user_id) = ?')
+        params.append(user_name)
+    return ' '.join(clauses), params
+
+def get_assistant_usage_summary_scoped(school_id, days=30, role='', user_id=''):
     sid = (school_id or '').strip()
-    if not sid:
-        return {'total': 0, 'llm_total': 0, 'role_rows': [], 'top_questions': [], 'avg_confidence': 0.0, 'low_confidence': 0, 'unresolved_total': 0, 'response_mode_rows': [], 'top_unresolved_questions': [], 'top_unresolved_pages': []}
+    default = {
+        'total': 0,
+        'llm_total': 0,
+        'role_rows': [],
+        'top_questions': [],
+        'avg_confidence': 0.0,
+        'low_confidence': 0,
+        'unresolved_total': 0,
+        'response_mode_rows': [],
+        'answer_version_rows': [],
+        'top_unresolved_questions': [],
+        'top_unresolved_pages': [],
+    }
+    if not sid or not ensure_extended_features_schema():
+        return default
+    days = max(1, min(int(days or 30), 365))
+    scope_sql, scope_params = _assistant_scope_filters(role=role, user_id=user_id)
+    try:
+        with db_connection() as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                f"""SELECT COUNT(*),
+                           COALESCE(SUM(CASE WHEN used_llm = 1 THEN 1 ELSE 0 END), 0),
+                           COALESCE(AVG(COALESCE(confidence, 0.0)), 0.0),
+                           COALESCE(SUM(CASE WHEN COALESCE(confidence, 0.0) < 0.50 THEN 1 ELSE 0 END), 0),
+                           COALESCE(SUM(CASE WHEN unresolved = 1 THEN 1 ELSE 0 END), 0)
+                    FROM assistant_query_logs
+                    WHERE school_id = ?
+                      {scope_sql}
+                      AND created_at >= (CURRENT_TIMESTAMP - (? || ' days')::interval)""",
+                tuple([sid] + list(scope_params) + [str(days)]),
+            )
+            row = c.fetchone() or (0, 0, 0.0, 0, 0)
+            total = int(row[0] or 0)
+            llm_total = int(row[1] or 0)
+            avg_confidence = round(float(row[2] or 0.0), 3)
+            low_confidence = int(row[3] or 0)
+            unresolved_total = int(row[4] or 0)
+
+            db_execute(
+                c,
+                f"""SELECT role, COUNT(*) AS cnt
+                    FROM assistant_query_logs
+                    WHERE school_id = ?
+                      {scope_sql}
+                      AND created_at >= (CURRENT_TIMESTAMP - (? || ' days')::interval)
+                    GROUP BY role
+                    ORDER BY cnt DESC, role ASC
+                    LIMIT 10""",
+                tuple([sid] + list(scope_params) + [str(days)]),
+            )
+            role_rows = [{'role': (r[0] or ''), 'count': int(r[1] or 0)} for r in (c.fetchall() or [])]
+
+            db_execute(
+                c,
+                f"""SELECT question, COUNT(*) AS cnt
+                    FROM assistant_query_logs
+                    WHERE school_id = ?
+                      {scope_sql}
+                      AND created_at >= (CURRENT_TIMESTAMP - (? || ' days')::interval)
+                    GROUP BY question
+                    ORDER BY cnt DESC, question ASC
+                    LIMIT 8""",
+                tuple([sid] + list(scope_params) + [str(days)]),
+            )
+            top_questions = [{'question': (r[0] or ''), 'count': int(r[1] or 0)} for r in (c.fetchall() or [])]
+
+            db_execute(
+                c,
+                f"""SELECT response_mode, COUNT(*) AS cnt
+                    FROM assistant_query_logs
+                    WHERE school_id = ?
+                      {scope_sql}
+                      AND created_at >= (CURRENT_TIMESTAMP - (? || ' days')::interval)
+                    GROUP BY response_mode
+                    ORDER BY cnt DESC, response_mode ASC
+                    LIMIT 6""",
+                tuple([sid] + list(scope_params) + [str(days)]),
+            )
+            response_mode_rows = [{'mode': (r[0] or 'standard'), 'count': int(r[1] or 0)} for r in (c.fetchall() or [])]
+            db_execute(
+                c,
+                f"""SELECT COALESCE(NULLIF(TRIM(answer_version), ''), 'legacy') AS version_tag, COUNT(*) AS cnt
+                    FROM assistant_query_logs
+                    WHERE school_id = ?
+                      {scope_sql}
+                      AND created_at >= (CURRENT_TIMESTAMP - (? || ' days')::interval)
+                    GROUP BY version_tag
+                    ORDER BY cnt DESC, version_tag ASC
+                    LIMIT 6""",
+                tuple([sid] + list(scope_params) + [str(days)]),
+            )
+            answer_version_rows = [{'version': (r[0] or 'legacy'), 'count': int(r[1] or 0)} for r in (c.fetchall() or [])]
+
+            db_execute(
+                c,
+                f"""SELECT question, COUNT(*) AS cnt
+                    FROM assistant_query_logs
+                    WHERE school_id = ?
+                      {scope_sql}
+                      AND unresolved = 1
+                      AND created_at >= (CURRENT_TIMESTAMP - (? || ' days')::interval)
+                    GROUP BY question
+                    ORDER BY cnt DESC, question ASC
+                    LIMIT 6""",
+                tuple([sid] + list(scope_params) + [str(days)]),
+            )
+            top_unresolved_questions = [{'question': (r[0] or ''), 'count': int(r[1] or 0)} for r in (c.fetchall() or [])]
+
+            db_execute(
+                c,
+                f"""SELECT source_page, COUNT(*) AS cnt
+                    FROM assistant_query_logs
+                    WHERE school_id = ?
+                      {scope_sql}
+                      AND unresolved = 1
+                      AND COALESCE(TRIM(source_page), '') <> ''
+                      AND created_at >= (CURRENT_TIMESTAMP - (? || ' days')::interval)
+                    GROUP BY source_page
+                    ORDER BY cnt DESC, source_page ASC
+                    LIMIT 6""",
+                tuple([sid] + list(scope_params) + [str(days)]),
+            )
+            top_unresolved_pages = [{'page': (r[0] or ''), 'count': int(r[1] or 0)} for r in (c.fetchall() or [])]
+    except Exception:
+        return default
+    return {
+        'total': total,
+        'llm_total': llm_total,
+        'role_rows': role_rows,
+        'top_questions': top_questions,
+        'avg_confidence': avg_confidence,
+        'low_confidence': low_confidence,
+        'unresolved_total': unresolved_total,
+        'response_mode_rows': response_mode_rows,
+        'answer_version_rows': answer_version_rows,
+        'top_unresolved_questions': top_unresolved_questions,
+        'top_unresolved_pages': top_unresolved_pages,
+    }
+
+def get_assistant_usage_summary(school_id, days=30):
+    return get_assistant_usage_summary_scoped(school_id=school_id, days=days)
+
+def get_assistant_quality_summary_scoped(school_id, days=30, role='', user_id=''):
+    sid = (school_id or '').strip()
+    default = {
+        'not_helpful_top': [],
+        'low_confidence_rate': 0.0,
+        'unresolved_rate': 0.0,
+    }
+    if not sid or not ensure_extended_features_schema():
+        return default
+    usage = get_assistant_usage_summary_scoped(sid, days=days, role=role, user_id=user_id)
+    total = max(1, int((usage or {}).get('total') or 0))
+    low_confidence_rate = round((int((usage or {}).get('low_confidence') or 0) / total) * 100.0, 2)
+    unresolved_rate = round((int((usage or {}).get('unresolved_total') or 0) / total) * 100.0, 2)
+    scope_sql, scope_params = _assistant_scope_filters(role=role, user_id=user_id)
+    not_helpful_top = []
+    try:
+        with db_connection() as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                f"""SELECT question, COUNT(*) AS cnt
+                    FROM assistant_feedback_logs
+                    WHERE school_id = ?
+                      {scope_sql}
+                      AND helpful = 0
+                      AND COALESCE(TRIM(question), '') <> ''
+                      AND created_at >= (CURRENT_TIMESTAMP - (? || ' days')::interval)
+                    GROUP BY question
+                    ORDER BY cnt DESC, question ASC
+                    LIMIT 6""",
+                tuple([sid] + list(scope_params) + [str(max(1, min(int(days or 30), 365)))]),
+            )
+            not_helpful_top = [{'question': str(r[0] or '').strip(), 'count': int(r[1] or 0)} for r in (c.fetchall() or []) if str(r[0] or '').strip()]
+    except Exception:
+        not_helpful_top = []
+    return {
+        'not_helpful_top': not_helpful_top,
+        'low_confidence_rate': low_confidence_rate,
+        'unresolved_rate': unresolved_rate,
+    }
+
+def get_assistant_quality_summary(school_id, days=30):
+    return get_assistant_quality_summary_scoped(school_id=school_id, days=days)
+
+def get_assistant_learning_queue(school_id, days=30, limit=12):
+    sid = (school_id or '').strip()
+    if not sid or not ensure_extended_features_schema():
+        return []
+    days = max(7, min(int(days or 30), 180))
+    limit = max(3, min(int(limit or 12), 40))
+    feedback_rows = []
+    query_rows = []
+    try:
+        with db_connection() as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """SELECT question,
+                          COALESCE(SUM(CASE WHEN helpful = 1 THEN 1 ELSE 0 END), 0) AS helpful_cnt,
+                          COALESCE(SUM(CASE WHEN helpful = 0 THEN 1 ELSE 0 END), 0) AS not_helpful_cnt,
+                          MAX(COALESCE(source_page, '')) AS sample_page
+                   FROM assistant_feedback_logs
+                   WHERE school_id = ?
+                     AND COALESCE(TRIM(question), '') <> ''
+                     AND created_at >= (CURRENT_TIMESTAMP - (? || ' days')::interval)
+                   GROUP BY question
+                   HAVING COALESCE(SUM(CASE WHEN helpful = 0 THEN 1 ELSE 0 END), 0) > 0
+                   ORDER BY not_helpful_cnt DESC, question ASC
+                   LIMIT 220""",
+                (sid, str(days)),
+            )
+            feedback_rows = c.fetchall() or []
+            db_execute(
+                c,
+                """SELECT question,
+                          COALESCE(SUM(CASE WHEN unresolved = 1 THEN 1 ELSE 0 END), 0) AS unresolved_cnt,
+                          COALESCE(AVG(COALESCE(confidence, 0.0)), 0.0) AS avg_conf
+                   FROM assistant_query_logs
+                   WHERE school_id = ?
+                     AND COALESCE(TRIM(question), '') <> ''
+                     AND created_at >= (CURRENT_TIMESTAMP - (? || ' days')::interval)
+                   GROUP BY question
+                   ORDER BY unresolved_cnt DESC, question ASC
+                   LIMIT 300""",
+                (sid, str(days)),
+            )
+            query_rows = c.fetchall() or []
+    except Exception:
+        return []
+
+    query_map = {}
+    for row in (query_rows or []):
+        q = str(row[0] or '').strip()
+        if not q:
+            continue
+        key = _assistant_normalize_text(q)
+        if not key:
+            continue
+        query_map[key] = {
+            'unresolved': int(row[1] or 0),
+            'avg_confidence': round(float(row[2] or 0.0), 3),
+        }
+
+    rows = []
+    for row in (feedback_rows or []):
+        question = str(row[0] or '').strip()
+        if not question:
+            continue
+        key = _assistant_normalize_text(question)
+        if not key:
+            continue
+        helpful_cnt = int(row[1] or 0)
+        not_helpful_cnt = int(row[2] or 0)
+        sample_page = str(row[3] or '').strip()
+        q_stat = query_map.get(key, {})
+        unresolved_cnt = int(q_stat.get('unresolved') or 0)
+        avg_conf = float(q_stat.get('avg_confidence') or 0.0)
+        priority_score = (not_helpful_cnt * 3) + max(0, unresolved_cnt - helpful_cnt) + (2 if avg_conf < 0.55 else 0)
+        if priority_score >= 9:
+            priority = 'high'
+        elif priority_score >= 5:
+            priority = 'medium'
+        else:
+            priority = 'watch'
+        rows.append({
+            'question': question,
+            'helpful': helpful_cnt,
+            'not_helpful': not_helpful_cnt,
+            'unresolved': unresolved_cnt,
+            'avg_confidence': round(avg_conf, 3),
+            'source_page': sample_page,
+            'priority': priority,
+            'priority_score': int(priority_score),
+        })
+    rows.sort(key=lambda x: (-int(x.get('priority_score') or 0), -int(x.get('not_helpful') or 0), str(x.get('question') or '').lower()))
+    return rows[:limit]
+
+def get_assistant_global_usage_summary(days=30):
     if not ensure_extended_features_schema():
-        return {'total': 0, 'llm_total': 0, 'role_rows': [], 'top_questions': [], 'avg_confidence': 0.0, 'low_confidence': 0, 'unresolved_total': 0, 'response_mode_rows': [], 'top_unresolved_questions': [], 'top_unresolved_pages': []}
+        return {'total': 0, 'llm_total': 0, 'avg_confidence': 0.0, 'low_confidence': 0, 'unresolved_total': 0, 'role_rows': [], 'top_questions': [], 'top_unresolved_pages': [], 'top_schools': [], 'answer_version_rows': []}
     days = max(1, min(int(days or 30), 365))
     try:
         with db_connection() as conn:
@@ -11815,9 +16550,8 @@ def get_assistant_usage_summary(school_id, days=30):
                           COALESCE(SUM(CASE WHEN COALESCE(confidence, 0.0) < 0.50 THEN 1 ELSE 0 END), 0),
                           COALESCE(SUM(CASE WHEN unresolved = 1 THEN 1 ELSE 0 END), 0)
                    FROM assistant_query_logs
-                   WHERE school_id = ?
-                     AND created_at >= (CURRENT_TIMESTAMP - (? || ' days')::interval)""",
-                (sid, str(days)),
+                   WHERE created_at >= (CURRENT_TIMESTAMP - (? || ' days')::interval)""",
+                (str(days),),
             )
             row = c.fetchone() or (0, 0, 0.0, 0, 0)
             total = int(row[0] or 0)
@@ -11830,12 +16564,11 @@ def get_assistant_usage_summary(school_id, days=30):
                 c,
                 """SELECT role, COUNT(*) AS cnt
                    FROM assistant_query_logs
-                   WHERE school_id = ?
-                     AND created_at >= (CURRENT_TIMESTAMP - (? || ' days')::interval)
+                   WHERE created_at >= (CURRENT_TIMESTAMP - (? || ' days')::interval)
                    GROUP BY role
                    ORDER BY cnt DESC, role ASC
                    LIMIT 10""",
-                (sid, str(days)),
+                (str(days),),
             )
             role_rows = [{'role': (r[0] or ''), 'count': int(r[1] or 0)} for r in (c.fetchall() or [])]
 
@@ -11843,105 +16576,71 @@ def get_assistant_usage_summary(school_id, days=30):
                 c,
                 """SELECT question, COUNT(*) AS cnt
                    FROM assistant_query_logs
-                   WHERE school_id = ?
-                     AND created_at >= (CURRENT_TIMESTAMP - (? || ' days')::interval)
+                   WHERE created_at >= (CURRENT_TIMESTAMP - (? || ' days')::interval)
+                     AND COALESCE(TRIM(question), '') <> ''
                    GROUP BY question
                    ORDER BY cnt DESC, question ASC
                    LIMIT 8""",
-                (sid, str(days)),
+                (str(days),),
             )
             top_questions = [{'question': (r[0] or ''), 'count': int(r[1] or 0)} for r in (c.fetchall() or [])]
-            db_execute(
-                c,
-                """SELECT response_mode, COUNT(*) AS cnt
-                   FROM assistant_query_logs
-                   WHERE school_id = ?
-                     AND created_at >= (CURRENT_TIMESTAMP - (? || ' days')::interval)
-                   GROUP BY response_mode
-                   ORDER BY cnt DESC, response_mode ASC
-                   LIMIT 6""",
-                (sid, str(days)),
-            )
-            response_mode_rows = [{'mode': (r[0] or 'standard'), 'count': int(r[1] or 0)} for r in (c.fetchall() or [])]
-            db_execute(
-                c,
-                """SELECT question, COUNT(*) AS cnt
-                   FROM assistant_query_logs
-                   WHERE school_id = ?
-                     AND unresolved = 1
-                     AND created_at >= (CURRENT_TIMESTAMP - (? || ' days')::interval)
-                   GROUP BY question
-                   ORDER BY cnt DESC, question ASC
-                   LIMIT 6""",
-                (sid, str(days)),
-            )
-            top_unresolved_questions = [{'question': (r[0] or ''), 'count': int(r[1] or 0)} for r in (c.fetchall() or [])]
+
             db_execute(
                 c,
                 """SELECT source_page, COUNT(*) AS cnt
                    FROM assistant_query_logs
-                   WHERE school_id = ?
-                     AND unresolved = 1
+                   WHERE unresolved = 1
                      AND COALESCE(TRIM(source_page), '') <> ''
                      AND created_at >= (CURRENT_TIMESTAMP - (? || ' days')::interval)
                    GROUP BY source_page
                    ORDER BY cnt DESC, source_page ASC
-                   LIMIT 6""",
-                (sid, str(days)),
+                   LIMIT 8""",
+                (str(days),),
             )
             top_unresolved_pages = [{'page': (r[0] or ''), 'count': int(r[1] or 0)} for r in (c.fetchall() or [])]
+            db_execute(
+                c,
+                """SELECT COALESCE(NULLIF(TRIM(answer_version), ''), 'legacy') AS version_tag, COUNT(*) AS cnt
+                   FROM assistant_query_logs
+                   WHERE created_at >= (CURRENT_TIMESTAMP - (? || ' days')::interval)
+                   GROUP BY version_tag
+                   ORDER BY cnt DESC, version_tag ASC
+                   LIMIT 10""",
+                (str(days),),
+            )
+            answer_version_rows = [{'version': (r[0] or 'legacy'), 'count': int(r[1] or 0)} for r in (c.fetchall() or [])]
+
+            db_execute(
+                c,
+                """SELECT q.school_id,
+                          COALESCE(MAX(s.school_name), q.school_id) AS school_name,
+                          COUNT(*) AS cnt
+                   FROM assistant_query_logs q
+                   LEFT JOIN schools s ON s.school_id = q.school_id
+                   WHERE q.created_at >= (CURRENT_TIMESTAMP - (? || ' days')::interval)
+                     AND COALESCE(TRIM(q.school_id), '') <> ''
+                   GROUP BY q.school_id
+                   ORDER BY cnt DESC, school_name ASC
+                   LIMIT 10""",
+                (str(days),),
+            )
+            top_schools = [
+                {'school_id': (r[0] or ''), 'school_name': (r[1] or r[0] or ''), 'count': int(r[2] or 0)}
+                for r in (c.fetchall() or [])
+            ]
     except Exception:
-        return {'total': 0, 'llm_total': 0, 'role_rows': [], 'top_questions': [], 'avg_confidence': 0.0, 'low_confidence': 0, 'unresolved_total': 0, 'response_mode_rows': [], 'top_unresolved_questions': [], 'top_unresolved_pages': []}
+        return {'total': 0, 'llm_total': 0, 'avg_confidence': 0.0, 'low_confidence': 0, 'unresolved_total': 0, 'role_rows': [], 'top_questions': [], 'top_unresolved_pages': [], 'top_schools': [], 'answer_version_rows': []}
     return {
         'total': total,
         'llm_total': llm_total,
-        'role_rows': role_rows,
-        'top_questions': top_questions,
         'avg_confidence': avg_confidence,
         'low_confidence': low_confidence,
         'unresolved_total': unresolved_total,
-        'response_mode_rows': response_mode_rows,
-        'top_unresolved_questions': top_unresolved_questions,
+        'role_rows': role_rows,
+        'top_questions': top_questions,
         'top_unresolved_pages': top_unresolved_pages,
-    }
-
-def get_assistant_quality_summary(school_id, days=30):
-    sid = (school_id or '').strip()
-    default = {
-        'not_helpful_top': [],
-        'low_confidence_rate': 0.0,
-        'unresolved_rate': 0.0,
-    }
-    if not sid or not ensure_extended_features_schema():
-        return default
-    usage = get_assistant_usage_summary(sid, days=days)
-    total = max(1, int((usage or {}).get('total') or 0))
-    low_confidence_rate = round((int((usage or {}).get('low_confidence') or 0) / total) * 100.0, 2)
-    unresolved_rate = round((int((usage or {}).get('unresolved_total') or 0) / total) * 100.0, 2)
-    not_helpful_top = []
-    try:
-        with db_connection() as conn:
-            c = conn.cursor()
-            db_execute(
-                c,
-                """SELECT question, COUNT(*) AS cnt
-                   FROM assistant_feedback_logs
-                   WHERE school_id = ?
-                     AND helpful = 0
-                     AND COALESCE(TRIM(question), '') <> ''
-                     AND created_at >= (CURRENT_TIMESTAMP - (? || ' days')::interval)
-                   GROUP BY question
-                   ORDER BY cnt DESC, question ASC
-                   LIMIT 6""",
-                (sid, str(max(1, min(int(days or 30), 365)))),
-            )
-            not_helpful_top = [{'question': str(r[0] or '').strip(), 'count': int(r[1] or 0)} for r in (c.fetchall() or []) if str(r[0] or '').strip()]
-    except Exception:
-        not_helpful_top = []
-    return {
-        'not_helpful_top': not_helpful_top,
-        'low_confidence_rate': low_confidence_rate,
-        'unresolved_rate': unresolved_rate,
+        'top_schools': top_schools,
+        'answer_version_rows': answer_version_rows,
     }
 
 def build_school_data_integrity_report(school_id, term='', academic_year=''):
@@ -12036,28 +16735,33 @@ def build_school_data_integrity_report(school_id, term='', academic_year=''):
     summary['issue_count'] = len(issues)
     return summary, issues
 
-def get_assistant_feedback_summary(school_id, days=30):
+def get_assistant_feedback_summary_scoped(school_id, days=30, role='', user_id=''):
     sid = (school_id or '').strip()
     if not sid or not ensure_extended_features_schema():
         return {'total': 0, 'helpful': 0, 'not_helpful': 0}
     days = max(1, min(int(days or 30), 365))
+    scope_sql, scope_params = _assistant_scope_filters(role=role, user_id=user_id)
     try:
         with db_connection() as conn:
             c = conn.cursor()
             db_execute(
                 c,
-                """SELECT COUNT(*),
-                          COALESCE(SUM(CASE WHEN helpful = 1 THEN 1 ELSE 0 END), 0),
-                          COALESCE(SUM(CASE WHEN helpful = 0 THEN 1 ELSE 0 END), 0)
-                   FROM assistant_feedback_logs
-                   WHERE school_id = ?
-                     AND created_at >= (CURRENT_TIMESTAMP - (? || ' days')::interval)""",
-                (sid, str(days)),
+                f"""SELECT COUNT(*),
+                           COALESCE(SUM(CASE WHEN helpful = 1 THEN 1 ELSE 0 END), 0),
+                           COALESCE(SUM(CASE WHEN helpful = 0 THEN 1 ELSE 0 END), 0)
+                    FROM assistant_feedback_logs
+                    WHERE school_id = ?
+                      {scope_sql}
+                      AND created_at >= (CURRENT_TIMESTAMP - (? || ' days')::interval)""",
+                tuple([sid] + list(scope_params) + [str(days)]),
             )
             row = c.fetchone() or (0, 0, 0)
         return {'total': int(row[0] or 0), 'helpful': int(row[1] or 0), 'not_helpful': int(row[2] or 0)}
     except Exception:
         return {'total': 0, 'helpful': 0, 'not_helpful': 0}
+
+def get_assistant_feedback_summary(school_id, days=30):
+    return get_assistant_feedback_summary_scoped(school_id=school_id, days=days)
 
 def get_admin_action_audit_summary(school_id, days=30):
     sid = (school_id or '').strip()
@@ -14508,10 +19212,14 @@ def get_school_publication_statuses(school_id, term, academic_year='', assignmen
     ensure_result_publication_approval_columns()
     has_approval_cols = result_publication_has_approval_columns()
     source_assignments = assignments if assignments is not None else get_class_assignments(school_id)
-    assignments = [
-        a for a in source_assignments
-        if (a.get('term') or '') == term and (a.get('academic_year') or '') == (academic_year or '')
-    ]
+    term_key = (term or '').strip().lower()
+    year_key = (academic_year or '').strip()
+    assignments = []
+    for a in (source_assignments or []):
+        row_term = (a.get('term') or '').strip().lower()
+        row_year = (a.get('academic_year') or '').strip()
+        if row_term == term_key and row_year == year_key:
+            assignments.append(a)
     classes = [a.get('classname', '') for a in assignments if a.get('classname')]
 
     publication_rows = {}
@@ -14831,10 +19539,13 @@ def load_students(school_id, class_filter='', term_filter='', include_archived=F
         params = [school_id]
         
         if class_filter:
-            query += ' AND classname = ?'
-            params.append(class_filter)
+            class_key = canonicalize_classname(class_filter)
+            if class_key:
+                query += " AND REGEXP_REPLACE(UPPER(COALESCE(classname, '')), '[^A-Z0-9]+', '', 'g') = ?"
+                params.append(class_key)
         if term_filter:
-            query += ' AND term = ?'
+            # Be tolerant to legacy data with mixed case/spacing in stored term values.
+            query += " AND LOWER(TRIM(COALESCE(term, ''))) = LOWER(TRIM(?))"
             params.append(term_filter)
         if has_archive_cols and not include_archived:
             query += ' AND COALESCE(is_archived, 0) = 0'
@@ -14893,8 +19604,8 @@ def load_students(school_id, class_filter='', term_filter='', include_archived=F
                 'student_phone': student_phone,
                 'date_of_birth': (date_of_birth or '').strip(),
                 'gender': (gender or '').strip(),
-                'classname': classname,
-                'first_year_class': first_year_class,
+                'classname': canonicalize_classname(classname),
+                'first_year_class': canonicalize_classname(first_year_class),
                 'term': term,
                 'stream': stream,
                 'number_of_subject': number_of_subject,
@@ -14915,7 +19626,11 @@ def load_students(school_id, class_filter='', term_filter='', include_archived=F
 
 def load_students_for_classes(school_id, classnames, term_filter='', include_archived=False):
     """Load students for a school limited to a class list."""
-    class_list = [str(c).strip() for c in (classnames or []) if str(c).strip()]
+    class_list = _dedupe_keep_order([
+        canonicalize_classname(str(c).strip())
+        for c in (classnames or [])
+        if str(c).strip()
+    ])
     if not class_list:
         return {}
     has_parent_cols = students_has_parent_access_columns()
@@ -14932,13 +19647,13 @@ def load_students_for_classes(school_id, classnames, term_filter='', include_arc
                 query = (
                     'SELECT student_id, firstname, email, date_of_birth, gender, classname, first_year_class, term, stream, '
                     f'number_of_subject, subjects, scores, promoted, parent_phone, parent_password_hash, parent_name, parent_gender, parent_name_2, parent_phone_2, parent_password_hash_2, parent_gender_2{archive_col}{phone_col} '
-                    f'FROM students WHERE school_id = ? AND classname IN ({placeholders})'
+                    f"FROM students WHERE school_id = ? AND REGEXP_REPLACE(UPPER(COALESCE(classname, '')), '[^A-Z0-9]+', '', 'g') IN ({placeholders})"
                 )
             else:
                 query = (
                     'SELECT student_id, firstname, email, date_of_birth, gender, classname, first_year_class, term, stream, '
                     f'number_of_subject, subjects, scores, promoted, parent_phone, parent_password_hash{archive_col}{phone_col} '
-                    f'FROM students WHERE school_id = ? AND classname IN ({placeholders})'
+                    f"FROM students WHERE school_id = ? AND REGEXP_REPLACE(UPPER(COALESCE(classname, '')), '[^A-Z0-9]+', '', 'g') IN ({placeholders})"
                 )
         else:
             archive_col = ', COALESCE(is_archived, 0)' if has_archive_cols else ''
@@ -14946,11 +19661,12 @@ def load_students_for_classes(school_id, classnames, term_filter='', include_arc
             query = (
                 'SELECT student_id, firstname, email, date_of_birth, gender, classname, first_year_class, term, stream, '
                 f'number_of_subject, subjects, scores, promoted{archive_col}{phone_col} '
-                f'FROM students WHERE school_id = ? AND classname IN ({placeholders})'
+                f"FROM students WHERE school_id = ? AND REGEXP_REPLACE(UPPER(COALESCE(classname, '')), '[^A-Z0-9]+', '', 'g') IN ({placeholders})"
             )
         params = [school_id] + class_list
         if term_filter:
-            query += ' AND term = ?'
+            # Be tolerant to legacy data with mixed case/spacing in stored term values.
+            query += " AND LOWER(TRIM(COALESCE(term, ''))) = LOWER(TRIM(?))"
             params.append(term_filter)
         if has_archive_cols and not include_archived:
             query += ' AND COALESCE(is_archived, 0) = 0'
@@ -15005,8 +19721,8 @@ def load_students_for_classes(school_id, classnames, term_filter='', include_arc
                 'student_phone': student_phone,
                 'date_of_birth': (date_of_birth or '').strip(),
                 'gender': (gender or '').strip(),
-                'classname': classname,
-                'first_year_class': first_year_class,
+                'classname': canonicalize_classname(classname),
+                'first_year_class': canonicalize_classname(first_year_class),
                 'term': term,
                 'stream': stream,
                 'number_of_subject': number_of_subject,
@@ -15036,14 +19752,21 @@ def load_students_for_student_ids(school_id, student_ids):
 
 def get_student_filter_options(school_id, classnames=None):
     """Return (available_classes, available_terms) without loading full student payloads."""
-    class_list = [str(c).strip() for c in (classnames or []) if str(c).strip()]
+    class_list = _dedupe_keep_order([
+        canonicalize_classname(str(c).strip())
+        for c in (classnames or [])
+        if str(c).strip()
+    ])
     with db_connection() as conn:
         c = conn.cursor()
         where = ['school_id = ?']
         params = [school_id]
         if class_list:
             placeholders = ','.join(['?'] * len(class_list))
-            where.append(f'classname IN ({placeholders})')
+            where.append(
+                "REGEXP_REPLACE(UPPER(COALESCE(classname, '')), '[^A-Z0-9]+', '', 'g') "
+                f"IN ({placeholders})"
+            )
             params.extend(class_list)
         where_sql = ' AND '.join(where)
 
@@ -15057,7 +19780,10 @@ def get_student_filter_options(school_id, classnames=None):
                 ORDER BY classname""",
             tuple(params),
         )
-        available_classes = [(row[0] or '').strip() for row in c.fetchall() if row and (row[0] or '').strip()]
+        available_classes = filter_secondary_classnames([
+            canonicalize_classname((row[0] or '').strip()) if row else ''
+            for row in (c.fetchall() or [])
+        ])
 
         db_execute(
             c,
@@ -15244,9 +19970,10 @@ def get_parent_students_by_phone(parent_phone):
 
 def save_student(school_id, student_id, student_data):
     """Save a student."""
+    school_ctx = get_school(school_id) or {}
     with db_connection(commit=True) as conn:
         c = conn.cursor()
-        save_student_with_cursor(c, school_id, student_id, student_data)
+        save_student_with_cursor(c, school_id, student_id, student_data, school_for_stream=school_ctx)
 
 def delete_student(school_id, student_id):
     """Delete a student."""
@@ -15301,41 +20028,45 @@ def get_student_count_by_class(school_id):
 def get_school_classnames(school_id):
     """Return all known class names for a school (not limited to classes with students)."""
     out = set()
-    with db_connection() as conn:
-        c = conn.cursor()
-        db_execute(
-            c,
-            """SELECT DISTINCT classname
-               FROM students
-               WHERE school_id = ? AND classname IS NOT NULL AND BTRIM(classname) <> ''""",
-            (school_id,),
-        )
-        for row in c.fetchall() or []:
-            classname = (row[0] or '').strip()
-            if classname:
-                out.add(classname)
-        db_execute(
-            c,
-            """SELECT DISTINCT classname
-               FROM class_subject_configs
-               WHERE school_id = ? AND classname IS NOT NULL AND BTRIM(classname) <> ''""",
-            (school_id,),
-        )
-        for row in c.fetchall() or []:
-            classname = (row[0] or '').strip()
-            if classname:
-                out.add(classname)
-        db_execute(
-            c,
-            """SELECT DISTINCT classname
-               FROM class_assignments
-               WHERE school_id = ? AND classname IS NOT NULL AND BTRIM(classname) <> ''""",
-            (school_id,),
-        )
-        for row in c.fetchall() or []:
-            classname = (row[0] or '').strip()
-            if classname:
-                out.add(classname)
+    try:
+        with db_connection() as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """SELECT DISTINCT classname
+                   FROM students
+                   WHERE school_id = ? AND classname IS NOT NULL AND BTRIM(classname) <> ''""",
+                (school_id,),
+            )
+            for row in c.fetchall() or []:
+                classname = (row[0] or '').strip()
+                if classname:
+                    out.add(classname)
+            db_execute(
+                c,
+                """SELECT DISTINCT classname
+                   FROM class_subject_configs
+                   WHERE school_id = ? AND classname IS NOT NULL AND BTRIM(classname) <> ''""",
+                (school_id,),
+            )
+            for row in c.fetchall() or []:
+                classname = (row[0] or '').strip()
+                if classname:
+                    out.add(classname)
+            db_execute(
+                c,
+                """SELECT DISTINCT classname
+                   FROM class_assignments
+                   WHERE school_id = ? AND classname IS NOT NULL AND BTRIM(classname) <> ''""",
+                (school_id,),
+            )
+            for row in c.fetchall() or []:
+                classname = (row[0] or '').strip()
+                if classname:
+                    out.add(classname)
+    except Exception as exc:
+        _log_suppressed_exception('get_school_classnames', exc)
+        return []
     return sorted(out, key=lambda value: str(value).lower())
 
 def get_secondary_school_classnames(school_id):
@@ -15345,51 +20076,59 @@ def get_secondary_school_classnames(school_id):
 def get_total_student_count(school_id):
     """Get total student count for one school."""
     has_archive_cols = students_has_archive_columns()
-    with db_connection() as conn:
-        c = conn.cursor()
-        archived_where = ' AND COALESCE(is_archived, 0) = 0' if has_archive_cols else ''
-        db_execute(c, f'SELECT COUNT(*) FROM students WHERE school_id = ?{archived_where}', (school_id,))
-        row = c.fetchone()
-        return int(row[0] or 0) if row else 0
+    try:
+        with db_connection() as conn:
+            c = conn.cursor()
+            archived_where = ' AND COALESCE(is_archived, 0) = 0' if has_archive_cols else ''
+            db_execute(c, f'SELECT COUNT(*) FROM students WHERE school_id = ?{archived_where}', (school_id,))
+            row = c.fetchone()
+            return int(row[0] or 0) if row else 0
+    except Exception as exc:
+        _log_suppressed_exception('get_total_student_count', exc)
+        return 0
 
 def get_linked_parent_count(school_id):
     """Get number of unique parent accounts linked by students in one school."""
     if not students_has_parent_access_columns():
         return 0
     has_parent_multi_cols = students_has_parent_multi_access_columns()
-    with db_connection() as conn:
-        c = conn.cursor()
-        if has_parent_multi_cols:
-            db_execute(
-                c,
-                """SELECT COUNT(DISTINCT phone)
-                   FROM (
-                     SELECT parent_phone AS phone
-                     FROM students
-                     WHERE school_id = ?
-                       AND TRIM(COALESCE(parent_phone, '')) <> ''
-                       AND TRIM(COALESCE(parent_password_hash, '')) <> ''
-                     UNION
-                     SELECT parent_phone_2 AS phone
-                     FROM students
-                     WHERE school_id = ?
-                       AND TRIM(COALESCE(parent_phone_2, '')) <> ''
-                       AND TRIM(COALESCE(parent_password_hash_2, '')) <> ''
-                   ) AS parent_union""",
-                (school_id, school_id),
-            )
-        else:
-            db_execute(
-                c,
-                """SELECT COUNT(DISTINCT parent_phone)
-                   FROM students
-                   WHERE school_id = ?
-                     AND TRIM(COALESCE(parent_phone, '')) <> ''
-                     AND TRIM(COALESCE(parent_password_hash, '')) <> ''""",
-                (school_id,),
-            )
-        row = c.fetchone()
-        return int(row[0] or 0) if row else 0
+    try:
+        with db_connection() as conn:
+            c = conn.cursor()
+            if has_parent_multi_cols:
+                db_execute(
+                    c,
+                    """SELECT COUNT(DISTINCT phone)
+                       FROM (
+                         SELECT parent_phone AS phone
+                         FROM students
+                         WHERE school_id = ?
+                           AND TRIM(COALESCE(parent_phone, '')) <> ''
+                           AND TRIM(COALESCE(parent_password_hash, '')) <> ''
+                         UNION
+                         SELECT parent_phone_2 AS phone
+                         FROM students
+                         WHERE school_id = ?
+                           AND TRIM(COALESCE(parent_phone_2, '')) <> ''
+                           AND TRIM(COALESCE(parent_password_hash_2, '')) <> ''
+                       ) AS parent_union""",
+                    (school_id, school_id),
+                )
+            else:
+                db_execute(
+                    c,
+                    """SELECT COUNT(DISTINCT parent_phone)
+                       FROM students
+                       WHERE school_id = ?
+                         AND TRIM(COALESCE(parent_phone, '')) <> ''
+                         AND TRIM(COALESCE(parent_password_hash, '')) <> ''""",
+                    (school_id,),
+                )
+            row = c.fetchone()
+            return int(row[0] or 0) if row else 0
+    except Exception as exc:
+        _log_suppressed_exception('get_linked_parent_count', exc)
+        return 0
 
 def get_school_parent_links(school_id):
     """List students in one school that have parent access linked."""
@@ -16745,6 +21484,15 @@ def promote_students(school_id, from_class, to_class, action_by_student, term=''
                 new_subjects = list(existing_subjects) if isinstance(existing_subjects, list) else []
                 if target_class != 'Graduated':
                     target_config = get_class_subject_config(school_id, target_class)
+                    if not target_config:
+                        defaults = _catalog_defaults_for_class(target_class)
+                        target_config = {
+                            'core_subjects': defaults.get('core', []),
+                            'science_subjects': defaults.get('science', []),
+                            'art_subjects': defaults.get('art', []),
+                            'commercial_subjects': defaults.get('commercial', []),
+                            'optional_subjects': defaults.get('optional', []),
+                        }
                     if target_config:
                         if class_uses_stream_for_school(school, target_class):
                             # Promote into stream-based class with pending stream allocation.
@@ -18091,12 +22839,16 @@ def get_subject_score_submission_map(school_id, teacher_id, term, academic_year)
             c,
             """SELECT classname, submitted_at
                FROM subject_score_submissions
-               WHERE school_id = ? AND teacher_id = ? AND term = ? AND academic_year = ?""",
+               WHERE school_id = ? AND teacher_id = ?
+                 AND LOWER(TRIM(COALESCE(term, ''))) = LOWER(TRIM(?))
+                 AND academic_year = ?""",
             (school_id, teacher_id, term, academic_year or ''),
         )
         out = {}
         for row in c.fetchall() or []:
-            out[(row[0] or '').strip()] = row[1] or ''
+            cls = canonicalize_classname((row[0] or '').strip())
+            if cls:
+                out[cls] = row[1] or ''
     return out
 
 def get_subject_submission_teacher_ids_for_class(school_id, classname, term, academic_year):
@@ -18105,12 +22857,16 @@ def get_subject_submission_teacher_ids_for_class(school_id, classname, term, aca
         return set()
     with db_connection() as conn:
         c = conn.cursor()
+        class_key = canonicalize_classname(classname)
         db_execute(
             c,
             """SELECT DISTINCT teacher_id
                FROM subject_score_submissions
-               WHERE school_id = ? AND LOWER(classname) = LOWER(?) AND LOWER(term) = LOWER(?) AND academic_year = ?""",
-            (school_id, classname, term, academic_year),
+               WHERE school_id = ?
+                 AND REGEXP_REPLACE(UPPER(COALESCE(classname, '')), '[^A-Z0-9]+', '', 'g') = ?
+                 AND LOWER(TRIM(COALESCE(term, ''))) = LOWER(TRIM(?))
+                 AND academic_year = ?""",
+            (school_id, class_key, term, academic_year),
         )
         rows = c.fetchall() or []
     return {(row[0] or '').strip() for row in rows if row and (row[0] or '').strip()}
@@ -18128,7 +22884,7 @@ def mark_subject_score_submitted(school_id, teacher_id, classname, term, academi
                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                ON CONFLICT(school_id, teacher_id, classname, term, academic_year)
                DO UPDATE SET submitted_at = CURRENT_TIMESTAMP""",
-            (school_id, teacher_id, classname, term, academic_year or ''),
+            (school_id, teacher_id, canonicalize_classname(classname), term, academic_year or ''),
         )
     return True
 
@@ -18138,12 +22894,15 @@ def clear_subject_score_submission(school_id, teacher_id, classname, term, acade
         return
     with db_connection(commit=True) as conn:
         c = conn.cursor()
+        class_key = canonicalize_classname(classname)
         db_execute(
             c,
             """DELETE FROM subject_score_submissions
-               WHERE school_id = ? AND teacher_id = ? AND LOWER(classname) = LOWER(?)
-                 AND term = ? AND academic_year = ?""",
-            (school_id, teacher_id, classname, term, academic_year or ''),
+               WHERE school_id = ? AND teacher_id = ?
+                 AND REGEXP_REPLACE(UPPER(COALESCE(classname, '')), '[^A-Z0-9]+', '', 'g') = ?
+                 AND LOWER(TRIM(COALESCE(term, ''))) = LOWER(TRIM(?))
+                 AND academic_year = ?""",
+            (school_id, teacher_id, class_key, term, academic_year or ''),
         )
 
 def get_result_signoff_details(school_id, classname, term, academic_year=''):
@@ -18381,7 +23140,7 @@ def assign_teacher_to_class(school_id, teacher_id, classname, term, academic_yea
             academic_year = (school.get('academic_year', '') or '').strip()
         if not academic_year:
             raise ValueError('Academic year is required for class assignment.')
-        classname = ' '.join((classname or '').strip().split())
+        classname = canonicalize_classname(classname)
         term = ' '.join((term or '').strip().split())
         db_execute(
             c,
@@ -18395,7 +23154,10 @@ def assign_teacher_to_class(school_id, teacher_id, classname, term, academic_yea
         db_execute(
             c,
             """SELECT teacher_id FROM class_assignments
-               WHERE school_id = ? AND LOWER(classname) = LOWER(?) AND LOWER(term) = LOWER(?) AND academic_year = ?
+               WHERE school_id = ?
+                 AND REGEXP_REPLACE(UPPER(COALESCE(classname, '')), '[^A-Z0-9]+', '', 'g') = ?
+                 AND LOWER(TRIM(COALESCE(term, ''))) = LOWER(TRIM(?))
+                 AND academic_year = ?
                LIMIT 1""",
             (school_id, classname, term, academic_year)
         )
@@ -18421,7 +23183,7 @@ def assign_teacher_to_subjects(school_id, teacher_id, classname, subjects, term,
             academic_year = (school.get('academic_year', '') or '').strip()
         if not academic_year:
             raise ValueError('Academic year is required for subject assignment.')
-        classname = ' '.join((classname or '').strip().split())
+        classname = canonicalize_classname(classname)
         term = ' '.join((term or '').strip().split())
         db_execute(
             c,
@@ -18436,8 +23198,10 @@ def assign_teacher_to_subjects(school_id, teacher_id, classname, subjects, term,
             c,
             """SELECT subject
                FROM teacher_subject_assignments
-               WHERE school_id = ? AND teacher_id = ? AND LOWER(classname) = LOWER(?)
-                 AND LOWER(term) = LOWER(?) AND academic_year = ?""",
+               WHERE school_id = ? AND teacher_id = ?
+                 AND REGEXP_REPLACE(UPPER(COALESCE(classname, '')), '[^A-Z0-9]+', '', 'g') = ?
+                 AND LOWER(TRIM(COALESCE(term, ''))) = LOWER(TRIM(?))
+                 AND academic_year = ?""",
             (school_id, teacher_id, classname, term, academic_year),
         )
         existing_subjects = normalize_subjects_list([row[0] for row in (c.fetchall() or []) if row and row[0]])
@@ -18447,8 +23211,11 @@ def assign_teacher_to_subjects(school_id, teacher_id, classname, subjects, term,
                 c,
                 """SELECT teacher_id
                    FROM teacher_subject_assignments
-                   WHERE school_id = ? AND LOWER(classname) = LOWER(?) AND LOWER(subject) = LOWER(?)
-                     AND LOWER(term) = LOWER(?) AND academic_year = ?
+                   WHERE school_id = ?
+                     AND REGEXP_REPLACE(UPPER(COALESCE(classname, '')), '[^A-Z0-9]+', '', 'g') = ?
+                     AND LOWER(subject) = LOWER(?)
+                     AND LOWER(TRIM(COALESCE(term, ''))) = LOWER(TRIM(?))
+                     AND academic_year = ?
                    LIMIT 1""",
                 (school_id, classname, subject, term, academic_year),
             )
@@ -18473,12 +23240,16 @@ def remove_teacher_subject_assignment(school_id, teacher_id, classname, subject,
     """Remove one teacher-subject assignment."""
     with db_connection(commit=True) as conn:
         c = conn.cursor()
+        class_key = canonicalize_classname(classname)
         db_execute(
             c,
             """DELETE FROM teacher_subject_assignments
-               WHERE school_id = ? AND teacher_id = ? AND LOWER(classname) = LOWER(?)
-                 AND LOWER(subject) = LOWER(?) AND LOWER(term) = LOWER(?) AND academic_year = ?""",
-            (school_id, teacher_id, classname, subject, term, academic_year),
+               WHERE school_id = ? AND teacher_id = ?
+                 AND REGEXP_REPLACE(UPPER(COALESCE(classname, '')), '[^A-Z0-9]+', '', 'g') = ?
+                 AND LOWER(subject) = LOWER(?)
+                 AND LOWER(TRIM(COALESCE(term, ''))) = LOWER(TRIM(?))
+                 AND academic_year = ?""",
+            (school_id, teacher_id, class_key, subject, term, academic_year),
         )
 
 def get_teacher_subject_assignments(school_id, teacher_id='', classname='', term='', academic_year=''):
@@ -18491,10 +23262,11 @@ def get_teacher_subject_assignments(school_id, teacher_id='', classname='', term
             where.append('tsa.teacher_id = ?')
             params.append(teacher_id)
         if classname:
-            where.append('LOWER(tsa.classname) = LOWER(?)')
-            params.append(classname)
+            class_key = canonicalize_classname(classname)
+            where.append("REGEXP_REPLACE(UPPER(COALESCE(tsa.classname, '')), '[^A-Z0-9]+', '', 'g') = ?")
+            params.append(class_key)
         if term:
-            where.append('LOWER(tsa.term) = LOWER(?)')
+            where.append("LOWER(TRIM(COALESCE(tsa.term, ''))) = LOWER(TRIM(?))")
             params.append(term)
         if academic_year:
             where.append('tsa.academic_year = ?')
@@ -18528,7 +23300,7 @@ def get_teacher_subject_assignments(school_id, teacher_id='', classname='', term
         out.append({
             'teacher_id': teacher_id_row,
             'teacher_name': teacher_name,
-            'classname': cls,
+            'classname': canonicalize_classname(cls),
             'subject': subject,
             'term': row_term,
             'academic_year': row_year,
@@ -18539,11 +23311,15 @@ def remove_teacher_from_class(school_id, teacher_id, classname, term, academic_y
     """Remove teacher assignment from a class/term."""
     with db_connection(commit=True) as conn:
         c = conn.cursor()
+        class_key = canonicalize_classname(classname)
         db_execute(
             c,
             """DELETE FROM class_assignments
-               WHERE school_id = ? AND teacher_id = ? AND LOWER(classname) = LOWER(?) AND LOWER(term) = LOWER(?) AND academic_year = ?""",
-            (school_id, teacher_id, classname, term, academic_year)
+               WHERE school_id = ? AND teacher_id = ?
+                 AND REGEXP_REPLACE(UPPER(COALESCE(classname, '')), '[^A-Z0-9]+', '', 'g') = ?
+                 AND LOWER(TRIM(COALESCE(term, ''))) = LOWER(TRIM(?))
+                 AND academic_year = ?""",
+            (school_id, teacher_id, class_key, term, academic_year)
         )
 
 def get_class_assignments(school_id):
@@ -18581,7 +23357,7 @@ def get_teacher_classes(school_id, teacher_id, term='', academic_year=''):
         where = ['school_id = ?', 'teacher_id = ?']
         params = [school_id, teacher_id]
         if term:
-            where.append('LOWER(term) = LOWER(?)')
+            where.append("LOWER(TRIM(COALESCE(term, ''))) = LOWER(TRIM(?))")
             params.append(term)
         if academic_year:
             where.append('academic_year = ?')
@@ -18589,14 +23365,24 @@ def get_teacher_classes(school_id, teacher_id, term='', academic_year=''):
         db_execute(c, f"""SELECT DISTINCT classname FROM class_assignments 
                        WHERE {' AND '.join(where)}""",
                    tuple(params))
-        return [row[0] for row in c.fetchall()]
+        out = []
+        seen = set()
+        for row in c.fetchall() or []:
+            cls = canonicalize_classname((row[0] or '').strip())
+            if cls and cls not in seen:
+                seen.add(cls)
+                out.append(cls)
+        return out
 
 def teacher_has_class_access(school_id, teacher_id, classname, term='', academic_year=''):
     """Check whether teacher is assigned to a class."""
     if not classname:
         return False
-    target = (classname or '').strip().lower()
-    classes = {(c or '').strip().lower() for c in get_teacher_classes(school_id, teacher_id, term=term, academic_year=academic_year)}
+    target = canonicalize_classname(classname).lower()
+    classes = {
+        canonicalize_classname(c).lower()
+        for c in get_teacher_classes(school_id, teacher_id, term=term, academic_year=academic_year)
+    }
     return target in classes
 
 def get_teacher_subjects(school_id, teacher_id):
@@ -18609,7 +23395,7 @@ def get_teacher_subjects_for_class_term(school_id, teacher_id, classname, term='
     rows = get_teacher_subject_assignments(
         school_id,
         teacher_id=teacher_id,
-        classname=classname,
+        classname=canonicalize_classname(classname),
         term=term,
         academic_year=academic_year,
     )
@@ -20143,7 +24929,13 @@ def enforce_school_operations_toggle():
             return None
         return redirect(url_for('teacher_dashboard'))
 
-    school_admin_allowed_when_locked = {'school_admin_change_password', 'privacy_request', 'report_issue'}
+    school_admin_allowed_when_locked = {
+        'school_admin_change_password',
+        'privacy_request',
+        'report_issue',
+        'school_admin_privacy_requests',
+        'school_admin_privacy_requests_review',
+    }
     if role == 'school_admin' and endpoint not in school_admin_allowed_when_locked and (endpoint in school_admin_blocked_endpoints or request.method == 'POST'):
         flash('School operations are OFF by super admin. School admin is currently in read-only mode.', 'error')
         return redirect(url_for('school_admin_dashboard'))
@@ -20209,6 +25001,74 @@ def enforce_school_access_policy():
     session.clear()
     flash(blocked_message, 'error')
     return redirect(url_for('login'))
+
+
+CBT_RESTRICTED_ENDPOINTS = {
+    'teacher_cbt',
+    'teacher_cbt_create',
+    'teacher_cbt_questions',
+    'teacher_cbt_add_question',
+    'teacher_cbt_delete_question',
+    'teacher_cbt_set_status',
+    'teacher_cbt_results',
+    'teacher_cbt_monitor',
+    'teacher_cbt_save_accommodation',
+    'teacher_cbt_retrieve',
+    'school_admin_cbt',
+    'school_admin_cbt_create',
+    'school_admin_cbt_questions',
+    'school_admin_cbt_add_question',
+    'school_admin_cbt_delete_question',
+    'school_admin_cbt_set_status',
+    'student_cbt',
+    'student_cbt_take',
+    'student_cbt_autosave',
+}
+
+
+def _school_cbt_disabled_message():
+    return 'CBT is disabled for this school. Contact super admin to enable CBT access.'
+
+
+@app.before_request
+def enforce_school_cbt_access_policy():
+    endpoint = (request.endpoint or '').strip()
+    if endpoint not in CBT_RESTRICTED_ENDPOINTS:
+        return None
+
+    role = (session.get('role') or '').strip().lower()
+    if role not in {'teacher', 'school_admin', 'student'}:
+        return None
+
+    school_id = (session.get('school_id') or '').strip()
+    if not school_id:
+        return None
+    try:
+        school = get_school(school_id) or {}
+    except Exception as exc:
+        logging.warning("Skipping CBT access policy check due lookup error: %s", exc)
+        return None
+
+    if normalize_school_cbt_enabled(school.get('cbt_enabled', 1), default=1):
+        return None
+
+    message = _school_cbt_disabled_message()
+    if endpoint == 'student_cbt_autosave':
+        return jsonify({'ok': False, 'error': 'cbt_disabled', 'message': message}), 403
+    if role == 'teacher':
+        flash(message, 'error')
+        return redirect(url_for('teacher_dashboard'))
+    if role == 'school_admin':
+        flash(message, 'error')
+        return redirect(url_for('school_admin_dashboard'))
+    # student
+    if safe_int(session.get('cbt_only', 0), 0):
+        session.clear()
+        flash(message, 'error')
+        return redirect(url_for('cbt_login'))
+    flash(message, 'error')
+    return redirect(url_for('student_dashboard'))
+
 
 @app.before_request
 def enforce_student_password_change():
@@ -20298,6 +25158,11 @@ def enforce_role_namespace_and_session_binding():
             'super_admin_two_factor',
             'manifest',
             'service_worker',
+            'assistant_guide',
+            'assistant_feedback',
+            'assistant_preferences',
+            'assistant_memory_clear',
+            'assistant_health',
         }
         or path.startswith('/static/')
         or path in {'/manifest.webmanifest', '/sw.js'}
@@ -20326,10 +25191,25 @@ def enforce_role_namespace_and_session_binding():
             for k in student_keys_raw
             if isinstance(k, str) and '::' in str(k)
         }
-        if not parent_phone or not student_keys:
+        if not parent_phone:
             session.clear()
             flash('Parent session is invalid. Please login again.', 'error')
             return redirect(url_for('login'))
+
+        # Recover missing session key cache from current parent links.
+        if not student_keys:
+            allowed_keys = _parent_allowed_student_keys()
+            if not allowed_keys:
+                session.clear()
+                flash('Parent access links are no longer valid. Please login again.', 'error')
+                return redirect(url_for('login'))
+            normalized_keys = sorted(allowed_keys, key=lambda v: v.lower())
+            session['parent_student_keys'] = normalized_keys
+            first_school = (normalized_keys[0].split('::', 1)[0] if normalized_keys and '::' in normalized_keys[0] else '').strip()
+            if first_school:
+                session['school_id'] = first_school
+            session['_auth_binding_checked_at'] = time.time()
+            return None
 
         now_ts = time.time()
         try:
@@ -20371,8 +25251,18 @@ def enforce_role_namespace_and_session_binding():
     if (now_ts - last_checked) < AUTH_BINDING_CHECK_INTERVAL_SECONDS:
         return None
 
-    user_row = get_user(user_id)
+    try:
+        user_row, lookup_status = get_user(user_id, return_meta=True)
+    except TypeError:
+        # Backward-compatible fallback for patched/mocked get_user(username) call sites.
+        user_row = get_user(user_id)
+        lookup_status = 'ok' if user_row else 'not_found'
     if not user_row:
+        if lookup_status == 'db_error':
+            # Keep active session during temporary DB outages; retry on next interval.
+            session['_auth_binding_checked_at'] = now_ts
+            logging.warning("Skipping session binding enforcement due user lookup DB error for %s", user_id)
+            return None
         session.clear()
         flash('Account not found. Please login again.', 'error')
         return redirect(url_for('login'))
@@ -20393,6 +25283,34 @@ def enforce_role_namespace_and_session_binding():
 
     session['_auth_binding_checked_at'] = now_ts
     return None
+
+@app.before_request
+def enforce_student_cbt_only_mode():
+    """When CBT login mode is active for a student, limit access to CBT routes."""
+    if (session.get('role') or '').strip().lower() != 'student':
+        return None
+    if not safe_int(session.get('cbt_only', 0), 0):
+        return None
+    endpoint = (request.endpoint or '').strip()
+    path = (request.path or '').strip()
+    if (
+        endpoint in {
+            'static',
+            'logout',
+            'manifest',
+            'service_worker',
+            'student_cbt',
+            'student_cbt_take',
+            'student_cbt_autosave',
+            'student_change_password',
+        }
+        or path.startswith('/static/')
+        or path in {'/manifest.webmanifest', '/sw.js'}
+    ):
+        return None
+    if request.method == 'POST' and endpoint == 'login':
+        return None
+    return redirect(url_for('student_cbt'))
 
 def _collect_request_school_ids():
     keys = {'school_id', 'target_school_id', 'reporter_school_id', 'selected_school_id'}
@@ -20552,6 +25470,115 @@ def apply_pwa_and_cache_headers(response):
     if app.config.get('SESSION_COOKIE_SECURE'):
         response.headers.setdefault('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
     return response
+
+@app.route('/cbt-login', methods=['GET', 'POST'])
+@require_rate_limit('cbt_login', RATE_LIMIT_LOGIN_PER_MIN, 60, redirect_endpoint='cbt_login', methods=('POST',))
+def cbt_login():
+    """Dedicated student CBT login that opens CBT-only workspace."""
+    existing_role = (session.get('role') or '').strip().lower()
+    if existing_role and existing_role != 'student':
+        return redirect(url_for(_role_home_endpoint(existing_role)))
+    if existing_role == 'student' and safe_int(session.get('cbt_only', 0), 0):
+        return redirect(url_for('student_cbt'))
+    if existing_role == 'student':
+        return redirect(url_for('student_cbt'))
+    terms_read = request.args.get('terms_read') == '1'
+    if request.method == 'POST':
+        username = (request.form.get('username', '') or '').strip().lower()
+        password = request.form.get('password', '')
+        agreed_terms = request.form.get('agree_terms') == 'on'
+        terms_read = terms_read or agreed_terms
+        if not username or not password:
+            flash('Please enter student ID and password.', 'error')
+            return render_template('shared/cbt_login.html', terms_read=terms_read)
+
+        client_ip = get_client_ip()
+        blocked, wait_minutes = is_login_blocked('cbt_login', username, client_ip)
+        if blocked:
+            flash(f'Too many failed login attempts. Try again in about {wait_minutes} minute(s).', 'error')
+            return render_template('shared/cbt_login.html', terms_read=terms_read)
+
+        user = get_user(username)
+        if not user:
+            register_failed_login('cbt_login', username, client_ip)
+            record_login_audit(username, 'student', None, 'cbt_login', False, 'invalid_credentials')
+            flash('Invalid student ID or password.', 'error')
+            return render_template('shared/cbt_login.html', terms_read=terms_read)
+
+        role = (user.get('role') or '').strip().lower()
+        if role != 'student':
+            register_failed_login('cbt_login', username, client_ip)
+            record_login_audit(username, role or '', user.get('school_id'), 'cbt_login', False, 'non_student_for_cbt_login')
+            flash('CBT login is for students only.', 'error')
+            return render_template('shared/cbt_login.html', terms_read=terms_read)
+        if not check_password(user.get('password_hash', ''), password):
+            register_failed_login('cbt_login', username, client_ip)
+            record_login_audit(username, role, user.get('school_id'), 'cbt_login', False, 'invalid_credentials')
+            flash('Invalid student ID or password.', 'error')
+            return render_template('shared/cbt_login.html', terms_read=terms_read)
+
+        terms_accepted = int(user.get('terms_accepted') or 0)
+        if not terms_accepted and not agreed_terms:
+            flash('You must agree to the Terms and Privacy Policy to continue.', 'error')
+            return render_template('shared/cbt_login.html', terms_read=terms_read)
+        if not terms_accepted and agreed_terms:
+            mark_terms_accepted(user.get('username'))
+
+        user_school_id = (user.get('school_id') or '').strip()
+        if not user_school_id:
+            resolved_school_id = find_student_school_id(user.get('username'))
+            if resolved_school_id:
+                update_user_school_id_only(user.get('username'), resolved_school_id)
+                user_school_id = resolved_school_id
+        if not user_school_id:
+            register_failed_login('cbt_login', username, client_ip)
+            record_login_audit(username, role, user_school_id, 'cbt_login', False, 'missing_school_assignment')
+            flash('Student account is missing school assignment. Contact school admin.', 'error')
+            return render_template('shared/cbt_login.html', terms_read=terms_read)
+
+        school_row = get_school(user_school_id)
+        if not school_row:
+            register_failed_login('cbt_login', username, client_ip)
+            record_login_audit(username, role, user_school_id, 'cbt_login', False, 'invalid_school_assignment')
+            flash('Student account is linked to an invalid school. Contact school admin.', 'error')
+            return render_template('shared/cbt_login.html', terms_read=terms_read)
+        access_state = build_school_access_state(school_row or {})
+        if not access_state.get('is_allowed', False):
+            register_failed_login('cbt_login', username, client_ip)
+            record_login_audit(
+                username,
+                role,
+                user_school_id,
+                'cbt_login',
+                False,
+                f"school_access_{access_state.get('effective_status', 'blocked')}",
+            )
+            flash(access_state.get('message') or 'School access is restricted. Contact super admin.', 'error')
+            return render_template('shared/cbt_login.html', terms_read=terms_read, blocked_access_state=access_state)
+        if not normalize_school_cbt_enabled(school_row.get('cbt_enabled', 1), default=1):
+            record_login_audit(username, role, user_school_id, 'cbt_login', False, 'cbt_disabled')
+            cbt_block_state = {
+                'effective_status': 'suspended',
+                'message': _school_cbt_disabled_message(),
+            }
+            flash(_school_cbt_disabled_message(), 'error')
+            return render_template('shared/cbt_login.html', terms_read=terms_read, blocked_access_state=cbt_block_state)
+
+        student_row = load_student(user_school_id, username)
+        if not student_row:
+            register_failed_login('cbt_login', username, client_ip)
+            record_login_audit(username, role, user_school_id, 'cbt_login', False, 'student_archived_or_missing')
+            flash('Student account is inactive. Contact school admin.', 'error')
+            return render_template('shared/cbt_login.html', terms_read=terms_read)
+
+        clear_failed_login('cbt_login', username, client_ip)
+        response = _complete_authenticated_login(user, user_school_id)
+        if session.get('must_change_password'):
+            return response
+        session['cbt_only'] = 1
+        return redirect(url_for('student_cbt'))
+    return render_template('shared/cbt_login.html', terms_read=terms_read)
+
 
 @app.route('/login', methods=['GET', 'POST'])
 @require_rate_limit('login', RATE_LIMIT_LOGIN_PER_MIN, 60, redirect_endpoint='login', methods=('POST',))
@@ -20788,19 +25815,21 @@ def terms_privacy():
 @app.route('/privacy-request', methods=['GET', 'POST'])
 @require_rate_limit('privacy_request_submit', 20, 3600, redirect_endpoint='privacy_request', methods=('POST',))
 def privacy_request():
-    """Allow users to submit data export/delete/correction requests."""
+    """Allow users to submit controlled data-rights requests."""
     role = (session.get('role') or '').strip().lower()
     user_id = (session.get('user_id') or '').strip().lower()
     school_id = (session.get('school_id') or '').strip()
     if role not in {'super_admin', 'school_admin', 'teacher', 'student', 'parent'}:
         flash('Login required to submit privacy request.', 'error')
         return redirect(url_for('login'))
+    request_type_options = get_privacy_request_type_options()
     if request.method == 'POST':
-        req_type = (request.form.get('request_type') or '').strip().lower()
+        req_type = _normalize_privacy_request_type(request.form.get('request_type'))
         subject_line = (request.form.get('subject_line') or '').strip()
         details = (request.form.get('details') or '').strip()
+        payload = _build_privacy_request_payload_from_form(request.form)
         try:
-            req_id = create_privacy_data_request(
+            req_id = create_controlled_privacy_data_request(
                 role=role,
                 user_id=user_id or (session.get('parent_phone') or ''),
                 school_id=school_id,
@@ -20809,13 +25838,129 @@ def privacy_request():
                 details=details,
                 source_page=(request.referrer or request.path or '')[:240],
                 source_ip=get_client_ip(),
+                payload=payload,
             )
             flash(f'Privacy request submitted. Reference: {req_id}', 'success')
             return redirect(url_for('privacy_request'))
+        except ValueError as exc:
+            flash(str(exc), 'error')
         except Exception:
             logging.exception("Could not submit privacy request.")
             flash('Could not submit privacy request. Please retry.', 'error')
-    return render_template('shared/privacy_request.html', role=role)
+    return render_template('shared/privacy_request.html', role=role, request_type_options=request_type_options)
+
+
+@app.route('/school-admin/privacy-requests')
+def school_admin_privacy_requests():
+    if (session.get('role') or '').strip().lower() != 'school_admin':
+        return redirect(url_for('login'))
+    school_id = (session.get('school_id') or '').strip()
+    if not school_id:
+        flash('School context is missing. Please login again.', 'error')
+        return redirect(url_for('login'))
+    school = get_school(school_id) or {}
+    queue_filter = (request.args.get('queue') or 'pending_school').strip().lower()
+    if queue_filter not in {'pending_school', 'pending_super', 'approved', 'resolved', 'rejected', 'all'}:
+        queue_filter = 'pending_school'
+    text_filter = (request.args.get('q') or '').strip()
+    try:
+        page = int(request.args.get('page', 1))
+    except Exception:
+        page = 1
+    try:
+        per_page = int(request.args.get('per_page', 25))
+    except Exception:
+        per_page = 25
+    page = max(1, page)
+    per_page = max(10, min(100, per_page))
+    rows, total_rows = list_privacy_data_requests_for_school(
+        school_id=school_id,
+        queue_filter=queue_filter,
+        text_filter=text_filter,
+        page=page,
+        per_page=per_page,
+        include_total=True,
+    )
+    total_pages = max(1, math.ceil(total_rows / max(1, per_page)))
+    return render_template(
+        'school/school_admin_privacy_requests.html',
+        school=school,
+        active_page='privacy_requests',
+        requests_data=rows,
+        queue_filter=queue_filter,
+        text_filter=text_filter,
+        page=page,
+        per_page=per_page,
+        total_rows=total_rows,
+        total_pages=total_pages,
+        last_login_at=format_timestamp(get_last_login_at(session.get('user_id'))),
+    )
+
+
+@app.route('/school-admin/privacy-requests/review', methods=['POST'])
+def school_admin_privacy_requests_review():
+    if (session.get('role') or '').strip().lower() != 'school_admin':
+        return redirect(url_for('login'))
+    school_id = (session.get('school_id') or '').strip()
+    if not school_id:
+        flash('School context is missing. Please login again.', 'error')
+        return redirect(url_for('login'))
+    request_id = (request.form.get('request_id') or '').strip()
+    decision = (request.form.get('decision') or 'approved').strip().lower()
+    note = (request.form.get('note') or '').strip()
+    queue_filter = (request.form.get('queue') or 'pending_school').strip().lower()
+    if queue_filter not in {'pending_school', 'pending_super', 'approved', 'resolved', 'rejected', 'all'}:
+        queue_filter = 'pending_school'
+    text_filter = (request.form.get('q') or '').strip()
+    try:
+        page = max(1, int(request.form.get('page', 1)))
+    except Exception:
+        page = 1
+    try:
+        per_page = max(10, min(100, int(request.form.get('per_page', 25))))
+    except Exception:
+        per_page = 25
+    try:
+        review_privacy_data_request_by_school_admin(
+            request_id=request_id,
+            school_id=school_id,
+            decision=decision,
+            note=note,
+            actor=(session.get('user_id') or '').strip(),
+        )
+        try:
+            record_admin_action_audit(
+                school_id,
+                'school_admin_privacy_request_review',
+                target_scope=f'privacy_request:{request_id}',
+                payload={
+                    'request_id': request_id,
+                    'decision': decision,
+                    'note': note[:500],
+                    'actor_role': 'school_admin',
+                    'actor_user_id': (session.get('user_id') or '').strip(),
+                },
+            )
+        except Exception as exc:
+            logging.warning("Failed to record school privacy review audit (%s): %s", request_id, exc)
+        if decision == 'approved':
+            flash(f'Request {request_id} approved and sent to super admin for final action.', 'success')
+        else:
+            flash(f'Request {request_id} rejected at school-admin review stage.', 'success')
+    except ValueError as exc:
+        flash(str(exc), 'error')
+    except Exception:
+        logging.exception("Could not review privacy request at school-admin stage.")
+        flash('Could not review privacy request. Please retry.', 'error')
+    return redirect(
+        url_for(
+            'school_admin_privacy_requests',
+            queue=queue_filter,
+            q=text_filter,
+            page=page,
+            per_page=per_page,
+        )
+    )
 
 
 @app.route('/super-admin/privacy-requests')
@@ -20823,6 +25968,8 @@ def super_admin_privacy_requests():
     if (session.get('role') or '').strip().lower() != 'super_admin':
         return redirect(url_for('login'))
     status_filter = (request.args.get('status') or '').strip().lower()
+    if status_filter not in {'pending', 'approved', 'resolved', 'rejected', ''}:
+        status_filter = ''
     text_filter = (request.args.get('q') or '').strip()
     try:
         page = int(request.args.get('page', 1))
@@ -20860,19 +26007,348 @@ def super_admin_privacy_requests_resolve():
     if (session.get('role') or '').strip().lower() != 'super_admin':
         return redirect(url_for('login'))
     request_id = (request.form.get('request_id') or '').strip()
-    status = (request.form.get('status') or 'resolved').strip().lower()
+    status = (request.form.get('status') or 'approved').strip().lower()
     note = (request.form.get('note') or '').strip()
     try:
-        resolve_privacy_data_request(
+        update_privacy_data_request_status(
             request_id=request_id,
             status=status,
             note=note,
             actor=session.get('user_id', ''),
         )
-        flash(f'Privacy request {request_id} updated as {status}.', 'success')
+        flash(
+            f'Privacy request {request_id} updated as {status}. '
+            'Use apply actions only after approval for data-change request types.',
+            'success',
+        )
+    except ValueError as exc:
+        flash(str(exc), 'error')
     except Exception:
         logging.exception("Could not update privacy request.")
         flash('Could not update privacy request. Please retry.', 'error')
+    return redirect(url_for('super_admin_privacy_requests'))
+
+@app.route('/super-admin/privacy-requests/apply-parent-phone', methods=['POST'])
+def super_admin_apply_parent_phone_change():
+    if (session.get('role') or '').strip().lower() != 'super_admin':
+        return redirect(url_for('login'))
+    request_id = (request.form.get('request_id') or '').strip()
+    apply_note = (request.form.get('apply_note') or '').strip()
+    try:
+        req = assert_privacy_request_applicable(request_id, 'apply_parent_phone')
+        school_id = (req.get('school_id') or '').strip()
+        payload = req.get('request_payload') if isinstance(req.get('request_payload'), dict) else {}
+        student_id = (request.form.get('student_id') or payload.get('student_id') or '').strip()
+        parent_slot = (request.form.get('parent_slot') or payload.get('parent_slot') or '1').strip()
+        new_parent_phone = normalize_parent_phone(request.form.get('new_parent_phone', '') or payload.get('new_parent_phone', ''))
+        if parent_slot not in {'1', '2'}:
+            raise ValueError('Invalid parent slot. Choose Parent 1 or Parent 2.')
+        if not school_id or not student_id:
+            raise ValueError('School ID and Student ID are required.')
+        if not new_parent_phone or not is_valid_parent_phone(new_parent_phone):
+            raise ValueError('Enter a valid new parent phone number.')
+        if not students_has_parent_access_columns():
+            raise ValueError('Parent access columns are missing. Run schema updates and retry.')
+        if parent_slot == '2' and not students_has_parent_multi_access_columns():
+            raise ValueError('Secondary parent columns are missing. Run schema updates and retry.')
+        student = load_student(school_id, student_id)
+        if not student:
+            raise ValueError('Student not found for that school.')
+
+        current_parent1 = normalize_parent_phone(student.get('parent_phone', ''))
+        current_parent2 = normalize_parent_phone(student.get('parent_phone_2', ''))
+        old_phone = current_parent1 if parent_slot == '1' else current_parent2
+        if parent_slot == '1':
+            if current_parent2 and new_parent_phone == current_parent2:
+                raise ValueError('Parent 1 phone cannot match Parent 2 phone.')
+            student['parent_phone'] = new_parent_phone
+        else:
+            if current_parent1 and new_parent_phone == current_parent1:
+                raise ValueError('Parent 2 phone must be different from Parent 1 phone.')
+            student['parent_phone_2'] = new_parent_phone
+
+        save_student(school_id, student_id, student)
+        before_snapshot = {
+            'student_id': student_id,
+            'parent_slot': parent_slot,
+            'old_parent_phone': old_phone,
+        }
+        after_snapshot = {
+            'student_id': student_id,
+            'parent_slot': parent_slot,
+            'new_parent_phone': new_parent_phone,
+        }
+        complete_privacy_request_apply(
+            request_id=request_id,
+            actor=session.get('user_id', ''),
+            note=apply_note or f'Parent {parent_slot} phone updated for student {student_id}.',
+            before_snapshot=before_snapshot,
+            after_snapshot=after_snapshot,
+        )
+        record_admin_action_audit(
+            school_id,
+            'super_admin_parent_phone_change',
+            target_scope=f'student:{student_id}',
+            payload={
+                'request_id': request_id,
+                'parent_slot': parent_slot,
+                'old_parent_phone': old_phone,
+                'new_parent_phone': new_parent_phone,
+                'actor_role': 'super_admin',
+                'actor_user_id': (session.get('user_id') or '').strip(),
+            },
+        )
+    except ValueError as exc:
+        flash(str(exc), 'error')
+        return redirect(url_for('super_admin_privacy_requests'))
+    except Exception:
+        logging.exception("Could not apply parent phone change request.")
+        flash('Could not apply parent phone change. Please retry.', 'error')
+        return redirect(url_for('super_admin_privacy_requests'))
+    flash(f'Parent {parent_slot} phone updated for student {student_id}.', 'success')
+    return redirect(url_for('super_admin_privacy_requests'))
+
+@app.route('/super-admin/privacy-requests/apply-student-email', methods=['POST'])
+def super_admin_apply_student_email_change():
+    if (session.get('role') or '').strip().lower() != 'super_admin':
+        return redirect(url_for('login'))
+    request_id = (request.form.get('request_id') or '').strip()
+    apply_note = (request.form.get('apply_note') or '').strip()
+    try:
+        req = assert_privacy_request_applicable(request_id, 'apply_student_email')
+        school_id = (req.get('school_id') or '').strip()
+        payload = req.get('request_payload') if isinstance(req.get('request_payload'), dict) else {}
+        student_id = (request.form.get('student_id') or payload.get('student_id') or '').strip()
+        new_student_email = (request.form.get('new_student_email') or payload.get('new_student_email') or '').strip().lower()
+        if not school_id or not student_id:
+            raise ValueError('School ID and Student ID are required.')
+        if not new_student_email or not is_valid_email(new_student_email):
+            raise ValueError('Enter a valid student email.')
+        student = load_student(school_id, student_id)
+        if not student:
+            raise ValueError('Student not found for that school.')
+        old_email = (student.get('email') or '').strip().lower()
+        student['email'] = new_student_email
+        save_student(school_id, student_id, student)
+        complete_privacy_request_apply(
+            request_id=request_id,
+            actor=session.get('user_id', ''),
+            note=apply_note or f'Student email updated for student {student_id}.',
+            before_snapshot={'student_id': student_id, 'old_email': old_email},
+            after_snapshot={'student_id': student_id, 'new_email': new_student_email},
+        )
+        record_admin_action_audit(
+            school_id,
+            'super_admin_student_email_change',
+            target_scope=f'student:{student_id}',
+            payload={
+                'request_id': request_id,
+                'old_student_email': old_email,
+                'new_student_email': new_student_email,
+                'actor_role': 'super_admin',
+                'actor_user_id': (session.get('user_id') or '').strip(),
+            },
+        )
+    except ValueError as exc:
+        flash(str(exc), 'error')
+        return redirect(url_for('super_admin_privacy_requests'))
+    except Exception:
+        logging.exception("Could not apply student email change request.")
+        flash('Could not apply student email change. Please retry.', 'error')
+        return redirect(url_for('super_admin_privacy_requests'))
+    flash(f'Student email updated for student {student_id}.', 'success')
+    return redirect(url_for('super_admin_privacy_requests'))
+
+@app.route('/super-admin/privacy-requests/apply-student-name', methods=['POST'])
+def super_admin_apply_student_name_change():
+    if (session.get('role') or '').strip().lower() != 'super_admin':
+        return redirect(url_for('login'))
+    request_id = (request.form.get('request_id') or '').strip()
+    apply_note = (request.form.get('apply_note') or '').strip()
+    try:
+        req = assert_privacy_request_applicable(request_id, 'apply_student_name')
+        school_id = (req.get('school_id') or '').strip()
+        payload = req.get('request_payload') if isinstance(req.get('request_payload'), dict) else {}
+        student_id = (request.form.get('student_id') or payload.get('student_id') or '').strip()
+        new_student_name = normalize_person_name(request.form.get('new_student_name', '') or payload.get('new_student_name', ''))
+        if not school_id or not student_id:
+            raise ValueError('School ID and Student ID are required.')
+        if not new_student_name:
+            raise ValueError('Enter a valid student name.')
+        student = load_student(school_id, student_id)
+        if not student:
+            raise ValueError('Student not found for that school.')
+        old_name = (student.get('firstname') or '').strip()
+        student['firstname'] = new_student_name
+        save_student(school_id, student_id, student)
+        complete_privacy_request_apply(
+            request_id=request_id,
+            actor=session.get('user_id', ''),
+            note=apply_note or f'Student name updated for student {student_id}.',
+            before_snapshot={'student_id': student_id, 'old_name': old_name},
+            after_snapshot={'student_id': student_id, 'new_name': new_student_name},
+        )
+        record_admin_action_audit(
+            school_id,
+            'super_admin_student_name_change',
+            target_scope=f'student:{student_id}',
+            payload={
+                'request_id': request_id,
+                'old_student_name': old_name,
+                'new_student_name': new_student_name,
+                'actor_role': 'super_admin',
+                'actor_user_id': (session.get('user_id') or '').strip(),
+            },
+        )
+    except ValueError as exc:
+        flash(str(exc), 'error')
+        return redirect(url_for('super_admin_privacy_requests'))
+    except Exception:
+        logging.exception("Could not apply student name change request.")
+        flash('Could not apply student name change. Please retry.', 'error')
+        return redirect(url_for('super_admin_privacy_requests'))
+    flash(f'Student name updated for student {student_id}.', 'success')
+    return redirect(url_for('super_admin_privacy_requests'))
+
+@app.route('/super-admin/privacy-requests/apply-student-dob', methods=['POST'])
+def super_admin_apply_student_dob_change():
+    if (session.get('role') or '').strip().lower() != 'super_admin':
+        return redirect(url_for('login'))
+    request_id = (request.form.get('request_id') or '').strip()
+    apply_note = (request.form.get('apply_note') or '').strip()
+    try:
+        req = assert_privacy_request_applicable(request_id, 'apply_student_dob')
+        school_id = (req.get('school_id') or '').strip()
+        payload = req.get('request_payload') if isinstance(req.get('request_payload'), dict) else {}
+        student_id = (request.form.get('student_id') or payload.get('student_id') or '').strip()
+        new_student_dob = (request.form.get('new_student_dob') or payload.get('new_student_dob') or '').strip()
+        if not school_id or not student_id:
+            raise ValueError('School ID and Student ID are required.')
+        parsed_dob = _parse_iso_date(new_student_dob)
+        if not parsed_dob:
+            raise ValueError('Enter a valid date of birth in YYYY-MM-DD format.')
+        if parsed_dob > date.today():
+            raise ValueError('Date of birth cannot be in the future.')
+        student = load_student(school_id, student_id)
+        if not student:
+            raise ValueError('Student not found for that school.')
+        old_dob = (student.get('date_of_birth') or '').strip()
+        student['date_of_birth'] = parsed_dob.strftime('%Y-%m-%d')
+        save_student(school_id, student_id, student)
+        complete_privacy_request_apply(
+            request_id=request_id,
+            actor=session.get('user_id', ''),
+            note=apply_note or f'Student date of birth updated for student {student_id}.',
+            before_snapshot={'student_id': student_id, 'old_date_of_birth': old_dob},
+            after_snapshot={'student_id': student_id, 'new_date_of_birth': student['date_of_birth']},
+        )
+        record_admin_action_audit(
+            school_id,
+            'super_admin_student_dob_change',
+            target_scope=f'student:{student_id}',
+            payload={
+                'request_id': request_id,
+                'old_student_dob': old_dob,
+                'new_student_dob': student['date_of_birth'],
+                'actor_role': 'super_admin',
+                'actor_user_id': (session.get('user_id') or '').strip(),
+            },
+        )
+    except ValueError as exc:
+        flash(str(exc), 'error')
+        return redirect(url_for('super_admin_privacy_requests'))
+    except Exception:
+        logging.exception("Could not apply student DOB change request.")
+        flash('Could not apply student date of birth change. Please retry.', 'error')
+        return redirect(url_for('super_admin_privacy_requests'))
+    flash(f'Student date of birth updated for student {student_id}.', 'success')
+    return redirect(url_for('super_admin_privacy_requests'))
+
+@app.route('/super-admin/privacy-requests/apply-teacher-contact', methods=['POST'])
+def super_admin_apply_teacher_contact_change():
+    if (session.get('role') or '').strip().lower() != 'super_admin':
+        return redirect(url_for('login'))
+    request_id = (request.form.get('request_id') or '').strip()
+    apply_note = (request.form.get('apply_note') or '').strip()
+    try:
+        req = assert_privacy_request_applicable(request_id, 'apply_teacher_contact')
+        school_id = (req.get('school_id') or '').strip()
+        payload = req.get('request_payload') if isinstance(req.get('request_payload'), dict) else {}
+        teacher_id = (request.form.get('teacher_id') or payload.get('teacher_id') or '').strip().lower()
+        new_teacher_phone = (request.form.get('new_teacher_phone') or payload.get('new_teacher_phone') or '').strip()
+        new_teacher_email = (request.form.get('new_teacher_email') or payload.get('new_teacher_email') or '').strip().lower()
+        if not school_id or not teacher_id:
+            raise ValueError('School ID and Teacher ID are required.')
+        if not new_teacher_phone and not new_teacher_email:
+            raise ValueError('Provide at least one update (phone or email/login).')
+        teacher = get_teacher(school_id, teacher_id)
+        if not teacher:
+            raise ValueError('Teacher not found for that school.')
+        if new_teacher_phone and not is_valid_parent_phone(new_teacher_phone):
+            raise ValueError('Enter a valid teacher phone number.')
+        if new_teacher_email and not is_valid_email(new_teacher_email):
+            raise ValueError('Enter a valid teacher email/login.')
+
+        old_phone = (teacher.get('phone') or '').strip()
+        effective_teacher_id = teacher_id
+        if new_teacher_email and new_teacher_email != teacher_id:
+            _rename_teacher_identifier_across_tables(school_id, teacher_id, new_teacher_email)
+            effective_teacher_id = new_teacher_email
+
+        if new_teacher_phone:
+            with db_connection(commit=True) as conn:
+                c = conn.cursor()
+                db_execute(
+                    c,
+                    """UPDATE teachers
+                       SET phone = ?
+                       WHERE school_id = ? AND LOWER(user_id) = LOWER(?)""",
+                    (new_teacher_phone, school_id, effective_teacher_id),
+                )
+                if c.rowcount <= 0:
+                    raise ValueError('Teacher phone update failed.')
+
+        note_parts = []
+        if new_teacher_phone:
+            note_parts.append('phone updated')
+        if new_teacher_email and new_teacher_email != teacher_id:
+            note_parts.append('email/login updated')
+        note_text = ', '.join(note_parts) if note_parts else 'contact updated'
+        complete_privacy_request_apply(
+            request_id=request_id,
+            actor=session.get('user_id', ''),
+            note=apply_note or f'Teacher contact updated ({note_text}) for {effective_teacher_id}.',
+            before_snapshot={
+                'old_teacher_id': teacher_id,
+                'old_teacher_phone': old_phone,
+            },
+            after_snapshot={
+                'new_teacher_id': effective_teacher_id,
+                'new_teacher_phone': new_teacher_phone or old_phone,
+            },
+        )
+        record_admin_action_audit(
+            school_id,
+            'super_admin_teacher_contact_change',
+            target_scope=f'teacher:{effective_teacher_id}',
+            payload={
+                'request_id': request_id,
+                'old_teacher_id': teacher_id,
+                'new_teacher_email': new_teacher_email,
+                'old_teacher_phone': old_phone,
+                'new_teacher_phone': new_teacher_phone,
+                'actor_role': 'super_admin',
+                'actor_user_id': (session.get('user_id') or '').strip(),
+            },
+        )
+    except ValueError as exc:
+        flash(str(exc), 'error')
+        return redirect(url_for('super_admin_privacy_requests'))
+    except Exception:
+        logging.exception("Could not apply teacher contact change request.")
+        flash('Could not apply teacher contact change. Please retry.', 'error')
+        return redirect(url_for('super_admin_privacy_requests'))
+    flash(f'Teacher contact updated for {effective_teacher_id}.', 'success')
     return redirect(url_for('super_admin_privacy_requests'))
 
 
@@ -21012,6 +26488,48 @@ def super_admin_dashboard():
     last_login_at = format_timestamp(get_last_login_at(session.get('user_id')))
     return render_template('super/super_admin_dashboard.html', overview=overview, last_login_at=last_login_at)
 
+@app.route('/super-admin/assistant-analytics')
+def super_admin_assistant_analytics():
+    if session.get('role') != 'super_admin':
+        return redirect(url_for('login'))
+    try:
+        assistant_days = int((request.args.get('assistant_days', '') or '30').strip())
+    except Exception:
+        assistant_days = 30
+    if assistant_days not in {7, 30, 90}:
+        assistant_days = 30
+    usage = get_assistant_global_usage_summary(days=assistant_days)
+    not_helpful_top = []
+    try:
+        with db_connection() as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """SELECT question, COUNT(*) AS cnt
+                   FROM assistant_feedback_logs
+                   WHERE helpful = 0
+                     AND COALESCE(TRIM(question), '') <> ''
+                     AND created_at >= (CURRENT_TIMESTAMP - (? || ' days')::interval)
+                   GROUP BY question
+                   ORDER BY cnt DESC, question ASC
+                   LIMIT 12""",
+                (str(assistant_days),),
+            )
+            not_helpful_top = [{'question': str(r[0] or '').strip(), 'count': int(r[1] or 0)} for r in (c.fetchall() or []) if str(r[0] or '').strip()]
+    except Exception:
+        not_helpful_top = []
+    _schools, overview = _build_super_admin_school_overview()
+    last_login_at = format_timestamp(get_last_login_at(session.get('user_id')))
+    return render_template(
+        'super/super_admin_assistant_analytics.html',
+        active_page='assistant_analytics',
+        assistant_days=assistant_days,
+        assistant_usage=usage,
+        not_helpful_top=not_helpful_top,
+        overview=overview,
+        last_login_at=last_login_at,
+    )
+
 @app.route('/super-admin/schools/add')
 def super_admin_add_school_page():
     if session.get('role') != 'super_admin':
@@ -21077,6 +26595,7 @@ def super_admin_onboarding_approve():
     request_id = (request.form.get('request_id') or '').strip()
     admin_username_override = (request.form.get('admin_username') or '').strip().lower()
     access_status = (request.form.get('access_status') or 'trial_free').strip().lower()
+    cbt_enabled = normalize_school_cbt_enabled(request.form.get('cbt_enabled', '1'), default=1)
     class_arm_ranking_mode = (request.form.get('class_arm_ranking_mode') or 'separate').strip().lower()
     review_note = (request.form.get('review_note') or '').strip()
 
@@ -21163,6 +26682,7 @@ def super_admin_onboarding_approve():
                 plan_max_teachers=request.form.get('plan_max_teachers', '0'),
                 plan_storage_quota_mb=request.form.get('plan_storage_quota_mb', '0'),
                 plan_features_json=request.form.get('plan_features_json', '{}'),
+                cbt_enabled=cbt_enabled,
                 updated_by=session.get('user_id', ''),
             )
             temp_password = secrets.token_urlsafe(24)
@@ -21623,6 +27143,7 @@ def super_admin_add_school():
     motto = request.form.get('motto', '').strip()
     class_arm_ranking_mode = request.form.get('class_arm_ranking_mode', 'separate').strip().lower()
     access_status = request.form.get('access_status', 'trial_free').strip().lower()
+    cbt_enabled = normalize_school_cbt_enabled(request.form.get('cbt_enabled', '1'), default=1)
     trial_start_date = (request.form.get('trial_start_date', '') or '').strip()
     trial_end_date = (request.form.get('trial_end_date', '') or '').strip()
     subscription_plan = (request.form.get('subscription_plan', '') or '').strip()
@@ -21693,6 +27214,7 @@ def super_admin_add_school():
                     plan_max_teachers=plan_max_teachers,
                     plan_storage_quota_mb=plan_storage_quota_mb,
                     plan_features_json=plan_features_json,
+                    cbt_enabled=cbt_enabled,
                     updated_by=session.get('user_id', ''),
                 )
                 # Create school admin user with the provided username and password.
@@ -21912,6 +27434,8 @@ def super_admin_update_school_admin():
     try:
         update_school_admin_account(school_id, admin_username, admin_password)
         flash(f'School admin updated for {school_id}: {admin_username}', 'success')
+    except ValueError as exc:
+        flash(str(exc), 'error')
     except Exception:
         logging.exception("Error updating school admin.")
         flash('Error updating school admin. Please retry.', 'error')
@@ -21982,6 +27506,7 @@ def super_admin_update_school_access():
             plan_max_teachers=request.form.get('plan_max_teachers', '0'),
             plan_storage_quota_mb=request.form.get('plan_storage_quota_mb', '0'),
             plan_features_json=request.form.get('plan_features_json', '{}'),
+            cbt_enabled=request.form.get('cbt_enabled', '1'),
             updated_by=session.get('user_id', ''),
         )
         flash(f'Access policy updated for school {school_id}.', 'success')
@@ -22160,11 +27685,11 @@ def school_admin_dashboard():
     )
     missing_score_alerts = []
     # Rule: show missing score alerts only for subjects that have teacher subject assignments.
-    term_students = load_students(school_id, term_filter=current_term)
-    term_students = {
-        sid: row for sid, row in (term_students or {}).items()
-        if (row.get('academic_year') or current_year) == current_year
-    }
+    try:
+        term_students = load_students(school_id, term_filter=current_term)
+    except Exception as exc:
+        logging.warning("Failed to load term students for school-admin dashboard: %s", exc)
+        term_students = {}
     term_students = {
         sid: row for sid, row in (term_students or {}).items()
         if (row.get('academic_year') or current_year) == current_year
@@ -22319,7 +27844,11 @@ def school_admin_notifications():
     current_term = get_current_term(school)
     current_year = (school or {}).get('academic_year', '')
 
-    term_students = load_students(school_id, term_filter=current_term)
+    try:
+        term_students = load_students(school_id, term_filter=current_term)
+    except Exception as exc:
+        logging.warning("Failed to load term students for school-admin notifications: %s", exc)
+        term_students = {}
 
     def _year_matches_current(row_year, active_year):
         row_year_val = (row_year or '').strip()
@@ -23949,15 +29478,24 @@ def school_admin_class_subjects():
         
 
         uses_stream = class_uses_stream_for_school(school, classname)
+        ss1_combined_mode = (
+            is_ss1_class(classname)
+            and ((school or {}).get('ss1_stream_mode', 'separate') or '').strip().lower() == 'combined'
+        )
         if not uses_stream:
-            if is_ss1_class(classname) and ((school or {}).get('ss1_stream_mode', 'separate') or '').strip().lower() == 'combined':
-                # SS1 combined mode uses one unified subject list from all selected SS buckets.
-                core_subjects = _dedupe_keep_order(core_subjects + science_subjects + art_subjects + commercial_subjects + optional_subjects)
-            # Non-stream classes persist one unified subject list only.
-            science_subjects = []
-            art_subjects = []
-            commercial_subjects = []
-            optional_subjects = []
+            if ss1_combined_mode:
+                # SS1 combined mode uses one unified subject list for students,
+                # but we keep stream buckets stored so schools can switch back to
+                # separate mode later without re-entering all subjects.
+                core_subjects = _dedupe_keep_order(
+                    core_subjects + science_subjects + art_subjects + commercial_subjects + optional_subjects
+                )
+            else:
+                # Non-stream classes persist one unified subject list only.
+                science_subjects = []
+                art_subjects = []
+                commercial_subjects = []
+                optional_subjects = []
 
         if not core_subjects:
             flash('Subjects offered are required.', 'error')
@@ -24016,6 +29554,739 @@ def school_admin_delete_class_subject_config():
         logging.exception("Error deleting class subject configuration.")
         flash('Error deleting class subject configuration. Please retry.', 'error')
     return redirect(url_for('school_admin_class_subjects'))
+
+@app.route('/teacher/cbt', methods=['GET'])
+@require_roles('teacher')
+def teacher_cbt():
+    if session.get('role') != 'teacher':
+        return redirect(url_for('login'))
+    if not ensure_cbt_schema():
+        flash('CBT module is not available right now. Please retry.', 'error')
+        return redirect(url_for('teacher_dashboard'))
+
+    school_id = session.get('school_id')
+    teacher_id = (session.get('user_id') or '').strip()
+    school = get_school(school_id) or {}
+    current_term = get_current_term(school)
+    current_year = (school or {}).get('academic_year', '')
+    selected_term = (request.args.get('term', current_term) or current_term).strip()
+    selected_year = (request.args.get('academic_year', current_year) or current_year).strip()
+    status_filter = (request.args.get('status', '') or '').strip().lower()
+
+    tests = [
+        row for row in list_cbt_tests_for_school(school_id, limit=800)
+        if _cbt_test_owned_by_teacher(row, teacher_id)
+    ]
+    if selected_term:
+        tests = [row for row in tests if (row.get('term') or '').strip() == selected_term]
+    if selected_year:
+        tests = [row for row in tests if (row.get('academic_year') or '').strip() == selected_year]
+    if status_filter in {'draft', 'published', 'closed'}:
+        tests = [row for row in tests if (row.get('status') or '').strip().lower() == status_filter]
+
+    class_options, class_subject_options = _cbt_teacher_class_subject_options(
+        school_id,
+        teacher_id,
+        selected_term,
+        selected_year,
+    )
+    all_subjects = sorted(
+        {s for items in class_subject_options.values() for s in (items or [])},
+        key=lambda x: str(x).lower(),
+    )
+    status_counts = {
+        'all': len(tests),
+        'draft': sum(1 for row in tests if (row.get('status') or '').strip().lower() == 'draft'),
+        'published': sum(1 for row in tests if (row.get('status') or '').strip().lower() == 'published'),
+        'closed': sum(1 for row in tests if (row.get('status') or '').strip().lower() == 'closed'),
+    }
+
+    return render_template(
+        'teacher/teacher_cbt.html',
+        school=school,
+        tests=tests,
+        current_term=current_term,
+        current_year=current_year,
+        selected_term=selected_term,
+        selected_year=selected_year,
+        status_filter=status_filter,
+        class_options=class_options,
+        class_subject_options=class_subject_options,
+        all_subjects=all_subjects,
+        status_counts=status_counts,
+        active_page='cbt',
+    )
+
+
+@app.route('/teacher/cbt/create', methods=['POST'])
+@require_roles('teacher')
+def teacher_cbt_create():
+    if session.get('role') != 'teacher':
+        return redirect(url_for('login'))
+    if not ensure_cbt_schema():
+        flash('CBT module is not available right now. Please retry.', 'error')
+        return redirect(url_for('teacher_cbt'))
+
+    school_id = session.get('school_id')
+    teacher_id = (session.get('user_id') or '').strip()
+    school = get_school(school_id) or {}
+    current_term = get_current_term(school)
+    current_year = (school.get('academic_year') or '').strip()
+    classname = canonicalize_classname(request.form.get('classname', ''))
+    subject = normalize_subject_name(request.form.get('subject', ''))
+    term = (request.form.get('term', '') or current_term).strip()
+    academic_year = (request.form.get('academic_year', '') or current_year).strip()
+    if not classname or not subject:
+        flash('Class and subject are required.', 'error')
+        return redirect(url_for('teacher_cbt'))
+    if not teacher_can_score_subject(
+        school_id,
+        teacher_id,
+        classname,
+        subject,
+        term=term,
+        academic_year=academic_year,
+    ):
+        flash('You can only create CBT for your assigned class/subject.', 'error')
+        return redirect(url_for('teacher_cbt'))
+
+    assessment_type = _normalize_cbt_assessment_type(request.form.get('assessment_type', 'test'))
+    if assessment_type == 'test' and not school.get('test_enabled', 1):
+        flash('Test component is disabled in school settings.', 'error')
+        return redirect(url_for('teacher_cbt'))
+    if assessment_type == 'exam' and not school.get('exam_enabled', 1):
+        flash('Exam component is disabled in school settings.', 'error')
+        return redirect(url_for('teacher_cbt'))
+
+    try:
+        test_id = create_cbt_test(
+            school_id=school_id,
+            title=request.form.get('title', ''),
+            classname=classname,
+            subject=subject,
+            term=term,
+            academic_year=academic_year,
+            duration_minutes=request.form.get('duration_minutes', 30),
+            instructions=request.form.get('instructions', ''),
+            created_by=teacher_id,
+            assessment_type=assessment_type,
+            score_over=request.form.get('score_over', 20),
+            test_slot=request.form.get('test_slot', 1),
+            questions_to_answer=request.form.get('questions_to_answer', 0),
+            strict_mode=request.form.get('strict_mode', '1'),
+            fullscreen_required=request.form.get('fullscreen_required', '1'),
+            tab_switch_limit=request.form.get('tab_switch_limit', 3),
+            block_clipboard=request.form.get('block_clipboard', '1'),
+            created_by_teacher_id=teacher_id,
+        )
+        flash('CBT test created. Add questions and publish when ready.', 'success')
+        return redirect(url_for('teacher_cbt_questions', test_id=test_id))
+    except Exception as exc:
+        flash(str(exc), 'error')
+        return redirect(url_for('teacher_cbt'))
+
+
+@app.route('/teacher/cbt/<test_id>/questions', methods=['GET'])
+@require_roles('teacher')
+def teacher_cbt_questions(test_id):
+    if session.get('role') != 'teacher':
+        return redirect(url_for('login'))
+    if not ensure_cbt_schema():
+        flash('CBT module is not available right now. Please retry.', 'error')
+        return redirect(url_for('teacher_cbt'))
+    school_id = session.get('school_id')
+    teacher_id = (session.get('user_id') or '').strip()
+    school = get_school(school_id) or {}
+    test_row = get_cbt_test(school_id, test_id)
+    if not test_row:
+        flash('CBT test not found.', 'error')
+        return redirect(url_for('teacher_cbt'))
+    if not _cbt_test_owned_by_teacher(test_row, teacher_id):
+        flash('You can only manage CBT tests created by you.', 'error')
+        return redirect(url_for('teacher_cbt'))
+    questions = list_cbt_questions(school_id, test_id)
+    attempt_counts = get_cbt_attempt_counts(school_id, test_id)
+    return render_template(
+        'teacher/teacher_cbt_questions.html',
+        school=school,
+        test=test_row,
+        questions=questions,
+        attempt_counts=attempt_counts,
+        active_page='cbt',
+    )
+
+
+@app.route('/teacher/cbt/<test_id>/questions/add', methods=['POST'])
+@require_roles('teacher')
+def teacher_cbt_add_question(test_id):
+    if session.get('role') != 'teacher':
+        return redirect(url_for('login'))
+    if not ensure_cbt_schema():
+        flash('CBT module is not available right now. Please retry.', 'error')
+        return redirect(url_for('teacher_cbt'))
+
+    school_id = session.get('school_id')
+    teacher_id = (session.get('user_id') or '').strip()
+    test_row = get_cbt_test(school_id, test_id)
+    if not test_row:
+        flash('CBT test not found.', 'error')
+        return redirect(url_for('teacher_cbt'))
+    if not _cbt_test_owned_by_teacher(test_row, teacher_id):
+        flash('You can only manage CBT tests created by you.', 'error')
+        return redirect(url_for('teacher_cbt'))
+    counts = get_cbt_attempt_counts(school_id, test_id)
+    if safe_int(counts.get('submitted'), 0) > 0:
+        flash('Questions cannot be edited because students already submitted this CBT.', 'error')
+        return redirect(url_for('teacher_cbt_questions', test_id=test_id))
+
+    try:
+        question_image_url = request.form.get('question_image_url', '')
+        uploaded_image, upload_err = parse_uploaded_cbt_question_image(request.files.get('question_image_file'))
+        if upload_err:
+            raise ValueError(upload_err)
+        if uploaded_image:
+            question_image_url = uploaded_image
+        add_cbt_question(
+            school_id=school_id,
+            test_id=test_id,
+            question_text=request.form.get('question_text', ''),
+            question_image_url=question_image_url,
+            option_a=request.form.get('option_a', ''),
+            option_b=request.form.get('option_b', ''),
+            option_c=request.form.get('option_c', ''),
+            option_d=request.form.get('option_d', ''),
+            correct_option=request.form.get('correct_option', ''),
+            question_type=request.form.get('question_type', 'mcq4'),
+            correct_text=request.form.get('correct_text', ''),
+            accepted_answers=request.form.get('accepted_answers', ''),
+            points=request.form.get('points', 1),
+            time_seconds=request.form.get('time_seconds', 60),
+            explanation=request.form.get('explanation', ''),
+        )
+        flash('Question added.', 'success')
+    except Exception as exc:
+        flash(str(exc), 'error')
+    return redirect(url_for('teacher_cbt_questions', test_id=test_id))
+
+
+@app.route('/teacher/cbt/<test_id>/questions/delete', methods=['POST'])
+@require_roles('teacher')
+def teacher_cbt_delete_question(test_id):
+    if session.get('role') != 'teacher':
+        return redirect(url_for('login'))
+    if not ensure_cbt_schema():
+        flash('CBT module is not available right now. Please retry.', 'error')
+        return redirect(url_for('teacher_cbt'))
+    school_id = session.get('school_id')
+    teacher_id = (session.get('user_id') or '').strip()
+    test_row = get_cbt_test(school_id, test_id)
+    if not test_row:
+        flash('CBT test not found.', 'error')
+        return redirect(url_for('teacher_cbt'))
+    if not _cbt_test_owned_by_teacher(test_row, teacher_id):
+        flash('You can only manage CBT tests created by you.', 'error')
+        return redirect(url_for('teacher_cbt'))
+    counts = get_cbt_attempt_counts(school_id, test_id)
+    if safe_int(counts.get('submitted'), 0) > 0:
+        flash('Questions cannot be edited because students already submitted this CBT.', 'error')
+        return redirect(url_for('teacher_cbt_questions', test_id=test_id))
+    deleted = delete_cbt_question(school_id, test_id, request.form.get('question_no', 0))
+    if deleted:
+        flash('Question removed.', 'success')
+    else:
+        flash('Question was not removed. Ensure test is draft and question exists.', 'error')
+    return redirect(url_for('teacher_cbt_questions', test_id=test_id))
+
+
+@app.route('/teacher/cbt/<test_id>/status', methods=['POST'])
+@require_roles('teacher')
+def teacher_cbt_set_status(test_id):
+    if session.get('role') != 'teacher':
+        return redirect(url_for('login'))
+    if not ensure_cbt_schema():
+        flash('CBT module is not available right now. Please retry.', 'error')
+        return redirect(url_for('teacher_cbt'))
+    school_id = session.get('school_id')
+    teacher_id = (session.get('user_id') or '').strip()
+    test_row = get_cbt_test(school_id, test_id)
+    if not test_row:
+        flash('CBT test not found.', 'error')
+        return redirect(url_for('teacher_cbt'))
+    if not _cbt_test_owned_by_teacher(test_row, teacher_id):
+        flash('You can only manage CBT tests created by you.', 'error')
+        return redirect(url_for('teacher_cbt'))
+    new_status = _normalize_cbt_status(request.form.get('status', 'draft'))
+    counts = get_cbt_attempt_counts(school_id, test_id)
+    if safe_int(counts.get('submitted'), 0) > 0 and new_status == 'draft':
+        flash('Cannot revert to draft after students have submitted this CBT.', 'error')
+        return redirect(url_for('teacher_cbt_questions', test_id=test_id))
+    try:
+        changed = set_cbt_test_status(school_id, test_id, new_status)
+        if changed:
+            flash(f'CBT status updated to {new_status.title()}.', 'success')
+        else:
+            flash('No status change was made.', 'warning')
+    except Exception as exc:
+        flash(str(exc), 'error')
+    return redirect(url_for('teacher_cbt_questions', test_id=test_id))
+
+
+@app.route('/teacher/cbt/<test_id>/results', methods=['GET'])
+@require_roles('teacher')
+def teacher_cbt_results(test_id):
+    if session.get('role') != 'teacher':
+        return redirect(url_for('login'))
+    school_id = session.get('school_id')
+    teacher_id = (session.get('user_id') or '').strip()
+    school = get_school(school_id) or {}
+    test_row = get_cbt_test(school_id, test_id)
+    if not test_row:
+        flash('CBT test not found.', 'error')
+        return redirect(url_for('teacher_cbt'))
+    if not _cbt_test_owned_by_teacher(test_row, teacher_id):
+        flash('You can only view results for CBT tests created by you.', 'error')
+        return redirect(url_for('teacher_cbt'))
+
+    with db_connection() as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """SELECT a.attempt_id, a.student_id, a.status, a.score, a.total_marks, a.total_questions,
+                      a.answered_questions, a.remaining_seconds, a.last_activity_at,
+                      a.started_at, a.submitted_at, a.auto_submitted,
+                      (SELECT COUNT(*) FROM cbt_attempt_events e
+                       WHERE e.school_id = a.school_id AND e.attempt_id = a.attempt_id) AS integrity_events_count,
+                      COALESCE(s.firstname, '') AS firstname,
+                      COALESCE(s.classname, a.classname) AS classname
+               FROM cbt_attempts a
+               LEFT JOIN students s
+                 ON s.school_id = a.school_id
+                AND s.student_id = a.student_id
+               WHERE a.school_id = ? AND a.test_id = ?
+               ORDER BY COALESCE(a.submitted_at, a.started_at) DESC, a.student_id ASC""",
+            (school_id, test_id),
+        )
+        attempts = [dict(row) for row in (c.fetchall() or [])]
+
+    integrity_summary = load_cbt_integrity_summary(school_id, test_id, test_row=test_row)
+    for row in attempts:
+        summary = integrity_summary.get((row.get('attempt_id') or '').strip(), {})
+        row['integrity_events_count'] = max(
+            safe_int(row.get('integrity_events_count', 0), 0),
+            safe_int(summary.get('events_count', 0), 0),
+        )
+        row['integrity_risk_score'] = safe_int(summary.get('risk_score', 0), 0)
+        row['integrity_risk_level'] = (summary.get('risk_level') or 'low').strip().lower()
+        row['integrity_top_flags'] = summary.get('top_flags', [])
+        row['integrity_flagged'] = 1 if safe_int(summary.get('flagged', 0), 0) else 0
+        row['integrity_flag_reason'] = (summary.get('flagged_reason') or '').strip()
+
+    submitted_rows = [row for row in attempts if (row.get('status') or '').strip().lower() == 'submitted']
+    avg_score = (
+        sum(safe_float(row.get('score', 0), 0.0) for row in submitted_rows) / len(submitted_rows)
+        if submitted_rows else 0.0
+    )
+    max_total_marks = max([safe_float(row.get('total_marks', 0), 0.0) for row in submitted_rows] + [0.0])
+
+    if (request.args.get('export', '') or '').strip().lower() == 'csv':
+        output = StringIO()
+        writer = csv.writer(output)
+        writer.writerow([
+            'Attempt ID', 'Student ID', 'Student Name', 'Class', 'Status',
+            'Score', 'Total Marks', 'Answered Questions', 'Total Questions',
+            'Started At', 'Submitted At', 'Auto Submitted',
+            'Integrity Events', 'Integrity Risk Score', 'Integrity Risk Level'
+        ])
+        for row in attempts:
+            writer.writerow([
+                row.get('attempt_id', ''),
+                row.get('student_id', ''),
+                row.get('firstname', ''),
+                row.get('classname', ''),
+                row.get('status', ''),
+                safe_float(row.get('score', 0), 0.0),
+                safe_float(row.get('total_marks', 0), 0.0),
+                safe_int(row.get('answered_questions', 0), 0),
+                safe_int(row.get('total_questions', 0), 0),
+                row.get('started_at', ''),
+                row.get('submitted_at', ''),
+                'Yes' if safe_int(row.get('auto_submitted', 0), 0) else 'No',
+                safe_int(row.get('integrity_events_count', 0), 0),
+                safe_int(row.get('integrity_risk_score', 0), 0),
+                (row.get('integrity_risk_level') or 'low').strip().lower(),
+            ])
+        csv_body = output.getvalue()
+        output.close()
+        filename = f"cbt_results_{(test_row.get('test_id') or 'test').replace('/', '-')}.csv"
+        return Response(
+            csv_body,
+            mimetype='text/csv',
+            headers={'Content-Disposition': f'attachment; filename=\"{filename}\"'},
+        )
+
+    return render_template(
+        'teacher/teacher_cbt_results.html',
+        school=school,
+        test=test_row,
+        attempts=attempts,
+        submitted_count=len(submitted_rows),
+        average_score=avg_score,
+        max_total_marks=max_total_marks,
+        integrity_summary=integrity_summary,
+        active_page='cbt',
+    )
+
+
+@app.route('/teacher/cbt/<test_id>/monitor', methods=['GET'])
+@require_roles('teacher')
+def teacher_cbt_monitor(test_id):
+    if session.get('role') != 'teacher':
+        return redirect(url_for('login'))
+    school_id = session.get('school_id')
+    teacher_id = (session.get('user_id') or '').strip()
+    school = get_school(school_id) or {}
+    test_row = get_cbt_test(school_id, test_id)
+    if not test_row:
+        flash('CBT test not found.', 'error')
+        return redirect(url_for('teacher_cbt'))
+    if not _cbt_test_owned_by_teacher(test_row, teacher_id):
+        flash('You can only monitor CBT tests created by you.', 'error')
+        return redirect(url_for('teacher_cbt'))
+
+    with db_connection() as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """SELECT a.attempt_id, a.student_id, a.status, a.score, a.total_marks, a.total_questions,
+                      a.answered_questions, a.remaining_seconds, a.last_activity_at,
+                      a.started_at, a.submitted_at, a.auto_submitted,
+                      COALESCE(s.firstname, '') AS firstname,
+                      COALESCE(s.classname, a.classname) AS classname
+               FROM cbt_attempts a
+               LEFT JOIN students s
+                 ON s.school_id = a.school_id
+                AND s.student_id = a.student_id
+               WHERE a.school_id = ? AND a.test_id = ?
+               ORDER BY
+                 CASE WHEN COALESCE(a.status, '') = 'started' THEN 0 ELSE 1 END,
+                 COALESCE(a.last_activity_at, a.started_at, a.submitted_at) DESC,
+                 a.student_id ASC""",
+            (school_id, test_id),
+        )
+        attempts = [dict(row) for row in (c.fetchall() or [])]
+
+        db_execute(
+            c,
+            """SELECT student_id, extra_minutes, extra_percent, is_active
+               FROM cbt_test_accommodations
+               WHERE school_id = ? AND test_id = ?""",
+            (school_id, test_id),
+        )
+        accommodation_rows = c.fetchall() or []
+    accommodations = {
+        (row.get('student_id') or '').strip(): {
+            'extra_minutes': safe_int(row.get('extra_minutes', 0), 0),
+            'extra_percent': safe_int(row.get('extra_percent', 0), 0),
+            'is_active': 1 if safe_int(row.get('is_active', 0), 0) else 0,
+        }
+        for row in accommodation_rows
+        if (row.get('student_id') or '').strip()
+    }
+
+    integrity_summary = load_cbt_integrity_summary(school_id, test_id, test_row=test_row)
+    for row in attempts:
+        attempt_id = (row.get('attempt_id') or '').strip()
+        student_id = (row.get('student_id') or '').strip()
+        summary = integrity_summary.get(attempt_id, {})
+        row['integrity_events_count'] = safe_int(summary.get('events_count', 0), 0)
+        row['integrity_risk_score'] = safe_int(summary.get('risk_score', 0), 0)
+        row['integrity_risk_level'] = (summary.get('risk_level') or 'low').strip().lower()
+        row['integrity_top_flags'] = summary.get('top_flags', [])
+        row['integrity_flagged'] = 1 if safe_int(summary.get('flagged', 0), 0) else 0
+        row['integrity_flag_reason'] = (summary.get('flagged_reason') or '').strip()
+        row['accommodation'] = accommodations.get(
+            student_id,
+            {'extra_minutes': 0, 'extra_percent': 0, 'is_active': 0},
+        )
+
+    return render_template(
+        'teacher/teacher_cbt_monitor.html',
+        school=school,
+        test=test_row,
+        attempts=attempts,
+        active_page='cbt',
+    )
+
+
+@app.route('/teacher/cbt/<test_id>/accommodation', methods=['POST'])
+@require_roles('teacher')
+def teacher_cbt_save_accommodation(test_id):
+    if session.get('role') != 'teacher':
+        return redirect(url_for('login'))
+    school_id = session.get('school_id')
+    teacher_id = (session.get('user_id') or '').strip()
+    test_row = get_cbt_test(school_id, test_id)
+    if not test_row:
+        flash('CBT test not found.', 'error')
+        return redirect(url_for('teacher_cbt'))
+    if not _cbt_test_owned_by_teacher(test_row, teacher_id):
+        flash('You can only update accommodations for CBT tests created by you.', 'error')
+        return redirect(url_for('teacher_cbt'))
+
+    student_id = (request.form.get('student_id', '') or '').strip()
+    if not student_id:
+        flash('Student ID is required.', 'error')
+        return redirect(url_for('teacher_cbt_monitor', test_id=test_id))
+    student = load_student(school_id, student_id)
+    if not student:
+        flash('Student not found.', 'error')
+        return redirect(url_for('teacher_cbt_monitor', test_id=test_id))
+    if not _cbt_class_matches_student(test_row.get('classname', ''), student.get('classname', '')):
+        flash('Student is not in this CBT class scope.', 'error')
+        return redirect(url_for('teacher_cbt_monitor', test_id=test_id))
+
+    is_active = 1 if (request.form.get('is_active', '') or '').strip().lower() in {'1', 'true', 'yes', 'on'} else 0
+    changed = save_cbt_test_accommodation(
+        school_id,
+        test_id,
+        student_id,
+        extra_minutes=request.form.get('extra_minutes', 0),
+        extra_percent=request.form.get('extra_percent', 0),
+        is_active=is_active,
+    )
+    if changed:
+        flash(f'Accessibility extra time updated for {student_id}.', 'success')
+    else:
+        flash('No accommodation change was made.', 'warning')
+    return redirect(url_for('teacher_cbt_monitor', test_id=test_id))
+
+
+@app.route('/teacher/cbt/<test_id>/retrieve', methods=['POST'])
+@require_roles('teacher')
+def teacher_cbt_retrieve(test_id):
+    if session.get('role') != 'teacher':
+        return redirect(url_for('login'))
+    school_id = session.get('school_id')
+    teacher_id = (session.get('user_id') or '').strip()
+    test_row = get_cbt_test(school_id, test_id)
+    if not test_row:
+        flash('CBT test not found.', 'error')
+        return redirect(url_for('teacher_cbt'))
+    if not _cbt_test_owned_by_teacher(test_row, teacher_id):
+        flash('You can only retrieve CBT tests created by you.', 'error')
+        return redirect(url_for('teacher_cbt'))
+    changed = mark_cbt_test_retrieved(school_id, test_id, retrieved_by=teacher_id)
+    if changed:
+        flash('CBT retrieved and closed. Students will no longer see it in CBT login.', 'success')
+    else:
+        flash('No retrieval change was made.', 'warning')
+    return redirect(url_for('teacher_cbt_results', test_id=test_id))
+
+@app.route('/school-admin/cbt', methods=['GET'])
+def school_admin_cbt():
+    if session.get('role') != 'school_admin':
+        return redirect(url_for('login'))
+    if not ensure_cbt_schema():
+        flash('CBT module is not available right now. Please retry.', 'error')
+        return redirect(url_for('school_admin_dashboard'))
+
+    school_id = session.get('school_id')
+    school = get_school(school_id) or {}
+    current_term = get_current_term(school)
+    current_year = (school or {}).get('academic_year', '')
+    selected_term = (request.args.get('term', current_term) or current_term).strip()
+    selected_year = (request.args.get('academic_year', current_year) or current_year).strip()
+    status_filter = (request.args.get('status', '') or '').strip().lower()
+
+    tests = list_cbt_tests_for_school(school_id, limit=500)
+    if selected_term:
+        tests = [row for row in tests if (row.get('term') or '').strip() == selected_term]
+    if selected_year:
+        tests = [row for row in tests if (row.get('academic_year') or '').strip() == selected_year]
+    if status_filter in {'draft', 'published', 'closed'}:
+        tests = [row for row in tests if (row.get('status') or '').strip().lower() == status_filter]
+
+    class_options, class_subject_options, all_subjects = _cbt_class_subject_options(school_id)
+    for row in tests:
+        cls = canonicalize_classname(row.get('classname', ''))
+        if cls and cls not in class_options:
+            class_options.append(cls)
+    class_options = sorted(set(class_options), key=lambda x: str(x).lower())
+    status_counts = {
+        'all': len(tests),
+        'draft': sum(1 for row in tests if (row.get('status') or '').strip().lower() == 'draft'),
+        'published': sum(1 for row in tests if (row.get('status') or '').strip().lower() == 'published'),
+        'closed': sum(1 for row in tests if (row.get('status') or '').strip().lower() == 'closed'),
+    }
+
+    return render_template(
+        'school/school_admin_cbt.html',
+        school=school,
+        tests=tests,
+        current_term=current_term,
+        current_year=current_year,
+        selected_term=selected_term,
+        selected_year=selected_year,
+        status_filter=status_filter,
+        class_options=class_options,
+        class_subject_options=class_subject_options,
+        all_subjects=all_subjects,
+        status_counts=status_counts,
+    )
+
+
+@app.route('/school-admin/cbt/create', methods=['POST'])
+def school_admin_cbt_create():
+    if session.get('role') != 'school_admin':
+        return redirect(url_for('login'))
+    if not ensure_cbt_schema():
+        flash('CBT module is not available right now. Please retry.', 'error')
+        return redirect(url_for('school_admin_cbt'))
+
+    school_id = session.get('school_id')
+    try:
+        test_id = create_cbt_test(
+            school_id=school_id,
+            title=request.form.get('title', ''),
+            classname=request.form.get('classname', ''),
+            subject=request.form.get('subject', ''),
+            term=request.form.get('term', ''),
+            academic_year=request.form.get('academic_year', ''),
+            duration_minutes=request.form.get('duration_minutes', 30),
+            instructions=request.form.get('instructions', ''),
+            questions_to_answer=request.form.get('questions_to_answer', 0),
+            strict_mode=request.form.get('strict_mode', '1'),
+            fullscreen_required=request.form.get('fullscreen_required', '1'),
+            tab_switch_limit=request.form.get('tab_switch_limit', 3),
+            block_clipboard=request.form.get('block_clipboard', '1'),
+            created_by=session.get('user_id', ''),
+        )
+        flash('CBT test created. Add questions and publish when ready.', 'success')
+        return redirect(url_for('school_admin_cbt_questions', test_id=test_id))
+    except Exception as exc:
+        flash(str(exc), 'error')
+        return redirect(url_for('school_admin_cbt'))
+
+
+@app.route('/school-admin/cbt/<test_id>/questions', methods=['GET'])
+def school_admin_cbt_questions(test_id):
+    if session.get('role') != 'school_admin':
+        return redirect(url_for('login'))
+    if not ensure_cbt_schema():
+        flash('CBT module is not available right now. Please retry.', 'error')
+        return redirect(url_for('school_admin_cbt'))
+    school_id = session.get('school_id')
+    school = get_school(school_id) or {}
+    test_row = get_cbt_test(school_id, test_id)
+    if not test_row:
+        flash('CBT test not found.', 'error')
+        return redirect(url_for('school_admin_cbt'))
+    questions = list_cbt_questions(school_id, test_id)
+    attempt_counts = get_cbt_attempt_counts(school_id, test_id)
+    return render_template(
+        'school/school_admin_cbt_questions.html',
+        school=school,
+        test=test_row,
+        questions=questions,
+        attempt_counts=attempt_counts,
+    )
+
+
+@app.route('/school-admin/cbt/<test_id>/questions/add', methods=['POST'])
+def school_admin_cbt_add_question(test_id):
+    if session.get('role') != 'school_admin':
+        return redirect(url_for('login'))
+    if not ensure_cbt_schema():
+        flash('CBT module is not available right now. Please retry.', 'error')
+        return redirect(url_for('school_admin_cbt'))
+
+    school_id = session.get('school_id')
+    test_row = get_cbt_test(school_id, test_id)
+    if not test_row:
+        flash('CBT test not found.', 'error')
+        return redirect(url_for('school_admin_cbt'))
+    counts = get_cbt_attempt_counts(school_id, test_id)
+    if safe_int(counts.get('submitted'), 0) > 0:
+        flash('Questions cannot be edited because students already submitted this CBT.', 'error')
+        return redirect(url_for('school_admin_cbt_questions', test_id=test_id))
+
+    try:
+        question_image_url = request.form.get('question_image_url', '')
+        uploaded_image, upload_err = parse_uploaded_cbt_question_image(request.files.get('question_image_file'))
+        if upload_err:
+            raise ValueError(upload_err)
+        if uploaded_image:
+            question_image_url = uploaded_image
+        add_cbt_question(
+            school_id=school_id,
+            test_id=test_id,
+            question_text=request.form.get('question_text', ''),
+            question_image_url=question_image_url,
+            option_a=request.form.get('option_a', ''),
+            option_b=request.form.get('option_b', ''),
+            option_c=request.form.get('option_c', ''),
+            option_d=request.form.get('option_d', ''),
+            correct_option=request.form.get('correct_option', ''),
+            question_type=request.form.get('question_type', 'mcq4'),
+            correct_text=request.form.get('correct_text', ''),
+            accepted_answers=request.form.get('accepted_answers', ''),
+            points=request.form.get('points', 1),
+            time_seconds=request.form.get('time_seconds', 60),
+            explanation=request.form.get('explanation', ''),
+        )
+        flash('Question added.', 'success')
+    except Exception as exc:
+        flash(str(exc), 'error')
+    return redirect(url_for('school_admin_cbt_questions', test_id=test_id))
+
+
+@app.route('/school-admin/cbt/<test_id>/questions/delete', methods=['POST'])
+def school_admin_cbt_delete_question(test_id):
+    if session.get('role') != 'school_admin':
+        return redirect(url_for('login'))
+    if not ensure_cbt_schema():
+        flash('CBT module is not available right now. Please retry.', 'error')
+        return redirect(url_for('school_admin_cbt'))
+
+    school_id = session.get('school_id')
+    counts = get_cbt_attempt_counts(school_id, test_id)
+    if safe_int(counts.get('submitted'), 0) > 0:
+        flash('Questions cannot be edited because students already submitted this CBT.', 'error')
+        return redirect(url_for('school_admin_cbt_questions', test_id=test_id))
+    deleted = delete_cbt_question(school_id, test_id, request.form.get('question_no', 0))
+    if deleted:
+        flash('Question removed.', 'success')
+    else:
+        flash('Question was not removed. Ensure test is draft and question exists.', 'error')
+    return redirect(url_for('school_admin_cbt_questions', test_id=test_id))
+
+
+@app.route('/school-admin/cbt/<test_id>/status', methods=['POST'])
+def school_admin_cbt_set_status(test_id):
+    if session.get('role') != 'school_admin':
+        return redirect(url_for('login'))
+    if not ensure_cbt_schema():
+        flash('CBT module is not available right now. Please retry.', 'error')
+        return redirect(url_for('school_admin_cbt'))
+    school_id = session.get('school_id')
+    test_row = get_cbt_test(school_id, test_id)
+    if not test_row:
+        flash('CBT test not found.', 'error')
+        return redirect(url_for('school_admin_cbt'))
+    new_status = _normalize_cbt_status(request.form.get('status', 'draft'))
+    counts = get_cbt_attempt_counts(school_id, test_id)
+    if safe_int(counts.get('submitted'), 0) > 0 and new_status == 'draft':
+        flash('Cannot revert to draft after students have submitted this CBT.', 'error')
+        return redirect(url_for('school_admin_cbt_questions', test_id=test_id))
+    try:
+        changed = set_cbt_test_status(school_id, test_id, new_status)
+        if changed:
+            flash(f'CBT status updated to {new_status.title()}.', 'success')
+        else:
+            flash('No status change was made.', 'warning')
+    except Exception as exc:
+        flash(str(exc), 'error')
+    return redirect(url_for('school_admin_cbt_questions', test_id=test_id))
 
 @app.route('/school-admin/settings', methods=['GET', 'POST'])
 def school_admin_settings():
@@ -24091,6 +30362,19 @@ def school_admin_settings():
 
         calendar_target_term = (request.form.get('calendar_term', '') or '').strip() or new_term
         calendar_target_year = (request.form.get('calendar_academic_year', '') or '').strip() or new_year
+        # Keep calendar scope aligned with the main settings term/year when the
+        # hidden calendar fields are stale (common after term/year edits).
+        posted_calendar_matches_previous = (
+            calendar_target_term.strip().lower() == previous_term.strip().lower()
+            and calendar_target_year == previous_year
+        )
+        changed_term_or_year = (
+            previous_term.strip().lower() != new_term.strip().lower()
+            or previous_year != new_year
+        )
+        if changed_term_or_year and posted_calendar_matches_previous:
+            calendar_target_term = new_term
+            calendar_target_year = new_year
         if calendar_target_term not in {'First Term', 'Second Term', 'Third Term'}:
             flash('Calendar term must be First Term, Second Term, or Third Term.', 'error')
             return redirect(url_for('school_admin_settings'))
@@ -24273,7 +30557,6 @@ def school_admin_settings():
                 'exam_score_max': exam_score_max,
             })
 
-        changed_term_or_year = previous_term.strip().lower() != new_term.strip().lower() or previous_year != new_year
         if changed_term_or_year:
             rollover_confirmed = (request.form.get('confirm_term_rollover', '') or '').strip() == '1'
             if not rollover_confirmed:
@@ -24404,16 +30687,46 @@ def school_admin_new_term_wizard():
     current_term = get_current_term(school)
     current_year = (school.get('academic_year', '') or '').strip()
     suggested_term, suggested_year = _suggest_next_term_year(current_term, current_year)
+    rollover_readiness = build_term_rollover_readiness(school_id, current_term, current_year)
 
     if request.method == 'POST':
         new_term = (request.form.get('new_term', '') or '').strip()
         new_year = (request.form.get('new_year', '') or '').strip()
         lock_previous = (request.form.get('lock_previous_term', '') or '').strip().lower() in {'1', 'true', 'yes', 'on'}
+        use_suggested_target = (request.form.get('use_suggested_target', '') or '').strip().lower() in {'1', 'true', 'yes', 'on'}
+        allow_custom_target = (request.form.get('allow_custom_target', '') or '').strip().lower() in {'1', 'true', 'yes', 'on'}
+        allow_unpublished = (request.form.get('allow_unpublished_rollover', '') or '').strip().lower() in {'1', 'true', 'yes', 'on'}
+        confirm_effects = (request.form.get('confirm_rollover_effects', '') or '').strip().lower() in {'1', 'true', 'yes', 'on'}
+
+        if use_suggested_target:
+            new_term = suggested_term
+            new_year = suggested_year
         if new_term not in {'First Term', 'Second Term', 'Third Term'}:
             flash('Select a valid term.', 'error')
             return redirect(url_for('school_admin_new_term_wizard'))
         if not new_year or not re.fullmatch(r'^\d{4}-\d{4}$', new_year):
             flash('Academic year must be in YYYY-YYYY format.', 'error')
+            return redirect(url_for('school_admin_new_term_wizard'))
+        if not confirm_effects:
+            flash('Confirm rollover effects before starting a new term.', 'error')
+            return redirect(url_for('school_admin_new_term_wizard'))
+        if (new_term != suggested_term or new_year != suggested_year) and not allow_custom_target:
+            flash(
+                f'For safety, use the suggested target ({suggested_term} {suggested_year}) or allow custom target.',
+                'error',
+            )
+            return redirect(url_for('school_admin_new_term_wizard'))
+        if int(rollover_readiness.get('pending_review_classes', 0) or 0) > 0:
+            flash(
+                'Cannot rollover now: some classes are still pending admin review. Resolve them first.',
+                'error',
+            )
+            return redirect(url_for('school_admin_new_term_wizard'))
+        if int(rollover_readiness.get('unpublished_classes', 0) or 0) > 0 and not allow_unpublished:
+            flash(
+                'Some classes are not published yet. Tick "Allow rollover with unpublished classes" to continue.',
+                'error',
+            )
             return redirect(url_for('school_admin_new_term_wizard'))
         if new_term.lower() == (current_term or '').strip().lower() and new_year == current_year:
             flash('New term/year must be different from the current term/year.', 'error')
@@ -24469,7 +30782,14 @@ def school_admin_new_term_wizard():
                 'from_year': current_year,
                 'to_year': new_year,
                 'lock_previous': bool(lock_previous),
+                'allow_unpublished': bool(allow_unpublished),
+                'used_suggested_target': bool(use_suggested_target),
                 'affected_rows': int(affected_rows or 0),
+                'readiness': {
+                    'total_classes': int(rollover_readiness.get('total_classes', 0) or 0),
+                    'published_classes': int(rollover_readiness.get('published_classes', 0) or 0),
+                    'unpublished_classes': int(rollover_readiness.get('unpublished_classes', 0) or 0),
+                },
             },
         )
         flash(
@@ -24487,6 +30807,7 @@ def school_admin_new_term_wizard():
         current_year=current_year,
         suggested_term=suggested_term,
         suggested_year=suggested_year,
+        rollover_readiness=rollover_readiness,
     )
 
 @app.route('/school-admin/score-audit')
@@ -26796,6 +33117,8 @@ def school_admin_import_target(target):
 
     try:
         if target_key == 'students':
+            school = get_school(school_id) or {}
+            class_config_cache = {}
             next_index_by_class = {}
             batch_student_ids = set()
             for idx, row in enumerate(rows, start=2):
@@ -26861,11 +33184,51 @@ def school_admin_import_target(target):
                 if promoted_raw not in {'', '0', '1', 'true', 'false', 'yes', 'no'}:
                     add_error(idx, row, 'promoted must be 0/1/true/false/yes/no.')
                     continue
-                try:
-                    number_of_subject = int(row.get('number_of_subject', 0) or 0)
-                except Exception:
-                    add_error(idx, row, 'number_of_subject must be numeric.')
+
+                class_config = class_config_cache.get(classname)
+                if class_config is None:
+                    class_config = get_class_subject_config(school_id, classname)
+                    class_config_cache[classname] = class_config
+                if not class_config:
+                    add_error(idx, row, f'No class subject configuration found for {classname}.')
                     continue
+
+                input_stream = (row.get('stream', '') or '').strip()
+                if class_uses_stream_for_school(school, classname):
+                    if input_stream:
+                        normalized_stream, stream_error = normalize_stream_for_class(
+                            classname, input_stream, school=school
+                        )
+                        if stream_error:
+                            add_error(idx, row, stream_error)
+                            continue
+                        subjects, final_stream, subject_error = build_subjects_from_config(
+                            classname=classname,
+                            stream=normalized_stream,
+                            config=class_config,
+                            selected_optional_subjects=[],
+                            school=school,
+                        )
+                        if subject_error:
+                            add_error(idx, row, subject_error)
+                            continue
+                    else:
+                        # Allow import without stream allocation for SS classes.
+                        subjects = _dedupe_keep_order(class_config.get('core_subjects', []) or [])
+                        final_stream = 'N/A'
+                else:
+                    subjects, final_stream, subject_error = build_subjects_from_config(
+                        classname=classname,
+                        stream='N/A',
+                        config=class_config,
+                        selected_optional_subjects=[],
+                        school=school,
+                    )
+                    if subject_error:
+                        add_error(idx, row, subject_error)
+                        continue
+
+                subjects = _dedupe_keep_order(subjects or [])
                 student_data = {
                     'firstname': full_name,
                     'email': email,
@@ -26874,9 +33237,9 @@ def school_admin_import_target(target):
                     'classname': classname,
                     'first_year_class': first_year_class,
                     'term': term,
-                    'stream': row.get('stream', 'N/A'),
-                    'number_of_subject': number_of_subject,
-                    'subjects': normalize_subjects_list(row.get('subjects', '')),
+                    'stream': final_stream,
+                    'number_of_subject': len(subjects),
+                    'subjects': subjects,
                     'scores': {},
                     'promoted': normalize_promoted_db_value(promoted_raw in {'1', 'true', 'yes'}),
                     'parent_phone': row.get('parent_phone', ''),
@@ -27116,6 +33479,11 @@ def school_admin_backup():
     if session.get('role') != 'school_admin':
         return redirect(url_for('login'))
     school_id = session.get('school_id')
+    def _redirect_target():
+        target = (request.args.get('return_to', '') or request.form.get('return_to', '')).strip().lower()
+        if target in {'recovery', 'recovery_drill', 'drill'}:
+            return 'school_admin_disaster_recovery_drill'
+        return 'school_admin_bulk_tools'
     try:
         payload = build_school_backup_payload(school_id)
         body = json.dumps(payload, indent=2)
@@ -27128,7 +33496,7 @@ def school_admin_backup():
         )
     except Exception as exc:
         flash(f'Backup failed: {exc}', 'error')
-        return redirect(url_for('school_admin_bulk_tools'))
+        return redirect(url_for(_redirect_target()))
 
 @app.route('/school-admin/backup-encrypted', methods=['POST'])
 def school_admin_backup_encrypted():
@@ -27136,9 +33504,14 @@ def school_admin_backup_encrypted():
         return redirect(url_for('login'))
     school_id = session.get('school_id')
     passphrase = (request.form.get('backup_passphrase', '') or '').strip()
+    def _redirect_target():
+        target = (request.args.get('return_to', '') or request.form.get('return_to', '')).strip().lower()
+        if target in {'recovery', 'recovery_drill', 'drill'}:
+            return 'school_admin_disaster_recovery_drill'
+        return 'school_admin_bulk_tools'
     if len(passphrase) < 8:
         flash('Backup passphrase must be at least 8 characters.', 'error')
-        return redirect(url_for('school_admin_bulk_tools'))
+        return redirect(url_for(_redirect_target()))
     try:
         payload = build_school_backup_payload(school_id)
         body = json.dumps(payload, indent=2)
@@ -27152,19 +33525,24 @@ def school_admin_backup_encrypted():
         )
     except Exception as exc:
         flash(f'Encrypted backup failed: {exc}', 'error')
-        return redirect(url_for('school_admin_bulk_tools'))
+        return redirect(url_for(_redirect_target()))
 
 @app.route('/school-admin/restore', methods=['POST'])
 def school_admin_restore():
     if session.get('role') != 'school_admin':
         return redirect(url_for('login'))
+    def _redirect_target():
+        target = (request.args.get('return_to', '') or request.form.get('return_to', '')).strip().lower()
+        if target in {'recovery', 'recovery_drill', 'drill'}:
+            return 'school_admin_disaster_recovery_drill'
+        return 'school_admin_bulk_tools'
     school_id = session.get('school_id')
     mode = (request.form.get('mode', 'merge') or 'merge').strip().lower()
     dry_run = (request.form.get('dry_run', '') or '').strip().lower() in {'1', 'true', 'yes', 'on'}
     file = request.files.get('backup_file')
     if not file:
         flash('Choose a backup JSON file.', 'error')
-        return redirect(url_for('school_admin_bulk_tools'))
+        return redirect(url_for(_redirect_target()))
     try:
         raw_body = file.read().decode('utf-8')
         passphrase = (request.form.get('backup_passphrase', '') or '').strip()
@@ -27186,13 +33564,31 @@ def school_admin_restore():
                 )
             else:
                 flash(f"Dry-run found missing sections: {', '.join(verify.get('missing_sections') or [])}", 'warning')
-            return redirect(url_for('school_admin_bulk_tools'))
+            return redirect(url_for(_redirect_target()))
         restore_school_backup_payload(school_id, payload, mode=mode)
         record_admin_action_audit(school_id, 'backup_restore', target_scope='school_backup', payload={'mode': mode})
         flash(f'Backup restored successfully using {mode} mode.', 'success')
     except Exception as exc:
         flash(f'Restore failed: {exc}', 'error')
-    return redirect(url_for('school_admin_bulk_tools'))
+    return redirect(url_for(_redirect_target()))
+
+
+@app.route('/school-admin/backup-snapshot', methods=['POST'])
+def school_admin_backup_snapshot():
+    if session.get('role') != 'school_admin':
+        return redirect(url_for('login'))
+    target = (request.form.get('return_to', '') or '').strip().lower()
+    redirect_ep = 'school_admin_disaster_recovery_drill' if target in {'recovery', 'recovery_drill', 'drill'} else 'school_admin_bulk_tools'
+    school_id = session.get('school_id')
+    try:
+        created = create_auto_backup_snapshot(school_id, trigger_reason='manual')
+        flash(
+            f"Snapshot created ({'%.2f' % ((int(created.get('backup_size_bytes', 0) or 0)) / 1048576)} MB).",
+            'success',
+        )
+    except Exception as exc:
+        flash(f'Failed to create snapshot: {exc}', 'error')
+    return redirect(url_for(redirect_ep))
 
 @app.route('/school-admin/security')
 def school_admin_security():
@@ -27459,6 +33855,8 @@ def school_admin_disaster_recovery_drill():
     ensure_extended_features_schema()
     school_id = session.get('school_id')
     school = get_school(school_id) or {}
+    backup_schedule = get_backup_schedule_settings(school_id)
+    backup_health = get_backup_health_summary(school_id, days=30)
     result = None
     if request.method == 'POST':
         started = datetime.now()
@@ -27532,12 +33930,16 @@ def school_admin_disaster_recovery_drill():
                 })
     except Exception:
         recent_drills = []
+    recent_auto_backups = get_recent_auto_backup_snapshots(school_id, limit=8)
     return render_template(
         'school/school_admin_disaster_recovery_drill.html',
         school=school,
         active_page='recovery_drill',
         result=result,
         recent_drills=recent_drills,
+        backup_schedule=backup_schedule,
+        backup_health=backup_health,
+        recent_auto_backups=recent_auto_backups,
     )
 
 @app.route('/school-admin/analytics')
@@ -27560,6 +33962,7 @@ def school_admin_analytics():
     assistant_usage = get_assistant_usage_summary(school_id, days=assistant_days)
     assistant_feedback = get_assistant_feedback_summary(school_id, days=assistant_days)
     assistant_quality = get_assistant_quality_summary(school_id, days=assistant_days)
+    assistant_learning_queue = get_assistant_learning_queue(school_id, days=assistant_days, limit=12)
     action_audit = get_admin_action_audit_summary(school_id, days=assistant_days)
     notification_stats = get_notification_delivery_stats(school_id, days=assistant_days)
     backup_health = get_backup_health_summary(school_id, days=assistant_days)
@@ -27575,6 +33978,7 @@ def school_admin_analytics():
         assistant_usage=assistant_usage,
         assistant_feedback=assistant_feedback,
         assistant_quality=assistant_quality,
+        assistant_learning_queue=assistant_learning_queue,
         action_audit=action_audit,
         notification_stats=notification_stats,
         backup_health=backup_health,
@@ -27609,12 +34013,17 @@ def school_admin_add_students_by_class():
     school_id = session.get('school_id')
     school = get_school(school_id) or {}
     added_students = []
-    selected_class = request.args.get('class', '').strip()
+    selected_class = canonicalize_classname((request.args.get('class', '') or '').strip())
+    current_term = get_current_term(school)
+    valid_terms = {'First Term', 'Second Term', 'Third Term'}
+    selected_term = (request.args.get('term', '') or '').strip() or current_term
+    if selected_term not in valid_terms:
+        selected_term = current_term
     
     if request.method == 'POST':
         classname = canonicalize_classname(request.form.get('classname', '').strip())
         first_year_class = classname  # First year class is the starting class
-        term = request.form.get('term', '').strip()
+        term = (request.form.get('term', '') or '').strip() or current_term
         student_names = [normalize_person_name(name.strip()) for name in request.form.getlist('student_name[]')]
         reg_numbers = [reg.strip() for reg in request.form.getlist('reg_no[]')]
         student_emails = [(val or '').strip().lower() for val in request.form.getlist('student_email[]')]
@@ -27626,9 +34035,25 @@ def school_admin_add_students_by_class():
         if not classname or not term:
             flash('Please fill in all required fields.', 'error')
             return redirect(url_for('school_admin_add_students_by_class'))
+        if term not in valid_terms:
+            flash('Invalid term selected.', 'error')
+            return redirect(url_for('school_admin_add_students_by_class'))
         if not is_secondary_classname(classname):
             flash('Only secondary classes are supported (JSS/SS).', 'error')
             return redirect(url_for('school_admin_add_students_by_class'))
+        if not config:
+            defaults = _catalog_defaults_for_class(classname)
+            save_class_subject_config(
+                school_id=school_id,
+                classname=classname,
+                core_subjects=defaults.get('core', []),
+                science_subjects=defaults.get('science', []),
+                art_subjects=defaults.get('art', []),
+                commercial_subjects=defaults.get('commercial', []),
+                optional_subjects=defaults.get('optional', []),
+            )
+            config = get_class_subject_config(school_id, classname)
+            flash(f'Class subjects were auto-created for {classname}. You can edit them later in Class Subjects.', 'info')
         if not config:
             flash('No class subject configuration found. Configure subjects for this class first.', 'error')
             return redirect(url_for('school_admin_add_students_by_class'))
@@ -27712,7 +34137,7 @@ def school_admin_add_students_by_class():
                 current_index = next_index
                 student_id = generate_student_id(school_id, current_index, first_year_class)
                 # Ensure uniqueness even if a collision exists.
-                while load_student(school_id, student_id):
+                while load_student(school_id, student_id, include_archived=True):
                     current_index += 1
                     student_id = generate_student_id(school_id, current_index, first_year_class)
                 next_index = current_index + 1
@@ -27722,9 +34147,16 @@ def school_admin_add_students_by_class():
                 continue
             batch_ids.add(student_id.lower())
 
-            # Avoid ID collision in school.
-            if load_student(school_id, student_id):
-                flash(f'ID "{student_id}" already exists. Skipped {firstname}.', 'error')
+            # Avoid ID collision in school, including archived records.
+            existing_student_any = load_student(school_id, student_id, include_archived=True)
+            if existing_student_any:
+                if int(existing_student_any.get('is_archived', 0) or 0):
+                    flash(
+                        f'ID "{student_id}" exists in archived records. Restore that student instead of re-adding.',
+                        'error',
+                    )
+                else:
+                    flash(f'ID "{student_id}" already exists. Skipped {firstname}.', 'error')
                 continue
             
             student_data = {
@@ -27771,7 +34203,9 @@ def school_admin_add_students_by_class():
         if added_students:
             flash(f'Successfully added {len(added_students)} students to {classname}!', 'success')
             # Redirect to GET to prevent accidental form resubmission on refresh
-            return redirect(f'{url_for("school_admin_add_students_by_class")}?class={urllib.parse.quote(classname)}')
+            return redirect(
+                f'{url_for("school_admin_add_students_by_class")}?class={urllib.parse.quote(classname)}&term={urllib.parse.quote(term)}'
+            )
 
     # Always build listing from fresh DB state so ordering and new additions are correct.
     all_students = load_students(school_id, include_archived=True)
@@ -27799,7 +34233,9 @@ def school_admin_add_students_by_class():
         added_students=added_students,
         class_options=class_options,
         selected_class=selected_class,
-        class_students=class_students
+        class_students=class_students,
+        current_term=current_term,
+        selected_term=selected_term,
     )
 
 @app.route('/school-admin/assign-teacher', methods=['POST'])
@@ -27811,8 +34247,9 @@ def school_admin_assign_teacher():
     school_id = session.get('school_id')
     fallback_redirect = safe_referrer_or(url_for('school_admin_dashboard'))
     teacher_id = request.form.get('teacher_id', '').strip()
-    classname = request.form.get('classname', '').strip()
-    term = request.form.get('term', 'First Term').strip()
+    classname = canonicalize_classname(request.form.get('classname', '').strip())
+    school = get_school(school_id) or {}
+    term = (request.form.get('term', '') or '').strip() or get_current_term(school)
     valid_terms = {'First Term', 'Second Term', 'Third Term'}
     if term not in valid_terms:
         flash('Invalid term selected.', 'error')
@@ -27869,10 +34306,15 @@ def school_admin_assign_subject_teacher():
     school_id = session.get('school_id')
     fallback_redirect = safe_referrer_or(url_for('school_admin_dashboard'))
     teacher_id = request.form.get('teacher_id', '').strip()
-    term = request.form.get('term', 'First Term').strip()
+    school = get_school(school_id) or {}
+    term = (request.form.get('term', '') or '').strip() or get_current_term(school)
     assignment_scope = (request.form.get('assignment_scope', 'all_compatible') or 'all_compatible').strip().lower()
-    legacy_classname = request.form.get('classname', '').strip()
-    selected_classnames = [str(c).strip() for c in request.form.getlist('target_classnames') if str(c).strip()]
+    legacy_classname = canonicalize_classname(request.form.get('classname', '').strip())
+    selected_classnames = [
+        canonicalize_classname(str(c).strip())
+        for c in request.form.getlist('target_classnames')
+        if str(c).strip()
+    ]
     subject_values = request.form.getlist('subjects')
     if not subject_values:
         subject_values = request.form.getlist('subjects[]')
@@ -27911,7 +34353,11 @@ def school_admin_assign_subject_teacher():
         if not class_candidates:
             flash('No classes available for subject assignment yet.', 'error')
             return redirect(fallback_redirect)
-        class_candidates = [str(c).strip() for c in class_candidates if str(c).strip()]
+        class_candidates = _dedupe_keep_order([
+            canonicalize_classname(str(c).strip())
+            for c in class_candidates
+            if str(c).strip()
+        ])
 
         extra_classnames = []
         if assignment_scope == 'selected':
@@ -28093,7 +34539,7 @@ def school_admin_send_student_message():
     send_sms = (request.form.get('send_sms', '') or '').strip().lower() in {'1', 'true', 'yes', 'on'}
     send_email = (request.form.get('send_email', '') or '').strip().lower() in {'1', 'true', 'yes', 'on'}
     target_mode = (request.form.get('target_mode', 'all') or 'all').strip().lower()
-    target_classname = (request.form.get('target_classname', '') or '').strip()
+    target_classname = canonicalize_classname((request.form.get('target_classname', '') or '').strip())
     target_stream = (request.form.get('target_stream', '') or '').strip()
     deadline_date = (request.form.get('deadline_date', '') or '').strip()
 
@@ -28117,8 +34563,9 @@ def school_admin_send_student_message():
             return redirect(url_for('school_admin_messages'))
     school = get_school(school_id) or {}
     class_candidates = get_secondary_school_classnames(school_id) or []
+    class_candidates_canon = {canonicalize_classname(c) for c in class_candidates if str(c).strip()}
     if target_mode in {'class', 'stream'}:
-        if target_classname and target_classname not in class_candidates:
+        if target_classname and target_classname not in class_candidates_canon:
             flash('Selected class is not valid for your school.', 'error')
             return redirect(url_for('school_admin_messages'))
         if target_classname and not is_secondary_classname(target_classname):
@@ -28256,7 +34703,7 @@ def school_admin_send_teacher_message():
     send_sms = (request.form.get('send_sms', '') or '').strip().lower() in {'1', 'true', 'yes', 'on'}
     send_email = (request.form.get('send_email', '') or '').strip().lower() in {'1', 'true', 'yes', 'on'}
     target_mode = (request.form.get('target_mode', 'all') or 'all').strip().lower()
-    target_classname = (request.form.get('target_classname', '') or '').strip()
+    target_classname = canonicalize_classname((request.form.get('target_classname', '') or '').strip())
     target_subject = normalize_subject_name(request.form.get('target_subject', ''))
     deadline_date = (request.form.get('deadline_date', '') or '').strip()
     if target_mode not in {'all', 'class', 'subject', 'class_subject'}:
@@ -28283,8 +34730,9 @@ def school_admin_send_teacher_message():
             return redirect(url_for('school_admin_messages'))
 
     class_candidates = get_secondary_school_classnames(school_id) or []
+    class_candidates_canon = {canonicalize_classname(c) for c in class_candidates if str(c).strip()}
     if target_mode in {'class', 'class_subject'}:
-        if target_classname and target_classname not in class_candidates:
+        if target_classname and target_classname not in class_candidates_canon:
             flash('Selected class is not valid for your school.', 'error')
             return redirect(url_for('school_admin_messages'))
         if target_classname and not is_secondary_classname(target_classname):
@@ -28480,7 +34928,9 @@ def school_admin_toggle_operations():
         return redirect(url_for('school_admin_dashboard'))
     enabled = request.form.get('teacher_operations_enabled', '1').strip() == '1'
     affected = set_teacher_operations_enabled(school_id, enabled)
-    if affected < 1:
+    # Some mocked/legacy implementations may return None; treat as non-failing best-effort.
+    affected_count = 1 if affected is None else safe_int(affected, 0)
+    if affected_count < 1:
         flash('School not found. Toggle failed.', 'error')
         return redirect(url_for('school_admin_dashboard'))
     record_admin_action_audit(
@@ -29894,6 +36344,58 @@ def teacher_messages():
         unread_teacher_messages=unread_teacher_messages,
     )
 
+@app.route('/teacher/assistant-analytics')
+def teacher_assistant_analytics():
+    if session.get('role') != 'teacher':
+        return redirect(url_for('login'))
+    school_id = (session.get('school_id') or '').strip()
+    teacher_id = (session.get('user_id') or '').strip().lower()
+    school = get_school(school_id) or {}
+    teacher = get_teacher(school_id, teacher_id) or {}
+    teacher_name = f"{(teacher.get('firstname') or '').strip()} {(teacher.get('lastname') or '').strip()}".strip() or teacher_id
+    try:
+        assistant_days = int((request.args.get('assistant_days', '') or '30').strip())
+    except Exception:
+        assistant_days = 30
+    if assistant_days not in {7, 30, 90}:
+        assistant_days = 30
+
+    usage_mine = get_assistant_usage_summary_scoped(
+        school_id=school_id,
+        days=assistant_days,
+        role='teacher',
+        user_id=teacher_id,
+    )
+    feedback_mine = get_assistant_feedback_summary_scoped(
+        school_id=school_id,
+        days=assistant_days,
+        role='teacher',
+        user_id=teacher_id,
+    )
+    quality_mine = get_assistant_quality_summary_scoped(
+        school_id=school_id,
+        days=assistant_days,
+        role='teacher',
+        user_id=teacher_id,
+    )
+    usage_role = get_assistant_usage_summary_scoped(
+        school_id=school_id,
+        days=assistant_days,
+        role='teacher',
+    )
+
+    return render_template(
+        'teacher/teacher_assistant_analytics.html',
+        active_page='assistant_analytics',
+        school=school,
+        teacher_name=teacher_name,
+        assistant_days=assistant_days,
+        assistant_usage_mine=usage_mine,
+        assistant_feedback_mine=feedback_mine,
+        assistant_quality_mine=quality_mine,
+        assistant_usage_role=usage_role,
+    )
+
 @app.route('/teacher/attendance', methods=['GET', 'POST'])
 def teacher_attendance():
     if session.get('role') != 'teacher':
@@ -30174,7 +36676,7 @@ def teacher_publish_results():
 
     school_id = session.get('school_id')
     teacher_id = session.get('user_id')
-    classname = request.form.get('classname', '').strip()
+    classname = canonicalize_classname(request.form.get('classname', '').strip())
     if not classname:
         flash('Select a class to submit for approval.', 'error')
         return redirect(url_for('teacher_dashboard'))
@@ -30291,7 +36793,7 @@ def teacher_submit_to_class_teacher():
         return redirect(url_for('login'))
     school_id = session.get('school_id')
     teacher_id = session.get('user_id')
-    classname = (request.form.get('classname', '') or '').strip()
+    classname = canonicalize_classname((request.form.get('classname', '') or '').strip())
     if not classname:
         flash('Class is required.', 'error')
         return redirect(url_for('teacher_dashboard'))
@@ -30350,7 +36852,7 @@ def school_admin_approve_results():
         return redirect(url_for('login'))
     school_id = session.get('school_id')
     admin_user_id = session.get('user_id')
-    classname = request.form.get('classname', '').strip()
+    classname = canonicalize_classname(request.form.get('classname', '').strip())
     term = (request.form.get('term', '') or '').strip()
     academic_year = (request.form.get('academic_year', '') or '').strip()
     if not classname:
@@ -30415,7 +36917,7 @@ def school_admin_reject_results():
         return redirect(url_for('login'))
     school_id = session.get('school_id')
     admin_user_id = session.get('user_id')
-    classname = request.form.get('classname', '').strip()
+    classname = canonicalize_classname(request.form.get('classname', '').strip())
     term = (request.form.get('term', '') or '').strip()
     academic_year = (request.form.get('academic_year', '') or '').strip()
     if not classname:
@@ -30482,7 +36984,7 @@ def school_admin_unlock_term_edit():
     school_id = session.get('school_id')
     school = get_school(school_id) or {}
     admin_user_id = session.get('user_id')
-    classname = (request.form.get('classname', '') or '').strip()
+    classname = canonicalize_classname((request.form.get('classname', '') or '').strip())
     term = (request.form.get('term', '') or '').strip()
     academic_year = (request.form.get('academic_year', '') or '').strip() or (school.get('academic_year') or '')
     reason = (request.form.get('unlock_reason', '') or '').strip()
@@ -30519,7 +37021,7 @@ def school_admin_relock_term_edit():
     school_id = session.get('school_id')
     school = get_school(school_id) or {}
     admin_user_id = session.get('user_id')
-    classname = (request.form.get('classname', '') or '').strip()
+    classname = canonicalize_classname((request.form.get('classname', '') or '').strip())
     term = (request.form.get('term', '') or '').strip()
     academic_year = (request.form.get('academic_year', '') or '').strip() or (school.get('academic_year') or '')
     if not classname or not term:
@@ -30544,7 +37046,7 @@ def school_admin_reset_class_student_passwords():
         return redirect(url_for('login'))
     school_id = session.get('school_id')
     admin_user_id = session.get('user_id')
-    classname = (request.form.get('classname', '') or '').strip()
+    classname = canonicalize_classname((request.form.get('classname', '') or '').strip())
     if not classname:
         flash('Class is required for password reset.', 'error')
         return redirect(safe_referrer_or(url_for('school_admin_add_students_by_class')))
@@ -30645,6 +37147,7 @@ def teacher_allocate_stream():
         return redirect(url_for('teacher_dashboard'))
 
     if request.method == 'POST':
+        allocation_started_at = time.perf_counter()
         previous_stream = (student.get('stream') or '').strip()
         stream = request.form.get('stream', '').strip()
         selected_optional_subjects = request.form.getlist('optional_subjects')
@@ -30668,7 +37171,56 @@ def teacher_allocate_stream():
         student['stream'] = final_stream
         student['subjects'] = subjects
         student['number_of_subject'] = len(subjects)
-        save_student(school_id, student_id, student)
+
+        # Use a focused update for stream allocation to avoid full-row save
+        # overhead and reduce the chance of long-running submit requests.
+        with db_connection(commit=True) as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """UPDATE students
+                   SET stream = ?,
+                       subjects = ?,
+                       number_of_subject = ?,
+                       scores = ?
+                   WHERE school_id = ? AND student_id = ?""",
+                (
+                    final_stream,
+                    json.dumps(subjects),
+                    len(subjects),
+                    json.dumps(student['scores']),
+                    school_id,
+                    student_id,
+                ),
+            )
+            updated_rows = int(c.rowcount or 0)
+        elapsed_ms = int((time.perf_counter() - allocation_started_at) * 1000)
+        if updated_rows <= 0:
+            logging.warning(
+                "teacher_allocate_stream: no rows updated school_id=%s student_id=%s teacher_id=%s elapsed_ms=%s",
+                school_id,
+                student_id,
+                teacher_id,
+                elapsed_ms,
+            )
+            flash('Could not save stream allocation. Student record may have changed. Please retry.', 'error')
+            return redirect(url_for('teacher_allocate_stream', student_id=student_id))
+        if elapsed_ms > 2000:
+            logging.warning(
+                "teacher_allocate_stream: slow submit school_id=%s student_id=%s teacher_id=%s elapsed_ms=%s",
+                school_id,
+                student_id,
+                teacher_id,
+                elapsed_ms,
+            )
+        else:
+            logging.info(
+                "teacher_allocate_stream: submit ok school_id=%s student_id=%s teacher_id=%s elapsed_ms=%s",
+                school_id,
+                student_id,
+                teacher_id,
+                elapsed_ms,
+            )
         if previous_stream in ('', 'N/A'):
             flash(f'Stream allocated for {student.get("firstname", "")}.', 'success')
         elif previous_stream != final_stream:
@@ -31920,6 +38472,13 @@ def student_change_password():
         flash('Password changed successfully.', 'success')
         return redirect(url_for('student_dashboard'))
 
+    return render_template(
+        'shared/change_password.html',
+        form_action='student_change_password',
+        back_url=('' if force_change else 'student_dashboard'),
+        force_change=force_change,
+    )
+
 @app.route('/student/profile', methods=['GET', 'POST'])
 def student_profile():
     if session.get('role') != 'student':
@@ -32010,12 +38569,276 @@ def student_subject_requests():
         requests=requests,
     )
 
+@app.route('/student/cbt')
+def student_cbt():
+    if session.get('role') != 'student':
+        return redirect(url_for('login'))
+    if not ensure_cbt_schema():
+        flash('CBT module is not available right now. Please retry.', 'error')
+        return redirect(url_for('student_dashboard'))
+
+    school_id = session.get('school_id')
+    student_id = session.get('user_id')
+    student = load_student(school_id, student_id)
+    if not student:
+        flash('Student data not found.', 'error')
+        return redirect(url_for('login'))
+
+    school = get_school(school_id) or {}
+    current_term = get_current_term(school)
+    current_year = (school or {}).get('academic_year', '')
+    selected_term = (request.args.get('term', current_term) or current_term).strip()
+    selected_year = (request.args.get('academic_year', current_year) or current_year).strip()
+
+    with db_connection() as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """SELECT t.test_id, t.title, t.instructions, t.classname, t.subject, t.term, t.academic_year,
+                      t.duration_minutes, t.total_questions, t.questions_to_answer, t.total_marks, t.status, t.created_at,
+                      a.attempt_id, a.status AS attempt_status, a.score, a.total_marks AS attempt_total_marks,
+                      a.answered_questions, a.total_questions AS attempt_total_questions,
+                      a.remaining_seconds, a.last_activity_at,
+                      a.started_at, a.submitted_at
+               FROM cbt_tests t
+               LEFT JOIN cbt_attempts a
+                 ON a.school_id = t.school_id
+                AND a.test_id = t.test_id
+                AND a.student_id = ?
+               WHERE t.school_id = ?
+                 AND t.status = 'published'
+                 AND COALESCE(t.total_questions, 0) > 0
+                 AND t.term = ?
+                 AND COALESCE(t.academic_year, '') = ?
+               ORDER BY t.created_at DESC""",
+            (student_id, school_id, selected_term, selected_year),
+        )
+        rows = c.fetchall() or []
+
+    student_class = (student.get('classname') or '').strip()
+    offered_subject_keys = _cbt_student_offered_subject_keys(school_id, student)
+    tests = []
+    for row in rows:
+        rowd = dict(row)
+        if not _cbt_class_matches_student(rowd.get('classname', ''), student_class):
+            continue
+        subject_key = normalize_subject_name(rowd.get('subject', '')).lower()
+        if subject_key and offered_subject_keys and subject_key not in offered_subject_keys:
+            continue
+        attempt_status = (rowd.get('attempt_status') or '').strip().lower()
+        rowd['action_mode'] = 'start'
+        if attempt_status == 'submitted':
+            rowd['action_mode'] = 'review'
+        elif attempt_status == 'started':
+            rowd['action_mode'] = 'continue'
+        tests.append(rowd)
+
     return render_template(
-        'shared/change_password.html',
-        form_action='student_change_password',
-        back_url=('' if force_change else 'student_dashboard'),
-        force_change=force_change,
+        'student/student_cbt.html',
+        school=school,
+        student=student,
+        tests=tests,
+        selected_term=selected_term,
+        selected_year=selected_year,
+        current_term=current_term,
+        current_year=current_year,
     )
+
+
+@app.route('/student/cbt/<test_id>/take', methods=['GET', 'POST'])
+def student_cbt_take(test_id):
+    if session.get('role') != 'student':
+        return redirect(url_for('login'))
+    if not ensure_cbt_schema():
+        flash('CBT module is not available right now. Please retry.', 'error')
+        return redirect(url_for('student_cbt'))
+
+    school_id = session.get('school_id')
+    student_id = session.get('user_id')
+    student = load_student(school_id, student_id)
+    if not student:
+        flash('Student data not found.', 'error')
+        return redirect(url_for('login'))
+    school = get_school(school_id) or {}
+
+    test_row = get_cbt_test(school_id, test_id)
+    can_take, deny_message = _student_can_take_cbt_test(school_id, student, test_row)
+    if not can_take:
+        flash(deny_message or 'This CBT is not available to your account.', 'error')
+        return redirect(url_for('student_cbt'))
+
+    question_pool = list_cbt_questions(school_id, test_id)
+    if not question_pool:
+        flash('This CBT has no questions yet.', 'error')
+        return redirect(url_for('student_cbt'))
+
+    attempt = get_student_cbt_attempt(school_id, test_id, student_id)
+    if request.method == 'POST':
+        if not can_take:
+            flash('This CBT is closed and cannot be submitted.', 'error')
+            return redirect(url_for('student_cbt_take', test_id=test_id))
+        try:
+            attempt = submit_student_cbt_attempt(
+                school_id=school_id,
+                test_row=test_row,
+                student_id=student_id,
+                answers_map=request.form,
+                auto_submitted=False,
+            )
+            flash('CBT submitted successfully.', 'success')
+        except Exception as exc:
+            flash(str(exc), 'error')
+        return redirect(url_for('student_cbt_take', test_id=test_id))
+
+    if not attempt and (test_row.get('status') or '').strip().lower() == 'published':
+        attempt = _ensure_student_cbt_attempt(school_id, test_row, student_id)
+
+    selected_questions = question_pool
+    answer_map = {}
+    draft_answer_map = {}
+    remaining_seconds_saved = 0
+    if attempt and attempt.get('attempt_id'):
+        with db_connection(commit=True) as conn:
+            c = conn.cursor()
+            _selected_qnos, selected_qrows = _ensure_attempt_question_set_with_cursor(
+                c,
+                school_id,
+                test_row,
+                attempt,
+                qrows=question_pool,
+            )
+        selected_questions = selected_qrows or question_pool
+        answer_map = list_student_cbt_answers(school_id, attempt.get('attempt_id'))
+        draft_answer_map = _load_cbt_draft_answers(attempt.get('draft_answers_json', ''))
+        answer_map = _merge_attempt_answer_maps(answer_map, draft_answer_map)
+        remaining_seconds_saved = max(0, safe_int(attempt.get('remaining_seconds', 0), 0))
+
+    is_submitted = bool(attempt and (attempt.get('status') or '').strip().lower() == 'submitted')
+    accommodation = get_cbt_test_accommodation(school_id, test_id, student_id)
+    extra_minutes = safe_int(accommodation.get('extra_minutes', 0), 0) if safe_int(accommodation.get('is_active', 0), 0) else 0
+    extra_percent = safe_int(accommodation.get('extra_percent', 0), 0) if safe_int(accommodation.get('is_active', 0), 0) else 0
+    duration_seconds = _cbt_duration_seconds_from_questions(
+        test_row,
+        selected_questions,
+        extra_minutes=extra_minutes,
+        extra_percent=extra_percent,
+    )
+    remaining_seconds = duration_seconds
+    if not is_submitted and remaining_seconds_saved > 0:
+        remaining_seconds = min(duration_seconds, remaining_seconds_saved)
+
+    attempted_count = 0
+    correct_count = 0
+    wrong_count = 0
+    total_count = len(selected_questions or [])
+    if is_submitted:
+        for q in (selected_questions or []):
+            q_no = safe_int(q.get('question_no', 0), 0)
+            if q_no <= 0:
+                continue
+            ans = answer_map.get(q_no, {})
+            selected = (ans.get('selected_option') or '').strip().upper()
+            if selected:
+                attempted_count += 1
+                if bool(ans.get('is_correct')):
+                    correct_count += 1
+                else:
+                    wrong_count += 1
+
+    return render_template(
+        'student/student_cbt_take.html',
+        school=school,
+        student=student,
+        test=test_row,
+        questions=selected_questions,
+        question_pool_size=len(question_pool),
+        questions_required=len(selected_questions),
+        attempt=attempt,
+        answer_map=answer_map,
+        is_submitted=is_submitted,
+        duration_seconds=duration_seconds,
+        remaining_seconds=remaining_seconds,
+        extra_minutes=extra_minutes,
+        extra_percent=extra_percent,
+        attempted_count=attempted_count,
+        correct_count=correct_count,
+        wrong_count=wrong_count,
+        total_count=total_count,
+    )
+
+
+@app.route('/student/cbt/<test_id>/autosave', methods=['POST'])
+@require_roles('student')
+def student_cbt_autosave(test_id):
+    if session.get('role') != 'student':
+        return jsonify({'ok': False, 'error': 'unauthorized'}), 403
+    if not ensure_cbt_schema():
+        return jsonify({'ok': False, 'error': 'cbt_unavailable'}), 503
+    school_id = session.get('school_id')
+    student_id = session.get('user_id')
+    student = load_student(school_id, student_id)
+    if not student:
+        return jsonify({'ok': False, 'error': 'student_not_found'}), 404
+    test_row = get_cbt_test(school_id, test_id)
+    can_take, deny_message = _student_can_take_cbt_test(school_id, student, test_row)
+    if not can_take:
+        return jsonify({'ok': False, 'error': deny_message or 'not_allowed'}), 400
+
+    attempt = get_student_cbt_attempt(school_id, test_id, student_id)
+    if not attempt:
+        attempt = _ensure_student_cbt_attempt(school_id, test_row, student_id)
+    if not attempt:
+        return jsonify({'ok': False, 'error': 'attempt_not_available'}), 500
+    if (attempt.get('status') or '').strip().lower() == 'submitted':
+        return jsonify({'ok': True, 'state': 'submitted'}), 200
+
+    question_pool = list_cbt_questions(school_id, test_id)
+    if not question_pool:
+        return jsonify({'ok': False, 'error': 'no_questions'}), 400
+    with db_connection(commit=True) as conn:
+        c = conn.cursor()
+        _selected_qnos, selected_qrows = _ensure_attempt_question_set_with_cursor(
+            c,
+            school_id,
+            test_row,
+            attempt,
+            qrows=question_pool,
+        )
+        draft_map = _build_cbt_draft_answers_map(request.form, selected_qrows or [])
+        remaining_seconds = max(0, min(24 * 3600, safe_int(request.form.get('remaining_seconds', 0), 0)))
+        db_execute(
+            c,
+            """UPDATE cbt_attempts
+               SET draft_answers_json = ?,
+                   remaining_seconds = ?,
+                   last_activity_at = CURRENT_TIMESTAMP
+               WHERE school_id = ? AND attempt_id = ?""",
+            (json.dumps(draft_map), remaining_seconds, school_id, attempt.get('attempt_id', '')),
+        )
+        integrity_events = _parse_cbt_integrity_events(
+            request.form.get('integrity_events_json', request.form.get('_integrity_events_json', ''))
+        )
+        if integrity_events:
+            _log_cbt_attempt_events_with_cursor(
+                c,
+                school_id,
+                attempt.get('attempt_id', ''),
+                test_id,
+                student_id,
+                integrity_events,
+            )
+            _refresh_cbt_attempt_integrity_flag_with_cursor(
+                c,
+                school_id,
+                attempt.get('attempt_id', ''),
+                test_row,
+            )
+    return jsonify({
+        'ok': True,
+        'saved_answers': len(draft_map),
+        'remaining_seconds': remaining_seconds,
+        'saved_at': datetime.utcnow().isoformat() + 'Z',
+    }), 200
 
 
 @app.route('/student/parent-access', methods=['POST'])
@@ -32295,6 +39118,72 @@ def _parent_allowed_student_keys():
         if (row.get('school_id') or '').strip() and (row.get('student_id') or '').strip()
     }
     return session_keys.intersection(linked_keys)
+
+def _build_parent_sidebar_context(limit_per_school=120):
+    allowed_keys = _parent_allowed_student_keys()
+    if not allowed_keys:
+        return {
+            'children': [],
+            'parent_theme_accent': '#1F7A8C',
+            'parent_messages': [],
+            'unread_parent_messages': 0,
+        }
+    key_pairs = []
+    student_ids_by_school = {}
+    for key in sorted(allowed_keys):
+        if '::' not in key:
+            continue
+        school_id, student_id = key.split('::', 1)
+        school_id = (school_id or '').strip()
+        student_id = (student_id or '').strip()
+        if not school_id or not student_id:
+            continue
+        key_pairs.append((key, school_id, student_id))
+        student_ids_by_school.setdefault(school_id, []).append(student_id)
+
+    schools_by_id = {sid: (get_school(sid) or {}) for sid in student_ids_by_school.keys()}
+    students_by_key = {}
+    for sid, student_ids in student_ids_by_school.items():
+        rows = load_students_for_student_ids(sid, student_ids)
+        for student_id, student in rows.items():
+            students_by_key[f'{sid}::{student_id}'] = student
+
+    children = []
+    for key, school_id, student_id in key_pairs:
+        student = students_by_key.get(key)
+        if not student:
+            continue
+        school = schools_by_id.get(school_id, {})
+        children.append({
+            'key': key,
+            'school_id': school_id,
+            'school_name': (school or {}).get('school_name', school_id),
+            'student_id': student_id,
+            'firstname': student.get('firstname', ''),
+            'classname': student.get('classname', ''),
+            'stream': student.get('stream', ''),
+            'subjects': student.get('subjects', []),
+        })
+    children.sort(key=lambda row: ((row.get('firstname') or '').lower(), (row.get('student_id') or '').lower()))
+
+    parent_theme_accent = '#1F7A8C'
+    if children:
+        first_school_id = (children[0].get('school_id') or '').strip()
+        first_school = schools_by_id.get(first_school_id, {}) if first_school_id else {}
+        parent_theme_accent = normalize_hex_color(first_school.get('theme_accent_color', ''), '#1F7A8C')
+
+    parent_messages = get_parent_messages_for_children(
+        parent_phone=session.get('parent_phone', ''),
+        children=children,
+        limit_per_school=max(40, int(limit_per_school or 120)),
+    )
+    unread_parent_messages = sum(1 for row in parent_messages if not row.get('is_read'))
+    return {
+        'children': children,
+        'parent_theme_accent': parent_theme_accent,
+        'parent_messages': parent_messages,
+        'unread_parent_messages': unread_parent_messages,
+    }
 
 
 @app.route('/parent-portal', methods=['GET', 'POST'])
@@ -32695,6 +39584,61 @@ def parent_messages():
         children=children,
         parent_messages=parent_messages,
         unread_parent_messages=unread_parent_messages,
+    )
+
+@app.route('/parent/assistant-analytics')
+def parent_assistant_analytics():
+    if session.get('role') != 'parent':
+        return redirect(url_for('login'))
+    allowed_keys = _parent_allowed_student_keys()
+    if not allowed_keys:
+        flash('Parent session expired. Please login again.', 'error')
+        return redirect(url_for('login'))
+    try:
+        assistant_days = int((request.args.get('assistant_days', '') or '30').strip())
+    except Exception:
+        assistant_days = 30
+    if assistant_days not in {7, 30, 90}:
+        assistant_days = 30
+
+    sidebar_ctx = _build_parent_sidebar_context(limit_per_school=160)
+    school_id = (session.get('school_id') or '').strip()
+    parent_id = normalize_parent_phone(session.get('parent_phone', '')).lower()
+    usage_mine = get_assistant_usage_summary_scoped(
+        school_id=school_id,
+        days=assistant_days,
+        role='parent',
+        user_id=parent_id,
+    )
+    feedback_mine = get_assistant_feedback_summary_scoped(
+        school_id=school_id,
+        days=assistant_days,
+        role='parent',
+        user_id=parent_id,
+    )
+    quality_mine = get_assistant_quality_summary_scoped(
+        school_id=school_id,
+        days=assistant_days,
+        role='parent',
+        user_id=parent_id,
+    )
+    usage_role = get_assistant_usage_summary_scoped(
+        school_id=school_id,
+        days=assistant_days,
+        role='parent',
+    )
+    return render_template(
+        'parent/parent_assistant_analytics.html',
+        active_page='assistant_analytics',
+        parent_phone=session.get('parent_phone', ''),
+        assistant_days=assistant_days,
+        assistant_usage_mine=usage_mine,
+        assistant_feedback_mine=feedback_mine,
+        assistant_quality_mine=quality_mine,
+        assistant_usage_role=usage_role,
+        children=sidebar_ctx.get('children') or [],
+        parent_theme_accent=sidebar_ctx.get('parent_theme_accent') or '#1F7A8C',
+        unread_parent_messages=int(sidebar_ctx.get('unread_parent_messages') or 0),
     )
 
 
@@ -34410,7 +41354,7 @@ def school_admin_unpublish_results():
 
     school_id = session.get('school_id')
     sid = (request.form.get('student_id', '') or '').strip()
-    classname = (request.form.get('classname', '') or '').strip()
+    classname = canonicalize_classname((request.form.get('classname', '') or '').strip())
     term_token = (request.form.get('term_token', '') or '').strip()
     admin_password = (request.form.get('admin_password', '') or '').strip()
     client_ip = get_client_ip()
@@ -34791,7 +41735,7 @@ def view_students():
     grade_cfg = get_grade_config(school_id)
     current_term = get_current_term(school)
 
-    selected_class = request.args.get('class', '').strip()
+    selected_class = canonicalize_classname(request.args.get('class', '').strip())
     selected_term = request.args.get('term', '').strip()
     try:
         per_page = int((request.args.get('per_page', '') or '50').strip())
@@ -34803,7 +41747,7 @@ def view_students():
     except (TypeError, ValueError):
         page = 1
     page = max(1, page)
-    if not selected_term:
+    if not selected_term and role == 'teacher':
         selected_term = current_term
 
     if session.get('role') == 'teacher':
@@ -34818,8 +41762,12 @@ def view_students():
             academic_year=current_year,
         )
         class_set.update({r.get('classname', '') for r in subject_rows if r.get('classname', '')})
-        students_data = load_students_for_classes(school_id, class_set, term_filter=selected_term)
         available_classes, available_terms = get_student_filter_options(school_id, classnames=class_set)
+        if selected_class and selected_class not in set(available_classes):
+            selected_class = ''
+        if selected_term and selected_term not in set(available_terms):
+            selected_term = ''
+        students_data = load_students_for_classes(school_id, class_set, term_filter=selected_term)
         teacher_result_classes_lower = {(c or '').strip().lower() for c in class_owner_set}
         subject_map_by_class = {}
         for row in subject_rows:
@@ -34830,8 +41778,19 @@ def view_students():
             subject_map_by_class.setdefault(cls, set()).add(subj)
     else:
         # School admin path: query only currently requested class/term when provided.
-        students_data = load_students(school_id, class_filter=selected_class, term_filter=selected_term)
         available_classes, available_terms = get_student_filter_options(school_id)
+        if selected_class and selected_class not in set(available_classes):
+            selected_class = ''
+        if selected_term and selected_term not in set(available_terms):
+            selected_term = ''
+        students_data = load_students(school_id, class_filter=selected_class, term_filter=selected_term)
+        # School admin usability fallback: if a class is selected but no rows match the selected term,
+        # automatically show that class across all terms instead of appearing empty.
+        if selected_class and selected_term and not students_data:
+            class_only_students = load_students(school_id, class_filter=selected_class, term_filter='')
+            if class_only_students:
+                students_data = class_only_students
+                selected_term = ''
         teacher_result_classes_lower = set()
         class_owner_set = set()
         subject_map_by_class = {}
@@ -34987,16 +41946,56 @@ def assistant_guide():
     teacher_scope = _assistant_get_teacher_scope() if role == 'teacher' else None
     source_page = (request.form.get('page', '') or '').strip()
     page_context = (request.form.get('page_context', '') or '').strip()[:260]
-    payload = _assistant_build_response(
-        role,
-        question,
-        teacher_scope=teacher_scope,
-        source_page=source_page,
-        page_context=page_context,
-        conversation_history=merged_history,
-        response_mode=response_mode,
-    )
+    try:
+        payload = _assistant_build_response(
+            role,
+            question,
+            teacher_scope=teacher_scope,
+            source_page=source_page,
+            page_context=page_context,
+            conversation_history=merged_history,
+            response_mode=response_mode,
+        )
+    except TypeError:
+        # Backward-compatible path for older/mocked helper signatures.
+        payload = _assistant_build_response(
+            role,
+            question,
+            teacher_scope=teacher_scope,
+            source_page=source_page,
+            conversation_history=merged_history,
+            response_mode=response_mode,
+        )
     school_id = (session.get('school_id') or '').strip()
+    learning_signal = (
+        get_assistant_learning_signal(
+            school_id=school_id,
+            role=role,
+            question=question,
+            source_page=source_page,
+            days=45,
+        )
+        if school_id and role != 'super_admin'
+        else {'needs_update': False}
+    )
+    if learning_signal.get('needs_update'):
+        steps_rows = [str(s).strip() for s in (payload.get('steps') or []) if str(s).strip()]
+        learning_step = 'Learning signal: this question has mixed feedback. Confirm the exact page/menu before applying changes.'
+        if learning_step not in steps_rows:
+            steps_rows.insert(0, learning_step)
+        payload['steps'] = steps_rows[:6]
+        payload['confidence'] = round(max(0.35, min(float(payload.get('confidence') or 0.0), 0.72)), 3)
+        if int(learning_signal.get('unresolved_hits') or 0) >= 2:
+            payload['unresolved'] = True
+        if not (payload.get('next_question') or '').strip():
+            payload['next_question'] = 'Which exact page are you on now so I can guide more precisely?'
+    payload['learning_signal'] = {
+        'needs_update': bool(learning_signal.get('needs_update')),
+        'helpful': int(learning_signal.get('helpful') or 0),
+        'not_helpful': int(learning_signal.get('not_helpful') or 0),
+        'unresolved_hits': int(learning_signal.get('unresolved_hits') or 0),
+        'avg_confidence': float(learning_signal.get('avg_confidence') or 0.0),
+    }
     boosted_prompts = get_assistant_prompt_boosts(
         school_id,
         role=role,
@@ -35017,7 +42016,7 @@ def assistant_guide():
                 break
         payload['quick_prompts'] = merged_prompts
     llm_available = bool((os.environ.get('OPENAI_API_KEY', '') or '').strip())
-    should_try_llm = llm_available and not payload.get('action_blocked')
+    should_try_llm = APP_ASSISTANT_ENABLE_OPENAI and llm_available and not payload.get('action_blocked')
     if should_try_llm:
         llm_prompt_question = question
         if page_context:
@@ -35045,6 +42044,7 @@ def assistant_guide():
         confidence=float(payload.get('confidence') or 0.0),
         unresolved=bool(payload.get('unresolved')),
         response_mode=response_mode,
+        answer_version=APP_ASSISTANT_ANSWER_VERSION,
     )
     save_assistant_memory_exchange(
         role=role,
@@ -35058,6 +42058,7 @@ def assistant_guide():
     payload.pop('knowledge_context', None)
     payload['ok'] = True
     payload['role'] = role
+    payload['answer_version'] = APP_ASSISTANT_ANSWER_VERSION
     return Response(json.dumps(payload), mimetype='application/json')
 
 @app.route('/assistant/feedback', methods=['POST'])
@@ -35071,6 +42072,7 @@ def assistant_feedback():
     answer = (request.form.get('answer', '') or '').strip()
     page = (request.form.get('page', '') or '').strip()
     log_assistant_feedback(role, question, answer, helpful, source_page=page)
+    _assistant_learn_from_feedback(role, question, answer, helpful, source_page=page)
     return Response(json.dumps({'ok': True}), mimetype='application/json')
 
 @app.route('/assistant/preferences', methods=['POST'])
@@ -35091,6 +42093,60 @@ def assistant_memory_clear():
         return Response(json.dumps({'ok': False, 'error': 'unauthorized'}), status=403, mimetype='application/json')
     cleared = clear_assistant_memory(role=role)
     return Response(json.dumps({'ok': True, 'cleared': int(cleared)}), mimetype='application/json')
+
+@app.route('/assistant/health')
+def assistant_health():
+    if (session.get('role') or '').strip().lower() != 'super_admin':
+        return Response(json.dumps({'ok': False, 'error': 'unauthorized'}), status=403, mimetype='application/json')
+    checks = {
+        'schema': False,
+        'db': False,
+        'response_engine': False,
+    }
+    notes = []
+    try:
+        checks['schema'] = bool(ensure_extended_features_schema())
+    except Exception as exc:
+        notes.append(f'schema_error: {exc}')
+    try:
+        with db_connection() as conn:
+            c = conn.cursor()
+            db_execute(c, "SELECT 1")
+            row = c.fetchone()
+            checks['db'] = bool(row and int(row[0] or 0) == 1)
+    except Exception as exc:
+        notes.append(f'db_error: {exc}')
+    try:
+        probe = _assistant_build_response(
+            role='school_admin',
+            question='where can i add student',
+            source_page='/school-admin',
+            page_context='School Admin Dashboard',
+            conversation_history=[],
+            response_mode='standard',
+        )
+        checks['response_engine'] = bool(str((probe or {}).get('answer') or '').strip())
+    except Exception as exc:
+        notes.append(f'engine_error: {exc}')
+
+    runtime = _assistant_transformer_load_runtime(force_reload=False)
+    transformer_info = {
+        'enabled': bool(APP_ASSISTANT_TRANSFORMER_ENABLED),
+        'loaded': bool(runtime.get('model') and runtime.get('meta')),
+        'device': str(runtime.get('device') or ''),
+        'error': str(runtime.get('error') or ''),
+    }
+    status_ok = all(bool(v) for v in checks.values())
+    body = {
+        'ok': bool(status_ok),
+        'timestamp': datetime.now().isoformat(),
+        'answer_version': APP_ASSISTANT_ANSWER_VERSION,
+        'checks': checks,
+        'transformer': transformer_info,
+        'openai_enabled': bool(APP_ASSISTANT_ENABLE_OPENAI and (os.environ.get('OPENAI_API_KEY', '') or '').strip()),
+        'notes': notes,
+    }
+    return Response(json.dumps(body), status=(200 if status_ok else 503), mimetype='application/json')
 
 @app.route('/help')
 def help():
@@ -35640,10 +42696,99 @@ if __name__ == '__main__':
     parser.add_argument('--db-health-check', action='store_true', help='Run DB connectivity/schema checks and exit.')
     parser.add_argument('--apply-fixes', action='store_true', help='With --db-health-check, apply best-effort schema fixes first.')
     parser.add_argument('--include-startup-ddl', action='store_true', help='With --db-health-check --apply-fixes, also run init_db().')
+    parser.add_argument('--train-assistant-transformer', action='store_true', help='Train local assistant transformer from in-app data and exit.')
+    parser.add_argument('--assistant-smoke-test', action='store_true', help='Run quick assistant intent smoke tests and exit.')
+    parser.add_argument('--assistant-school-id', default='', help='Optional school_id scope for transformer training data.')
+    parser.add_argument('--assistant-epochs', type=int, default=12, help='Epochs for local assistant transformer training.')
+    parser.add_argument('--assistant-batch-size', type=int, default=32, help='Batch size for local assistant transformer training.')
     args = parser.parse_args()
 
     if args.db_health_check:
         raise SystemExit(run_db_health_check(apply_fixes=args.apply_fixes, include_startup_ddl=args.include_startup_ddl))
+
+    if args.train_assistant_transformer:
+        summary = train_local_assistant_transformer(
+            school_id=(args.assistant_school_id or '').strip(),
+            epochs=int(args.assistant_epochs or 12),
+            batch_size=int(args.assistant_batch_size or 32),
+        )
+        if summary.get('ok'):
+            print(
+                "[assistant-train] ok | samples={sample_count} | labels={labels} | vocab={vocab_size} | device={device}".format(
+                    sample_count=summary.get('sample_count', 0),
+                    labels=summary.get('labels', 0),
+                    vocab_size=summary.get('vocab_size', 0),
+                    device=summary.get('device', 'cpu'),
+                )
+            )
+            raise SystemExit(0)
+        print("[assistant-train] failed: {err}".format(err=summary.get('error') or 'unknown error'))
+        raise SystemExit(1)
+
+    if args.assistant_smoke_test:
+        smoke_cases = [
+            ('school_admin', 'where can i add student', '/school-admin/dashboard', 'School Admin Dashboard'),
+            ('school_admin', 'how to reset student password', '/school-admin/dashboard', 'School Admin Dashboard'),
+            ('school_admin', 'where do i configure subject', '/school-admin/dashboard', 'School Admin Dashboard'),
+            ('school_admin', 'how to upload principal signature', '/school-admin/dashboard', 'School Admin Dashboard'),
+            ('school_admin', 'how to assign teacher to class', '/school-admin/dashboard', 'School Admin Dashboard'),
+            ('teacher', 'how to create cbt', '/teacher/dashboard', 'Teacher Dashboard'),
+            ('teacher', 'how does cbt autosave work', '/teacher/dashboard', 'Teacher Dashboard'),
+            ('parent', 'where can parent see timetable', '/parent/dashboard', 'Parent Dashboard'),
+            ('super_admin', 'difference between data request and report issue', '/super-admin/dashboard', 'Super Admin Dashboard'),
+            # Typo/real-world phrasing coverage (10 extra prompts)
+            ('school_admin', 'where can i add stident', '/school-admin/dashboard', 'School Admin Dashboard'),
+            ('school_admin', 'how to resert student password', '/school-admin/dashboard', 'School Admin Dashboard'),
+            ('school_admin', 'where do i configuer subject', '/school-admin/dashboard', 'School Admin Dashboard'),
+            ('school_admin', 'how to opload principal signeture', '/school-admin/dashboard', 'School Admin Dashboard'),
+            ('school_admin', 'why i cant publish result now', '/school-admin/dashboard', 'School Admin Dashboard'),
+            ('school_admin', 'unlock locked result for corection', '/school-admin/dashboard', 'School Admin Dashboard'),
+            ('school_admin', 'how to relock result after corection', '/school-admin/dashboard', 'School Admin Dashboard'),
+            ('teacher', 'how do i creat cbt test', '/teacher/dashboard', 'Teacher Dashboard'),
+            ('parent', 'where can parrent see time table', '/parent/dashboard', 'Parent Dashboard'),
+            ('super_admin', 'request refrence not found what to do', '/super-admin/dashboard', 'Super Admin Dashboard'),
+        ]
+        print('[assistant-smoke] start')
+        with app.test_request_context('/assistant-smoke'):
+            for role_name, question_text, src_page, page_title in smoke_cases:
+                resp = _assistant_build_response(
+                    role=role_name,
+                    question=question_text,
+                    source_page=src_page,
+                    page_context=page_title,
+                    conversation_history=[],
+                )
+                answer_text = str((resp or {}).get('answer') or '').strip().replace('\n', ' ')
+                next_q = str((resp or {}).get('next_question') or '').strip().replace('\n', ' ')
+                conf = float((resp or {}).get('confidence') or 0.0)
+                print(f'[assistant-smoke] role={role_name} q="{question_text}" conf={conf:.2f}')
+                print(f'  answer: {answer_text[:220]}')
+                if next_q:
+                    print(f'  next: {next_q[:180]}')
+            # Multi-turn short "yes" follow-up check for add-student prompt.
+            first = _assistant_build_response(
+                role='school_admin',
+                question='where can i add student',
+                source_page='/school-admin/dashboard',
+                page_context='School Admin Dashboard',
+                conversation_history=[],
+            )
+            history_rows = [
+                {'role': 'user', 'text': 'where can i add student'},
+                {'role': 'assistant', 'text': f"{first.get('answer', '')} {first.get('next_question', '')}".strip()},
+            ]
+            follow = _assistant_build_response(
+                role='school_admin',
+                question='yes',
+                source_page='/school-admin/dashboard',
+                page_context='School Admin Dashboard',
+                conversation_history=history_rows,
+            )
+            print('[assistant-smoke] follow-up check q="yes" after add-student prompt')
+            print(f'  answer: {str(follow.get("answer") or "").strip()[:220]}')
+            print(f'  next: {str(follow.get("next_question") or "").strip()[:180]}')
+        print('[assistant-smoke] done')
+        raise SystemExit(0)
 
     port = int(os.environ.get('PORT', 5000))
     debug_flag = (

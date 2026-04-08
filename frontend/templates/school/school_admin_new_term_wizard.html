@@ -3,6 +3,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>New Term Wizard - School Admin</title>
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}" />
     <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260307f') }}" />
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" />
@@ -38,12 +39,37 @@
           <div class="card">
             <h2>Current Term</h2>
             <p><strong>{{ current_term }}</strong>{% if current_year %} ({{ current_year }}){% endif %}</p>
+            <p class="note" style="margin-top:8px;">
+              Suggested next: <strong>{{ suggested_term }}</strong> ({{ suggested_year }})
+            </p>
+          </div>
+
+          <div class="card">
+            <h2>Rollover Readiness</h2>
+            <p>
+              Classes tracked: <strong>{{ rollover_readiness.total_classes if rollover_readiness else 0 }}</strong> |
+              Published: <strong>{{ rollover_readiness.published_classes if rollover_readiness else 0 }}</strong> |
+              Unpublished: <strong>{{ rollover_readiness.unpublished_classes if rollover_readiness else 0 }}</strong> |
+              Pending Review: <strong>{{ rollover_readiness.pending_review_classes if rollover_readiness else 0 }}</strong>
+            </p>
+            {% if rollover_readiness and rollover_readiness.blocking_reason %}
+              <p class="note" style="color:#b42318; font-weight:700;">{{ rollover_readiness.blocking_reason }}</p>
+            {% endif %}
+            {% if rollover_readiness and rollover_readiness.unpublished_classnames %}
+              <p class="note">Unpublished classes: {{ rollover_readiness.unpublished_classnames|join(', ') }}</p>
+            {% endif %}
           </div>
 
           <div class="card">
             <h2>Advance to New Term</h2>
             <form method="post" action="{{ url_for('school_admin_new_term_wizard') }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+              <div class="form-group">
+                <label>
+                  <input type="checkbox" name="use_suggested_target" value="1" checked>
+                  Use suggested next term/year automatically (recommended)
+                </label>
+              </div>
               <div class="form-group">
                 <label for="new_term">New Term</label>
                 <select id="new_term" name="new_term" required>
@@ -63,6 +89,25 @@
                 </label>
                 <p class="note">This prevents accidental edits in the old term.</p>
               </div>
+              <div class="form-group">
+                <label>
+                  <input type="checkbox" name="confirm_rollover_effects" value="1" required>
+                  I confirm rollover resets working scores and moves active students to the new term.
+                </label>
+              </div>
+              <div class="form-group">
+                <label>
+                  <input type="checkbox" name="allow_custom_target" value="1">
+                  Allow custom term/year target (not the suggested next step)
+                </label>
+              </div>
+              <div class="form-group">
+                <label>
+                  <input type="checkbox" name="allow_unpublished_rollover" value="1">
+                  Allow rollover with unpublished classes
+                </label>
+                <p class="note">Leave unchecked to enforce publishing discipline before rollover.</p>
+              </div>
               <button class="btn btn-primary" type="submit">
                 <i class="fas fa-rocket"></i> Start New Term
               </button>
@@ -72,5 +117,21 @@
       </div>
     </div>
     <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260306e') }}"></script>
-  </body>
+    <script>
+      (function() {
+        const useSuggestedEl = document.querySelector('input[name="use_suggested_target"]');
+        const termEl = document.getElementById('new_term');
+        const yearEl = document.getElementById('new_year');
+        if (!useSuggestedEl || !termEl || !yearEl) return;
+        const sync = () => {
+          const locked = !!useSuggestedEl.checked;
+          termEl.disabled = locked;
+          yearEl.disabled = locked;
+        };
+        useSuggestedEl.addEventListener('change', sync);
+        sync();
+      })();
+    </script>
+      {% include "shared/_loading_overlay.html" %}
+</body>
 </html>

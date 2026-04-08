@@ -89,6 +89,27 @@ def test_build_subjects_from_config_ss1_combined_merges_all_tracks(app_module):
     ]
 
 
+def test_secondary_class_normalization_accepts_jss_aliases(app_module):
+    m = app_module
+    assert m.canonicalize_classname("JSS 1A") == "JSS1A"
+    assert m.canonicalize_classname("JS1") == "JSS1"
+    assert m.canonicalize_classname("Junior Secondary 2B") == "JSS2B"
+    assert m.is_secondary_classname("Junior Secondary 2B") is True
+    assert m.is_secondary_classname("JSS3") is True
+
+
+def test_cbt_test_score_pair_split_even_and_odd(app_module):
+    m = app_module
+    assert m._split_cbt_test_score_pair(14) == (7.0, 7.0)
+    assert m._split_cbt_test_score_pair(15) == (7.0, 8.0)
+
+
+def test_cbt_target_test_slots_prefers_next_slot(app_module):
+    m = app_module
+    assert m._cbt_target_test_slots(1, 3) == [1, 2]
+    assert m._cbt_target_test_slots(3, 3) == [3, 2]
+
+
 def test_load_published_student_result_combines_three_terms(app_module, monkeypatch):
     m = app_module
     # prepare fake DB connection that returns predetermined rows by term
@@ -893,3 +914,174 @@ def test_parent_timetable_filters_to_child_subjects_only(client, app_module, mon
     assert resp.status_code == 200
     assert "Mathematics" in body
     assert "French" not in body
+
+def test_teacher_allocate_stream_post_updates_and_redirects_dashboard(client, app_module, monkeypatch):
+    m = app_module
+    update_calls = []
+
+    monkeypatch.setattr(
+        m,
+        "get_user",
+        lambda username: {"username": (username or "").lower(), "role": "teacher", "school_id": "SCH1"},
+    )
+
+    monkeypatch.setattr(m, "get_school", lambda school_id: {"academic_year": "2025-2026", "ss1_stream_mode": "separate"})
+    monkeypatch.setattr(m, "get_current_term", lambda school: "First Term")
+    monkeypatch.setattr(
+        m,
+        "load_student",
+        lambda school_id, student_id: {
+            "student_id": student_id,
+            "firstname": "Aka",
+            "classname": "SS2",
+            "stream": "N/A",
+            "subjects": ["English Language", "Mathematics"],
+            "scores": {"English Language": {"overall_mark": 65}},
+            "number_of_subject": 2,
+        },
+    )
+    monkeypatch.setattr(m, "teacher_has_class_access", lambda *args, **kwargs: True)
+    monkeypatch.setattr(m, "class_uses_stream_for_school", lambda *args, **kwargs: True)
+    monkeypatch.setattr(
+        m,
+        "get_class_subject_config",
+        lambda school_id, classname: {
+            "core_subjects": ["English Language", "Mathematics"],
+            "science_subjects": ["Biology"],
+            "art_subjects": ["Literature in English"],
+            "commercial_subjects": ["Commerce"],
+            "optional_subjects": [],
+        },
+    )
+    monkeypatch.setattr(
+        m,
+        "build_subjects_from_config",
+        lambda **kwargs: (["English Language", "Mathematics", "Biology"], "Science", None),
+    )
+
+    def fake_db_connection(commit=False):
+        class FakeCursor:
+            def __init__(self):
+                self.rowcount = 0
+
+        class FakeConn:
+            def __init__(self):
+                self._cursor = FakeCursor()
+
+            def cursor(self):
+                return self._cursor
+
+        @contextlib.contextmanager
+        def ctx(commit=False):
+            yield FakeConn()
+
+        return ctx(commit)
+
+    def fake_db_execute(cursor, query, params=None):
+        if "UPDATE students" in str(query):
+            cursor.rowcount = 1
+            update_calls.append((query, params))
+
+    monkeypatch.setattr(m, "db_connection", fake_db_connection)
+    monkeypatch.setattr(m, "db_execute", fake_db_execute)
+
+    with client.session_transaction() as sess:
+        sess["role"] = "teacher"
+        sess["school_id"] = "SCH1"
+        sess["user_id"] = "T1"
+
+    resp = client.post(
+        "/teacher/allocate-stream",
+        data={"student_id": "ST1", "stream": "Science"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+    assert resp.headers["Location"].endswith("/teacher")
+    assert update_calls, "Expected UPDATE students call for stream allocation"
+    _, params = update_calls[-1]
+    assert params[0] == "Science"
+    assert params[4] == "SCH1"
+    assert params[5] == "ST1"
+
+
+def test_teacher_allocate_stream_post_handles_zero_updated_rows(client, app_module, monkeypatch):
+    m = app_module
+
+    monkeypatch.setattr(
+        m,
+        "get_user",
+        lambda username: {"username": (username or "").lower(), "role": "teacher", "school_id": "SCH1"},
+    )
+
+    monkeypatch.setattr(m, "get_school", lambda school_id: {"academic_year": "2025-2026", "ss1_stream_mode": "separate"})
+    monkeypatch.setattr(m, "get_current_term", lambda school: "First Term")
+    monkeypatch.setattr(
+        m,
+        "load_student",
+        lambda school_id, student_id: {
+            "student_id": student_id,
+            "firstname": "Aka",
+            "classname": "SS2",
+            "stream": "N/A",
+            "subjects": ["English Language", "Mathematics"],
+            "scores": {},
+            "number_of_subject": 2,
+        },
+    )
+    monkeypatch.setattr(m, "teacher_has_class_access", lambda *args, **kwargs: True)
+    monkeypatch.setattr(m, "class_uses_stream_for_school", lambda *args, **kwargs: True)
+    monkeypatch.setattr(
+        m,
+        "get_class_subject_config",
+        lambda school_id, classname: {
+            "core_subjects": ["English Language", "Mathematics"],
+            "science_subjects": ["Biology"],
+            "art_subjects": [],
+            "commercial_subjects": [],
+            "optional_subjects": [],
+        },
+    )
+    monkeypatch.setattr(
+        m,
+        "build_subjects_from_config",
+        lambda **kwargs: (["English Language", "Mathematics", "Biology"], "Science", None),
+    )
+
+    def fake_db_connection(commit=False):
+        class FakeCursor:
+            def __init__(self):
+                self.rowcount = 0
+
+        class FakeConn:
+            def __init__(self):
+                self._cursor = FakeCursor()
+
+            def cursor(self):
+                return self._cursor
+
+        @contextlib.contextmanager
+        def ctx(commit=False):
+            yield FakeConn()
+
+        return ctx(commit)
+
+    def fake_db_execute(cursor, query, params=None):
+        if "UPDATE students" in str(query):
+            cursor.rowcount = 0
+
+    monkeypatch.setattr(m, "db_connection", fake_db_connection)
+    monkeypatch.setattr(m, "db_execute", fake_db_execute)
+
+    with client.session_transaction() as sess:
+        sess["role"] = "teacher"
+        sess["school_id"] = "SCH1"
+        sess["user_id"] = "T1"
+
+    resp = client.post(
+        "/teacher/allocate-stream",
+        data={"student_id": "ST1", "stream": "Science"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+    assert "/teacher/allocate-stream?student_id=ST1" in resp.headers["Location"]
+

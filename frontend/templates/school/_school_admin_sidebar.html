@@ -55,7 +55,7 @@
       }
     </style>
     <div class="side-brand">
-        <img src="{{ url_for('static', filename='img/osartech-logo.png') }}" alt="Osartech Logo" class="brand-logo">
+        <img src="{{ url_for('static', filename='img/osartech-logo.png', v='20260322a') }}" alt="Osartech Logo" class="brand-logo">
         <div class="school-brand-meta">
             <div class="school-brand-title">School Admin</div>
             <div class="school-brand-org">OSARTECH</div>
@@ -140,6 +140,12 @@
                     <i class="fas fa-book-open"></i>
                     <span>Class Subjects</span>
                 </a>
+                {% if school_cbt_enabled %}
+                <a href="{{ url_for('school_admin_cbt') }}" class="side-link{% if active_page == 'cbt' %} active{% endif %}">
+                    <i class="fas fa-laptop-code"></i>
+                    <span>CBT</span>
+                </a>
+                {% endif %}
                 <a href="{{ url_for('school_admin_timetable') }}" class="side-link{% if active_page == 'timetable' %} active{% endif %}">
                     <i class="fas fa-table"></i>
                     <span>Timetable</span>
@@ -266,6 +272,13 @@
                 <a href="{{ url_for('report_issue') }}" class="side-link">
                     <i class="fas fa-bug"></i>
                     <span>Report Issue</span>
+                </a>
+                <a href="{{ url_for('school_admin_privacy_requests') }}" class="side-link{% if active_page == 'privacy_requests' %} active{% endif %}">
+                    <i class="fas fa-user-shield"></i>
+                    <span>Data Requests</span>
+                    {% if school_pending_privacy_review_count|default(0) %}
+                    <span class="notif-badge">{{ school_pending_privacy_review_count }}</span>
+                    {% endif %}
                 </a>
                 <a href="{{ url_for('help', role='school_admin') }}" class="side-link">
                     <i class="fas fa-question-circle"></i>

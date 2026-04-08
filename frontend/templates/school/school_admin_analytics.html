@@ -3,11 +3,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>School Analytics</title>
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260307f') }}">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 </head>
 <body>
+    {% include "shared/_loading_overlay.html" %}
 <div class="app-shell topbar-layout">
     {% set active_page = 'analytics' %}
     {% include 'school/_school_admin_sidebar.html' %}
@@ -145,6 +147,17 @@
             {% endfor %}
             </tbody>
         </table>
+        <h3 style="margin-top: 14px;">Answer Versions</h3>
+        <table>
+            <thead><tr><th>Version</th><th>Count</th></tr></thead>
+            <tbody>
+            {% for row in (assistant_usage.answer_version_rows if assistant_usage else []) %}
+            <tr><td>{{ row.version }}</td><td>{{ row.count }}</td></tr>
+            {% else %}
+            <tr><td colspan="2">No answer-version data yet.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
         <h3 style="margin-top: 14px;">Top Unresolved Questions</h3>
         <table>
             <thead><tr><th>Question</th><th>Count</th></tr></thead>
@@ -183,6 +196,25 @@
             <tr><td>{{ row.question }}</td><td>{{ row.count }}</td></tr>
             {% else %}
             <tr><td colspan="2">No negative feedback pattern yet.</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+
+        <h3 style="margin-top: 14px;">Learning Queue (Needs Assistant Update)</h3>
+        <table>
+            <thead><tr><th>Priority</th><th>Question</th><th>Not Helpful</th><th>Unresolved</th><th>Avg Confidence</th><th>Sample Page</th></tr></thead>
+            <tbody>
+            {% for row in (assistant_learning_queue or []) %}
+            <tr>
+                <td>{{ row.priority|upper }}</td>
+                <td>{{ row.question }}</td>
+                <td>{{ row.not_helpful }}</td>
+                <td>{{ row.unresolved }}</td>
+                <td>{{ '%.2f'|format(row.avg_confidence|default(0)) }}</td>
+                <td>{{ row.source_page if row.source_page else '-' }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="6">No learning queue items right now.</td></tr>
             {% endfor %}
             </tbody>
         </table>

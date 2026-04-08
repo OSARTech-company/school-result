@@ -3,7 +3,7 @@
         {% if teacher_sidebar_profile_image %}
         <img src="{{ teacher_sidebar_profile_image }}" alt="Profile Picture" class="teacher-brand-photo">
         {% else %}
-        <img src="{{ url_for('static', filename='img/osartech-logo.png') }}" alt="Osartech Logo" class="teacher-brand-photo">
+        <img src="{{ url_for('static', filename='img/osartech-logo.png', v='20260322a') }}" alt="Osartech Logo" class="teacher-brand-photo">
         {% endif %}
         <div class="teacher-brand-org">OSARTECH</div>
         <div class="teacher-brand-name">{{ teacher_sidebar_display_name or 'Teacher' }}</div>
@@ -56,7 +56,7 @@
             </div>
         </details>
 
-        <details class="side-group" {% if active_page in ['score_entry', 'timetable', 'subject_ranks', 'upload_csv'] or show_score_tree %}open{% endif %}>
+        <details class="side-group" {% if active_page in ['score_entry', 'timetable', 'subject_ranks', 'upload_csv', 'cbt'] or show_score_tree %}open{% endif %}>
             <summary class="side-group-toggle">
                 <span>Academics</span><i class="fas fa-chevron-down"></i>
             </summary>
@@ -91,6 +91,12 @@
                     <i class="fas fa-table"></i>
                     <span>Timetable</span>
                 </a>
+                {% if school_cbt_enabled %}
+                <a href="{{ url_for('teacher_cbt') }}" class="side-link{% if active_page == 'cbt' %} active{% endif %}">
+                    <i class="fas fa-laptop-code"></i>
+                    <span>CBT</span>
+                </a>
+                {% endif %}
                 <a href="{{ url_for('teacher_subject_rank_history') }}" class="side-link{% if active_page == 'subject_ranks' %} active{% endif %}">
                     <i class="fas fa-list-ol"></i>
                     <span>Subject Ranks</span>
@@ -129,11 +135,15 @@
             </div>
         </details>
 
-        <details class="side-group" {% if request.endpoint == 'change_password' %}open{% endif %}>
+        <details class="side-group" {% if request.endpoint == 'change_password' or active_page == 'assistant_analytics' %}open{% endif %}>
             <summary class="side-group-toggle">
                 <span>Support</span><i class="fas fa-chevron-down"></i>
             </summary>
             <div class="side-group-links">
+                <a href="{{ url_for('teacher_assistant_analytics') }}" class="side-link{% if active_page == 'assistant_analytics' %} active{% endif %}">
+                    <i class="fas fa-robot"></i>
+                    <span>Assistant Analytics</span>
+                </a>
                 <a href="{{ url_for('report_issue') }}" class="side-link">
                     <i class="fas fa-bug"></i>
                     <span>Report Issue</span>

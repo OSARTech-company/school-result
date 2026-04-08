@@ -191,6 +191,28 @@
         hostNode.appendChild(wrap);
     }
 
+    function renderQuickPrompts(container, prompts, onPick) {
+        if (!container) return;
+        while (container.firstChild) container.removeChild(container.firstChild);
+        var rows = Array.isArray(prompts) ? prompts : [];
+        if (!rows.length) return;
+        var label = document.createElement('div');
+        label.className = 'app-ai-quick-label';
+        label.textContent = 'Tap To Ask';
+        container.appendChild(label);
+        rows.slice(0, 8).forEach(function (item) {
+            var text = String(item || '').trim();
+            if (!text) return;
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.textContent = text;
+            btn.addEventListener('click', function () {
+                if (typeof onPick === 'function') onPick(text);
+            });
+            container.appendChild(btn);
+        });
+    }
+
     function initAssistant(root) {
         if (!root || root.dataset.bound === '1') return;
         root.dataset.bound = '1';
@@ -204,13 +226,22 @@
         var modeSelect = form ? form.querySelector('select[name=\"response_mode\"]') : null;
         var submitBtn = form ? form.querySelector('button[type=\"submit\"]') : null;
         var messages = root.querySelector('.app-ai-messages');
+        var quickWrap = root.querySelector('.app-ai-quick');
         var csrfToken = (root.querySelector('.app-ai-csrf') || {}).value || '';
         var defaultMode = String(root.getAttribute('data-preferred-mode') || 'standard').trim().toLowerCase();
         var defaultIntro = String((messages && messages.getAttribute('data-intro')) || '').trim();
+        var defaultQuickPrompts = [];
         var history = [];
         var isBusy = false;
 
         if (!panel || !toggle || !closeBtn || !form || !input || !messages) return;
+        if (quickWrap) {
+            try {
+                defaultQuickPrompts = JSON.parse(String(quickWrap.getAttribute('data-default-prompts') || '[]'));
+            } catch (_e) {
+                defaultQuickPrompts = [];
+            }
+        }
 
         try {
             var savedMode = window.localStorage.getItem('app_ai_response_mode_v1') || '';
@@ -253,6 +284,7 @@
             while (messages.firstChild) messages.removeChild(messages.firstChild);
             if (defaultIntro) createMessage(messages, defaultIntro, false);
             if (extraText) createMessage(messages, extraText, false);
+            renderQuickPrompts(quickWrap, defaultQuickPrompts, function (picked) { ask(picked); });
         }
 
         function ask(questionText) {
@@ -306,9 +338,21 @@
                     return;
                 }
                 var lines = [data.answer || 'I could not find a direct answer.'];
+                if (data.role_scope) {
+                    lines.push(String(data.role_scope));
+                }
+                if (data.click_path) {
+                    lines.push('Click path: ' + String(data.click_path));
+                }
                 if (Array.isArray(data.steps) && data.steps.length) {
                     data.steps.slice(0, 4).forEach(function (step, idx) {
                         lines.push((idx + 1) + '. ' + step);
+                    });
+                }
+                if (data.guided_checklist && Array.isArray(data.checklist_items) && data.checklist_items.length) {
+                    lines.push('Checklist:');
+                    data.checklist_items.slice(0, 8).forEach(function (item) {
+                        lines.push('- [ ] ' + String(item || '').trim());
                     });
                 }
                 if (Array.isArray(data.links) && data.links.length) {
@@ -326,6 +370,9 @@
                 if (data.next_question) {
                     lines.push('Next: ' + data.next_question);
                 }
+                if (data.answer_version) {
+                    lines.push('Answer version: ' + String(data.answer_version));
+                }
                 var answerText = lines.join('\n');
                 createStreamedBotMessage(messages, answerText, function (botNode) {
                     history.push({ role: 'assistant', text: answerText });
@@ -333,6 +380,15 @@
                     renderFeedbackControls(csrfToken, botNode, text, answerText);
                     renderSmartLinks(botNode, data.smart_links || []);
                     renderFixSnippet(botNode, data.fix_snippet || '');
+                    var nextPrompts = [];
+                    if (Array.isArray(data.quick_prompts) && data.quick_prompts.length) {
+                        nextPrompts = data.quick_prompts;
+                    } else if (Array.isArray(data.follow_ups) && data.follow_ups.length) {
+                        nextPrompts = data.follow_ups;
+                    } else {
+                        nextPrompts = defaultQuickPrompts;
+                    }
+                    renderQuickPrompts(quickWrap, nextPrompts, function (picked) { ask(picked); });
                     setBusy(false);
                 });
             }).catch(function (err) {
@@ -405,6 +461,7 @@
             });
         }
 
+        renderQuickPrompts(quickWrap, defaultQuickPrompts, function (picked) { ask(picked); });
         // Always start collapsed and open only on user click.
         closePanel();
     }

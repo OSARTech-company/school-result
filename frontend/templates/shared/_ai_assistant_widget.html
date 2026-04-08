@@ -58,38 +58,44 @@
         </div>
         <form class="app-ai-form" autocomplete="off">
             <select class="app-ai-mode" name="response_mode" aria-label="Assistant response style">
+                <option value="ultra_simple" {% if assistant_preferred_mode == 'ultra_simple' %}selected{% endif %}>Ultra Simple</option>
                 <option value="standard" {% if assistant_preferred_mode == 'standard' %}selected{% endif %}>Standard</option>
                 <option value="simple" {% if assistant_preferred_mode == 'simple' %}selected{% endif %}>Simple English</option>
                 <option value="detailed" {% if assistant_preferred_mode == 'detailed' %}selected{% endif %}>Detailed</option>
+                <option value="checklist" {% if assistant_preferred_mode == 'checklist' %}selected{% endif %}>Checklist</option>
                 <option value="local" {% if assistant_preferred_mode == 'local' %}selected{% endif %}>Local Style</option>
                 <option value="pidgin" {% if assistant_preferred_mode == 'pidgin' %}selected{% endif %}>Pidgin-friendly</option>
             </select>
             <input type="text" name="question" maxlength="1200" placeholder="Ask about workflows or paste an error message..." required>
             <button type="submit">Ask</button>
         </form>
+        <div class="app-ai-quick" data-default-prompts='{{ (assistant_quick_prompts or [])|tojson|safe }}'></div>
     </section>
 </div>
 {% set show_alert_fab = false %}
 {% set alert_count = 0 %}
 {% set alert_target = '#' %}
-{% if session.get('role') == 'school_admin' and request.endpoint == 'school_admin_dashboard' %}
+{% set alert_label = 'Notifications' %}
+{% if session.get('role') == 'school_admin' %}
 {% set show_alert_fab = true %}
-{% set alert_count = missing_score_alerts|default([], true)|length %}
-{% set alert_target = url_for('school_admin_notifications') %}
+{% set alert_count = school_pending_privacy_review_count|default(0, true) %}
+{% set alert_target = url_for('school_admin_privacy_requests') %}
+{% set alert_label = 'Pending data requests' %}
 {% elif session.get('role') == 'teacher' and request.endpoint == 'teacher_dashboard' %}
 {% set show_alert_fab = true %}
 {% set alert_count = teacher_missing_score_alerts|default([], true)|length %}
 {% set alert_target = url_for('teacher_notifications') %}
+{% set alert_label = 'Missing score alerts' %}
 {% endif %}
 {% if show_alert_fab %}
 <a href="{{ alert_target }}"
    class="app-alert-fab {% if alert_count > 0 %}has-alerts{% endif %}"
-   aria-label="Missing score alerts{% if alert_count > 0 %}: {{ alert_count }}{% endif %}"
-   title="{% if alert_count > 0 %}{{ alert_count }} missing score alert{{ '' if alert_count == 1 else 's' }}{% else %}No missing score alerts{% endif %}">
+   aria-label="{{ alert_label }}{% if alert_count > 0 %}: {{ alert_count }}{% endif %}"
+   title="{% if alert_count > 0 %}{{ alert_count }} {{ alert_label|lower }}{% else %}No {{ alert_label|lower }}{% endif %}">
     <i class="fas fa-bell" aria-hidden="true"></i>
     {% if alert_count > 0 %}
     <span class="app-alert-fab-badge">{{ alert_count }}</span>
     {% endif %}
 </a>
 {% endif %}
-<script src="{{ url_for('static', filename='js/app-assistant.js', v='20260309a') }}" defer></script>
+<script src="{{ url_for('static', filename='js/app-assistant.js', v='20260328d') }}" defer></script>

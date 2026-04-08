@@ -4,8 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Student Dashboard - Student Score Management System</title>
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260308d') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-enhanced.css', v='20260322a') }}">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         .container { max-width: 960px; }
@@ -98,7 +100,7 @@
     <div class="app-shell topbar-layout">
         <div class="side-taskbar">
             <div class="side-brand">
-                <img src="{{ url_for('static', filename='img/osartech-logo.png') }}" alt="Osartech Logo" class="brand-logo">
+                <img src="{{ url_for('static', filename='img/osartech-logo.png', v='20260322a') }}" alt="Osartech Logo" class="brand-logo">
                 <span>Student</span>
             </div>
             {% if school_access_state %}
@@ -125,6 +127,12 @@
                     <i class="fas fa-chart-bar"></i>
                     <span>View Results</span>
                 </a>
+                {% if school_cbt_enabled %}
+                <a href="{{ url_for('student_cbt') }}" class="side-link">
+                    <i class="fas fa-laptop-code"></i>
+                    <span>CBT</span>
+                </a>
+                {% endif %}
                 <a href="{{ url_for('student_profile') }}" class="side-link">
                     <i class="fas fa-user"></i>
                     <span>Profile</span>
@@ -493,6 +501,8 @@
     </script>
     {% endif %}
     {% include 'shared/_ai_assistant_widget.html' %}
+    <script src="{{ url_for('static', filename='js/dashboard-enhanced.js', v='20260322a') }}"></script>
+    {% include "shared/_loading_overlay.html" %}
 </body>
 </html>
 

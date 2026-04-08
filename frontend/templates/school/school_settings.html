@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>School Settings - Student Score Management System</title>
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260307f') }}">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
@@ -26,6 +27,7 @@
     </style>
 </head>
 <body>
+    {% include "shared/_loading_overlay.html" %}
     <div class="app-shell topbar-layout">
     {% set active_page = 'settings' %}
     {% include 'school/_school_admin_sidebar.html' %}
@@ -106,14 +108,17 @@
                         <input type="checkbox" id="confirm_term_rollover" name="confirm_term_rollover" value="1">
                         <label for="confirm_term_rollover">I confirm that changing term/year will reset working scores for active students.</label>
                     </div>
+                    <small style="color:#5a6c7d; display:block; margin-top:8px;">
+                        Recommended: use the <a href="{{ url_for('school_admin_new_term_wizard') }}">New Term Wizard</a> for safer step-by-step rollover.
+                    </small>
                 </div>
 
                 <div class="section-title"><i class="fas fa-calendar-alt"></i> Term Calendar</div>
                 <div class="form-group">
                     <label>Calendar Term Scope</label>
                     <div class="note">
-                        Using current term/year: <strong>{{ school.current_term if school else 'First Term' }}</strong>
-                        ({{ school.academic_year if school else '' }})
+                        Using current term/year: <strong id="calendar_scope_term_label">{{ school.current_term if school else 'First Term' }}</strong>
+                        (<span id="calendar_scope_year_label">{{ school.academic_year if school else '' }}</span>)
                     </div>
                     <input type="hidden" id="calendar_academic_year" name="calendar_academic_year" value="{{ school.academic_year if school else '' }}">
                     <input type="hidden" id="calendar_term" name="calendar_term" value="{{ school.current_term if school else 'First Term' }}">
@@ -531,8 +536,39 @@
             const el = document.getElementById(id);
             if (el) el.addEventListener('change', calcDaysOpenPreview);
         });
+        const settingsYearEl = document.getElementById('academic_year');
+        const settingsTermEl = document.getElementById('current_term');
         const calendarYearEl = document.getElementById('calendar_academic_year');
         const calendarTermEl = document.getElementById('calendar_term');
+        const calendarScopeTermLabelEl = document.getElementById('calendar_scope_term_label');
+        const calendarScopeYearLabelEl = document.getElementById('calendar_scope_year_label');
+        function syncCalendarScopeWithMainSettings() {
+            if (calendarYearEl && settingsYearEl) {
+                calendarYearEl.value = (settingsYearEl.value || '').trim();
+            }
+            if (calendarTermEl && settingsTermEl) {
+                calendarTermEl.value = (settingsTermEl.value || '').trim();
+            }
+            if (calendarScopeTermLabelEl && settingsTermEl) {
+                calendarScopeTermLabelEl.textContent = (settingsTermEl.value || '').trim() || 'First Term';
+            }
+            if (calendarScopeYearLabelEl && settingsYearEl) {
+                calendarScopeYearLabelEl.textContent = (settingsYearEl.value || '').trim();
+            }
+        }
+        if (settingsYearEl) {
+            settingsYearEl.addEventListener('input', syncCalendarScopeWithMainSettings);
+            settingsYearEl.addEventListener('change', () => {
+                syncCalendarScopeWithMainSettings();
+                loadSelectedCalendarIfSaved();
+            });
+        }
+        if (settingsTermEl) {
+            settingsTermEl.addEventListener('change', () => {
+                syncCalendarScopeWithMainSettings();
+                loadSelectedCalendarIfSaved();
+            });
+        }
         if (calendarYearEl) calendarYearEl.addEventListener('change', loadSelectedCalendarIfSaved);
         if (calendarTermEl) calendarTermEl.addEventListener('change', loadSelectedCalendarIfSaved);
 
@@ -561,6 +597,7 @@
             }
             viewKeyEl.addEventListener('change', () => renderReadOnlyCalendar(viewKeyEl.value));
         }
+        syncCalendarScopeWithMainSettings();
         loadSelectedCalendarIfSaved();
         calcDaysOpenPreview();
     </script>

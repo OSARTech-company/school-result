@@ -1,18 +1,21 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Super Admin Dashboard - Student Score Management System</title>
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260308d') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-enhanced.css', v='20260322a') }}">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" integrity="sha384-3B6NwesSXE7YJlcLI9RpRqGf2p/EgVH8BgoKTaUrmKNDkHPStTQ3EyoYjCGXaOTS" crossorigin="anonymous" referrerpolicy="no-referrer">
 </head>
 <body>
+    {% include "shared/_loading_overlay.html" %}
     <div class="app-shell topbar-layout">
         <div class="side-taskbar">
             <div class="side-brand">
-                <img src="{{ url_for('static', filename='img/osartech-logo.png') }}" alt="Osartech Logo" class="brand-logo">
+                <img src="{{ url_for('static', filename='img/osartech-logo.png', v='20260322a') }}" alt="Osartech Logo" class="brand-logo">
                 <span>Super Admin</span>
             </div>
             <div class="side-links">
@@ -47,6 +50,10 @@
                 <a href="{{ url_for('super_admin_system_settings') }}" class="side-link">
                     <i class="fas fa-sliders-h"></i>
                     <span>System Settings</span>
+                </a>
+                <a href="{{ url_for('super_admin_assistant_analytics') }}" class="side-link">
+                    <i class="fas fa-robot"></i>
+                    <span>Assistant Analytics</span>
                 </a>
                 <a href="{{ url_for('super_admin_webhook_setup') }}" class="side-link">
                     <i class="fas fa-plug"></i>
@@ -163,6 +170,7 @@
         });
       })();
     </script>
+    <script src="{{ url_for('static', filename='js/dashboard-enhanced.js', v='20260322a') }}"></script>
     {% include 'shared/_ai_assistant_widget.html' %}
 </body>
 </html>

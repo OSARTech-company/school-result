@@ -1,9 +1,10 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>School Admin Dashboard - Student Score Management System</title>
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
     <link
       rel="stylesheet"
       href="{{ url_for('static', filename='css/style.css', v='20260228b') }}"
@@ -11,6 +12,10 @@
     <link
       rel="stylesheet"
       href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260308d') }}"
+    />
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='css/dashboard-enhanced.css', v='20260322a') }}"
     />
     <link
       href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
@@ -450,7 +455,9 @@
         draw();
       })();
     </script>
-  </body>
+    <script src="{{ url_for('static', filename='js/dashboard-enhanced.js', v='20260322a') }}"></script>
+      {% include "shared/_loading_overlay.html" %}
+</body>
 </html>
 
 

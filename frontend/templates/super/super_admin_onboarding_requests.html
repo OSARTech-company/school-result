@@ -4,11 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Onboarding Requests - Super Admin</title>
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260308b') }}">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 </head>
 <body>
+    {% include "shared/_loading_overlay.html" %}
 <div class="app-shell topbar-layout">
     {% set active_page = 'onboarding_requests' %}
     {% include 'super/_super_admin_sidebar.html' %}
@@ -144,6 +146,10 @@
                                     <option value="active_paid" {% if not item.payment_proof_path %}disabled{% endif %} title="Upload payment proof to enable Active Paid">Active Paid</option>
                                     <option value="pending_payment">Pending Payment</option>
                                     <option value="suspended">Suspended</option>
+                                </select>
+                                <select name="cbt_enabled" title="CBT access">
+                                    <option value="1" selected>CBT Enabled</option>
+                                    <option value="0">CBT Disabled</option>
                                 </select>
                                 {% if not item.payment_proof_path %}
                                 <div class="flash error" style="margin-top:6px; padding:6px 10px; display:inline-block;">

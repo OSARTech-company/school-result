@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Add Students by Class - Student Score Management System</title>
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260307f') }}">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
@@ -46,6 +47,7 @@
     </style>
 </head>
 <body>
+    {% include "shared/_loading_overlay.html" %}
     <div class="app-shell topbar-layout">
     {% set active_page = 'add_students' %}
     {% include 'school/_school_admin_sidebar.html' %}
@@ -152,10 +154,11 @@
                 <div class="form-group">
                     <label for="term">Term:</label>
                     <select id="term" name="term" required>
-                        <option value="First Term">First Term</option>
-                        <option value="Second Term">Second Term</option>
-                        <option value="Third Term">Third Term</option>
+                        <option value="First Term" {% if selected_term == 'First Term' %}selected{% endif %}>First Term</option>
+                        <option value="Second Term" {% if selected_term == 'Second Term' %}selected{% endif %}>Second Term</option>
+                        <option value="Third Term" {% if selected_term == 'Third Term' %}selected{% endif %}>Third Term</option>
                     </select>
+                    <span class="help-text">Default is current school term: {{ current_term }}</span>
                 </div>
                 
                 <div class="form-group">

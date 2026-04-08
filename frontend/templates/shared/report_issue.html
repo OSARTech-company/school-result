@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Report Issue - Student Score Management System</title>
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
@@ -95,6 +96,7 @@
     </style>
 </head>
 <body>
+    {% include "shared/_loading_overlay.html" %}
     <div class="container">
         <div class="issue-form">
             <h2><i class="fas fa-exclamation-triangle"></i> Report an Issue</h2>

@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student CBT - Student Score Management System</title>
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260307f') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .container { width: min(1080px, 100%); margin: 0 auto; padding: 24px; }
+        .header { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+        .header h1 { margin: 0; font-size: 1.85rem; }
+        .header .back { color: white; text-decoration: none; font-weight: 700; }
+        .info-strip { display: flex; gap: 10px; flex-wrap: wrap; margin: 10px 0 16px; }
+        .info-chip { border-radius: 999px; padding: 5px 12px; border: 1px solid #cfe0f8; background: #eef5ff; color: #1f3b5c; font-size: 0.86rem; }
+        .test-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 14px; }
+        .test-card { border: 1px solid #dce7f5; border-radius: 12px; background: #f9fbff; padding: 14px; }
+        .test-title { font-size: 1.05rem; font-weight: 700; color: #14365e; margin-bottom: 6px; }
+        .test-meta { color: #58667a; font-size: 0.9rem; margin-bottom: 8px; }
+        .status-pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 0.78rem; text-transform: capitalize; }
+        .status-pill.published { background: #dcfce7; color: #166534; }
+        .status-pill.closed { background: #fee2e2; color: #991b1b; }
+        .status-pill.submitted { background: #dbeafe; color: #1d4ed8; }
+        .status-pill.started { background: #fef3c7; color: #92400e; }
+        .muted { color: #64748b; font-size: 0.9rem; }
+    </style>
+</head>
+<body style="--brand: {{ school.theme_primary_color if school and school.theme_primary_color else '#0F4C81' }}; --brand-2: {{ school.theme_secondary_color if school and school.theme_secondary_color else '#1F7A8C' }}; --accent: {{ school.theme_accent_color if school and school.theme_accent_color else '#1F7A8C' }};">
+<div class="app-shell topbar-layout">
+    <div class="side-taskbar">
+        <div class="side-brand">
+            <img src="{{ url_for('static', filename='img/osartech-logo.png', v='20260322a') }}" alt="Osartech Logo" class="brand-logo">
+            <span>Student</span>
+        </div>
+        {% if school_access_state %}
+        {% set access_status = (school_access_state.effective_status or school_access_state.status or '') %}
+        {% set access_class = 'is-active' if access_status in ['trial_free', 'active_paid'] else ('is-warning' if access_status == 'pending_payment' else 'is-blocked') %}
+        <div class="side-access-status">
+            <span class="label">Access</span>
+            <span class="status {{ access_class }}">{{ access_status|replace('_', ' ')|title }}</span>
+        </div>
+        {% endif %}
+        <div class="side-links">
+            {% if session.get('cbt_only') %}
+            <a href="{{ url_for('student_cbt') }}" class="side-link active">
+                <i class="fas fa-laptop-code"></i>
+                <span>CBT</span>
+            </a>
+            <form method="post" action="{{ url_for('logout') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="side-link side-link-logout">
+                    <i class="fas fa-sign-out-alt"></i>
+                    <span>Logout</span>
+                </button>
+            </form>
+            {% else %}
+            <a href="{{ url_for('student_dashboard') }}" class="side-link">
+                <i class="fas fa-home"></i>
+                <span>Dashboard</span>
+            </a>
+            <a href="{{ url_for('student_messages') }}" class="side-link">
+                <i class="fas fa-bell"></i>
+                <span>Messages</span>
+            </a>
+            <a href="{{ url_for('student_view_result') }}" class="side-link">
+                <i class="fas fa-chart-bar"></i>
+                <span>View Results</span>
+            </a>
+            <a href="{{ url_for('student_cbt') }}" class="side-link active">
+                <i class="fas fa-laptop-code"></i>
+                <span>CBT</span>
+            </a>
+            <a href="{{ url_for('student_profile') }}" class="side-link">
+                <i class="fas fa-user"></i>
+                <span>Profile</span>
+            </a>
+            <a href="{{ url_for('student_subject_requests') }}" class="side-link">
+                <i class="fas fa-book"></i>
+                <span>Subject Requests</span>
+            </a>
+            <a href="{{ url_for('student_change_password') }}" class="side-link">
+                <i class="fas fa-key"></i>
+                <span>Change Password</span>
+            </a>
+            <a href="{{ url_for('help', role='student') }}" class="side-link">
+                <i class="fas fa-question-circle"></i>
+                <span>Help</span>
+            </a>
+            <form method="post" action="{{ url_for('logout') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="side-link side-link-logout">
+                    <i class="fas fa-sign-out-alt"></i>
+                    <span>Logout</span>
+                </button>
+            </form>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="main-content">
+        <div class="container">
+            <div class="header">
+                <h1><i class="fas fa-laptop-code"></i> CBT Tests</h1>
+                <a href="{{ url_for('student_dashboard') }}" class="back"><i class="fas fa-arrow-left"></i> Back to Dashboard</a>
+            </div>
+
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="flash {{ category }}">{{ message }}</div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+
+            <div class="info-strip">
+                <span class="info-chip">Class: {{ student.classname }}</span>
+                <span class="info-chip">Term: {{ selected_term }}</span>
+                <span class="info-chip">Year: {{ selected_year }}</span>
+            </div>
+
+            {% if tests %}
+            <div class="test-grid">
+                {% for test in tests %}
+                <div class="test-card">
+                    <div class="test-title">{{ test.title }}</div>
+                    <div class="test-meta">
+                        {% set answer_count = test.questions_to_answer if (test.questions_to_answer or 0) > 0 else test.total_questions %}
+                        <strong>{{ test.subject }}</strong> | {{ test.classname }}<br>
+                        Duration: {{ test.duration_minutes }} mins<br>
+                        Questions: {{ answer_count or 0 }} of {{ test.total_questions or 0 }} | Marks: {{ '%.2f'|format(test.total_marks or 0) }}
+                    </div>
+                    <div class="test-meta">
+                        Test Status:
+                        <span class="status-pill {{ test.status|lower }}">{{ test.status }}</span>
+                        {% if test.attempt_status %}
+                        | Attempt:
+                        <span class="status-pill {{ test.attempt_status|lower }}">{{ test.attempt_status }}</span>
+                        {% endif %}
+                    </div>
+                    {% if test.attempt_status == 'submitted' %}
+                    <p class="muted">Score: {{ '%.2f'|format(test.score or 0) }} / {{ '%.2f'|format(test.attempt_total_marks or test.total_marks or 0) }}</p>
+                    {% elif test.action_mode == 'continue' %}
+                    <p class="muted">
+                        Draft in progress
+                        {% if (test.remaining_seconds or 0)|int > 0 %}
+                        | Time left: {{ ((test.remaining_seconds or 0)|int // 60) }}:{{ '%02d'|format(((test.remaining_seconds or 0)|int % 60)) }}
+                        {% endif %}
+                    </p>
+                    {% endif %}
+                    <div style="margin-top: 10px;">
+                        {% if test.action_mode == 'review' %}
+                        <a href="{{ url_for('student_cbt_take', test_id=test.test_id) }}" class="btn btn-secondary">
+                            <i class="fas fa-eye"></i> View Submission
+                        </a>
+                        {% elif test.action_mode == 'continue' %}
+                        <a href="{{ url_for('student_cbt_take', test_id=test.test_id) }}" class="btn btn-primary">
+                            <i class="fas fa-play"></i> Continue
+                        </a>
+                        {% else %}
+                        <a href="{{ url_for('student_cbt_take', test_id=test.test_id) }}" class="btn btn-primary">
+                            <i class="fas fa-play"></i> Start Test
+                        </a>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="card">
+                <p class="muted">No subject entered yet for CBT in {{ selected_term }} {{ selected_year }}, or all CBT for your class/subjects has already been retrieved by teachers.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% if not session.get('cbt_only') and session.get('role') in ['student', 'school_admin', 'teacher', 'parent', 'super_admin'] %}
+{% include 'shared/_ai_assistant_widget.html' %}
+{% endif %}
+<script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260309a') }}"></script>
+{% include "shared/_loading_overlay.html" %}
+</body>
+</html>

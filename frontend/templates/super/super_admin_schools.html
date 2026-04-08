@@ -4,15 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>View Schools - Super Admin</title>
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260308b') }}">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 </head>
 <body>
+    {% include "shared/_loading_overlay.html" %}
     <div class="app-shell topbar-layout">
         <div class="side-taskbar">
             <div class="side-brand">
-                <img src="{{ url_for('static', filename='img/osartech-logo.png') }}" alt="Osartech Logo" class="brand-logo">
+                <img src="{{ url_for('static', filename='img/osartech-logo.png', v='20260322a') }}" alt="Osartech Logo" class="brand-logo">
                 <span>Super Admin</span>
             </div>
             <div class="side-links">
@@ -47,6 +49,10 @@
                 <a href="{{ url_for('super_admin_system_settings') }}" class="side-link">
                     <i class="fas fa-sliders-h"></i>
                     <span>System Settings</span>
+                </a>
+                <a href="{{ url_for('super_admin_assistant_analytics') }}" class="side-link">
+                    <i class="fas fa-robot"></i>
+                    <span>Assistant Analytics</span>
                 </a>
                 <a href="{{ url_for('super_admin_webhook_setup') }}" class="side-link">
                     <i class="fas fa-plug"></i>
@@ -99,7 +105,8 @@
                                     Trial: {{ school.trial_start_date or '-' }} to {{ school.trial_end_date or '-' }} |
                                     Plan: {{ school.subscription_plan or '-' }} |
                                     Subscription: {{ school.subscription_start_date or '-' }} to {{ school.subscription_end_date or '-' }} |
-                                    Payment Ref: {{ school.payment_reference or '-' }}
+                                    Payment Ref: {{ school.payment_reference or '-' }} |
+                                    CBT: <strong class="{{ 'op-on' if school.cbt_enabled else 'op-off' }}">{{ 'Enabled' if school.cbt_enabled else 'Disabled' }}</strong>
                                 </div>
                                 <div class="school-meta">
                                     Payment Due: {{ school.payment_due_date or '-' }} |
@@ -169,7 +176,7 @@
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                     <input type="hidden" name="school_id" value="{{ school.school_id }}"/>
                                     <input type="email" name="admin_username" value="{{ school.admin_username or '' }}" placeholder="School admin email" required>
-                                    <input type="password" name="admin_password" placeholder="New password (optional)" autocomplete="new-password">
+                                    <input type="password" name="admin_password" placeholder="New password (optional)" autocomplete="new-password" minlength="12" title="Use at least 12 characters. Include uppercase, lowercase, number, and symbol.">
                                     <button type="submit" class="btn btn-primary"><i class="fas fa-user-edit"></i> Update Admin</button>
                                 </form>
                                 <form action="{{ url_for('super_admin_update_school_access') }}" method="POST" class="inline-form super-admin-inline-form">
@@ -180,6 +187,10 @@
                                         <option value="active_paid" {% if school.access_status == 'active_paid' %}selected{% endif %}>Active Paid</option>
                                         <option value="pending_payment" {% if school.access_status == 'pending_payment' %}selected{% endif %}>Pending Payment</option>
                                         <option value="suspended" {% if school.access_status == 'suspended' %}selected{% endif %}>Suspended</option>
+                                    </select>
+                                    <select name="cbt_enabled" title="CBT access">
+                                        <option value="1" {% if school.cbt_enabled %}selected{% endif %}>CBT Enabled</option>
+                                        <option value="0" {% if not school.cbt_enabled %}selected{% endif %}>CBT Disabled</option>
                                     </select>
                                     <input type="date" name="trial_start_date" value="{{ school.trial_start_date or '' }}" title="Trial start date">
                                     <input type="date" name="trial_end_date" value="{{ school.trial_end_date or '' }}" title="Trial end date">

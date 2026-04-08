@@ -4,15 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Add School - Super Admin</title>
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260308b') }}">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 </head>
 <body>
+    {% include "shared/_loading_overlay.html" %}
     <div class="app-shell topbar-layout">
         <div class="side-taskbar">
             <div class="side-brand">
-                <img src="{{ url_for('static', filename='img/osartech-logo.png') }}" alt="Osartech Logo" class="brand-logo">
+                <img src="{{ url_for('static', filename='img/osartech-logo.png', v='20260322a') }}" alt="Osartech Logo" class="brand-logo">
                 <span>Super Admin</span>
             </div>
             <div class="side-links">
@@ -47,6 +49,10 @@
                 <a href="{{ url_for('super_admin_system_settings') }}" class="side-link">
                     <i class="fas fa-sliders-h"></i>
                     <span>System Settings</span>
+                </a>
+                <a href="{{ url_for('super_admin_assistant_analytics') }}" class="side-link">
+                    <i class="fas fa-robot"></i>
+                    <span>Assistant Analytics</span>
                 </a>
                 <a href="{{ url_for('super_admin_webhook_setup') }}" class="side-link">
                     <i class="fas fa-plug"></i>
@@ -124,6 +130,13 @@
                                     <option value="active_paid">Active Paid</option>
                                     <option value="pending_payment">Pending Payment</option>
                                     <option value="suspended">Suspended</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="cbt_enabled">CBT Access:</label>
+                                <select id="cbt_enabled" name="cbt_enabled">
+                                    <option value="1" selected>Enabled</option>
+                                    <option value="0">Disabled</option>
                                 </select>
                             </div>
                             <div class="form-group">

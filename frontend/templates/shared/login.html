@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Osartech Multi-School Result System</title>
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260309a') }}">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
@@ -307,11 +308,12 @@
     </style>
 </head>
 <body>
+    {% include "shared/_loading_overlay.html" %}
     <div class="container">
         <div class="auth-shell">
             <aside class="auth-info">
                 <div class="auth-brand">
-                    <img class="logo" src="{{ url_for('static', filename='img/osartech-logo.png') }}" alt="Osartech">
+                    <img class="logo" src="{{ url_for('static', filename='img/osartech-logo.png', v='20260322a') }}" alt="Osartech">
                     <span>OSARTECH</span>
                 </div>
                 <h1>Multi-School Access Portal</h1>
@@ -366,6 +368,7 @@
 
                 <p class="auth-hint">Need help? Contact your school administrator for account support.</p>
                 <p class="auth-hint">New school? <a href="{{ url_for('school_access_request') }}">Request School Access</a></p>
+                <p class="auth-hint">Student CBT only? <a href="{{ url_for('cbt_login') }}">Open CBT Login</a></p>
             </section>
         </div>
     </div>

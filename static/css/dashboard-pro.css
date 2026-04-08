@@ -764,6 +764,58 @@ body.sidebar-collapsed .side-section-label {
   border-color: #2d3a63;
 }
 
+/* Parent sidebar: keep child controls and grouped rows aligned in rail mode. */
+.topbar-layout .side-taskbar.parent-sidebar .side-group-toggle {
+  text-transform: none;
+  letter-spacing: 0.02em;
+  font-size: 0.79rem;
+}
+
+.topbar-layout .side-taskbar.parent-sidebar .side-section-label.side-child-count {
+  display: none;
+  margin: 8px 12px 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(15, 23, 42, 0.22);
+  color: #8ea4d6;
+  font-size: 0.72rem;
+  line-height: 1.2;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.topbar-layout .side-taskbar.parent-sidebar .parent-child-select-wrap {
+  display: none;
+  margin: 0 12px 8px;
+  padding: 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  background: rgba(15, 23, 42, 0.22);
+}
+
+.topbar-layout .side-taskbar.parent-sidebar .parent-child-select-wrap label.muted {
+  display: block;
+  margin: 0 0 6px;
+  color: #cbd8f2 !important;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.topbar-layout .side-taskbar.parent-sidebar #parentChildSelect {
+  width: 100%;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #eef2ff;
+  padding: 8px 9px;
+  font-size: 0.82rem;
+}
+
+.topbar-layout .side-taskbar.parent-sidebar #parentChildSelect option {
+  color: #0f172a;
+}
+
 /* Touch-friendly expanded rail mode (desktop/tablet widths). */
 body.rail-expanded .app-shell.topbar-layout {
   grid-template-columns: 248px minmax(0, 1fr);
@@ -814,6 +866,14 @@ body.rail-expanded .topbar-layout .side-link .notif-badge {
 
 body.rail-expanded .topbar-layout .side-link::after {
   display: none;
+}
+
+body.rail-expanded .topbar-layout .side-taskbar.parent-sidebar .side-section-label.side-child-count {
+  display: flex;
+}
+
+body.rail-expanded .topbar-layout .side-taskbar.parent-sidebar .parent-child-select-wrap {
+  display: block;
 }
 
 /* Mouse fallback: expanding the rail on hover/focus should always reveal labels. */
@@ -874,6 +934,16 @@ body.rail-expanded .topbar-layout .side-link::after {
   .topbar-layout .side-taskbar:hover .side-link::after,
   .topbar-layout .side-taskbar:focus-within .side-link::after {
     display: none;
+  }
+
+  .topbar-layout .side-taskbar.parent-sidebar:hover .side-section-label.side-child-count,
+  .topbar-layout .side-taskbar.parent-sidebar:focus-within .side-section-label.side-child-count {
+    display: flex;
+  }
+
+  .topbar-layout .side-taskbar.parent-sidebar:hover .parent-child-select-wrap,
+  .topbar-layout .side-taskbar.parent-sidebar:focus-within .parent-child-select-wrap {
+    display: block;
   }
 }
 
@@ -1036,6 +1106,16 @@ body.rail-expanded .topbar-layout .side-link::after {
   .topbar-layout .side-taskbar.school-admin-sidebar .side-link.active {
     background: rgba(99, 102, 241, 0.34);
     border-color: rgba(129, 140, 248, 0.62);
+  }
+
+  .topbar-layout .side-taskbar.parent-sidebar .side-section-label.side-child-count,
+  body.rail-open .topbar-layout .side-taskbar.parent-sidebar .side-section-label.side-child-count {
+    display: flex;
+  }
+
+  .topbar-layout .side-taskbar.parent-sidebar .parent-child-select-wrap,
+  body.rail-open .topbar-layout .side-taskbar.parent-sidebar .parent-child-select-wrap {
+    display: block;
   }
 
   .rail-toggle {

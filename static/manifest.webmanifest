@@ -9,13 +9,13 @@
   "description": "School result management system for multi-school use.",
   "icons": [
     {
-      "src": "/static/FullLogo.png",
-      "sizes": "192x192",
+      "src": "/static/img/osartech-logo.png?v=20260322a",
+      "sizes": "any",
       "type": "image/png"
     },
     {
-      "src": "/static/FullLogo.png",
-      "sizes": "512x512",
+      "src": "/static/img/osartech-logo.png?v=20260322a",
+      "sizes": "any",
       "type": "image/png"
     }
   ]
