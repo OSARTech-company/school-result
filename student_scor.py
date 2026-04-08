@@ -6784,10 +6784,47 @@ except Exception as exc:
     logging.warning("Alembic head check failed: %s", exc)
 
 
+def ensure_core_auth_schema():
+    """Best-effort core auth schema guard for startup/bootstrap."""
+    try:
+        with db_connection(commit=True) as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """CREATE TABLE IF NOT EXISTS users (
+                       id SERIAL PRIMARY KEY,
+                       username TEXT UNIQUE NOT NULL,
+                       password_hash TEXT,
+                       role TEXT DEFAULT 'student',
+                       school_id TEXT,
+                       terms_accepted INTEGER DEFAULT 0,
+                       password_changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                       tutorial_seen_at TIMESTAMP,
+                       current_login_at TIMESTAMP,
+                       last_login_at TIMESTAMP,
+                       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                   )""",
+            )
+            db_execute(c, "ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT")
+            db_execute(c, "ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'student'")
+            db_execute(c, "ALTER TABLE users ADD COLUMN IF NOT EXISTS school_id TEXT")
+            db_execute(c, "ALTER TABLE users ADD COLUMN IF NOT EXISTS terms_accepted INTEGER DEFAULT 0")
+            db_execute(c, "ALTER TABLE users ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+            db_execute(c, "ALTER TABLE users ADD COLUMN IF NOT EXISTS tutorial_seen_at TIMESTAMP")
+            db_execute(c, "ALTER TABLE users ADD COLUMN IF NOT EXISTS current_login_at TIMESTAMP")
+            db_execute(c, "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP")
+        return True
+    except Exception as exc:
+        logging.warning("Failed to ensure core auth schema: %s", exc)
+        return False
+
+
 # Create super admin user (bootstrap-only, disabled for normal runtime startup).
 def create_super_admin():
     """Ensure super admin account exists; do not reset password on every startup."""
     try:
+        if not ensure_core_auth_schema():
+            return
         with db_connection(commit=True) as conn:
             c = conn.cursor()
             db_execute(
@@ -7147,6 +7184,8 @@ def is_login_blocked(endpoint, username, ip_address):
 
 def register_failed_login(endpoint, username, ip_address):
     """Track a failed login and lock after max attempts."""
+    if not ensure_login_security_schema():
+        return
     purge_old_login_attempts()
     endpoint = (endpoint or '').strip().lower()
     username = (username or '').strip().lower()
@@ -7204,6 +7243,8 @@ def register_failed_login(endpoint, username, ip_address):
             )
 
 def clear_failed_login(endpoint, username, ip_address):
+    if not ensure_login_security_schema():
+        return
     endpoint = (endpoint or '').strip().lower()
     username = (username or '').strip().lower()
     ip_address = (ip_address or '').strip()
@@ -7218,6 +7259,8 @@ def clear_failed_login(endpoint, username, ip_address):
 
 def purge_old_login_attempts():
     """Delete stale login-attempt rows to keep table size small."""
+    if not ensure_login_security_schema():
+        return
     cutoff = datetime.now() - timedelta(days=7)
     with db_connection(commit=True) as conn:
         c = conn.cursor()
@@ -7231,6 +7274,8 @@ def purge_old_login_attempts():
 
 def update_login_timestamps(username):
     """Shift current_login_at -> last_login_at and set current_login_at=now."""
+    if not ensure_login_security_schema():
+        return
     with db_connection(commit=True) as conn:
         c = conn.cursor()
         db_execute(
@@ -14811,6 +14856,32 @@ def ensure_extended_features_schema():
         return True
     except Exception as exc:
         logging.warning("Failed to ensure extended features schema: %s", exc)
+        return False
+
+def ensure_login_security_schema():
+    """Best-effort schema guard for login tracking tables/columns."""
+    try:
+        with db_connection(commit=True) as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """CREATE TABLE IF NOT EXISTS login_attempts (
+                       id SERIAL PRIMARY KEY,
+                       endpoint TEXT NOT NULL,
+                       username TEXT NOT NULL,
+                       ip_address TEXT NOT NULL,
+                       failures INTEGER NOT NULL DEFAULT 0,
+                       first_failed_at TIMESTAMP,
+                       last_failed_at TIMESTAMP,
+                       locked_until TIMESTAMP,
+                       UNIQUE(endpoint, username, ip_address)
+                   )""",
+            )
+            db_execute(c, "ALTER TABLE users ADD COLUMN IF NOT EXISTS current_login_at TIMESTAMP")
+            db_execute(c, "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP")
+        return True
+    except Exception as exc:
+        logging.warning("Failed to ensure login security schema: %s", exc)
         return False
 
 def _parse_bool_setting(value, default=False):
