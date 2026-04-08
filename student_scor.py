@@ -7825,7 +7825,11 @@ def hash_password(password):
 
 def check_password(hashed, password):
     """Verify a password."""
-    return check_password_hash(hashed, password)
+    try:
+        return check_password_hash(hashed, password)
+    except Exception as exc:
+        logging.warning("Password hash verification failed; treating as mismatch: %s", exc)
+        return False
 
 def validate_admin_password_strength(password):
     value = str(password or '')
@@ -14888,6 +14892,39 @@ def ensure_extended_features_schema():
         return True
     except Exception as exc:
         logging.warning("Failed to ensure extended features schema: %s", exc)
+        return False
+
+def ensure_error_logs_schema():
+    """Ensure the app error log table exists even if other optional tables do not."""
+    try:
+        with db_connection(commit=True) as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """CREATE TABLE IF NOT EXISTS app_error_logs (
+                       id SERIAL PRIMARY KEY,
+                       error_uid TEXT UNIQUE NOT NULL,
+                       school_id TEXT,
+                       role TEXT DEFAULT '',
+                       user_id TEXT DEFAULT '',
+                       endpoint TEXT DEFAULT '',
+                       path TEXT DEFAULT '',
+                       method TEXT DEFAULT '',
+                       error_type TEXT DEFAULT '',
+                       error_message TEXT DEFAULT '',
+                       traceback_text TEXT DEFAULT '',
+                       source_page TEXT DEFAULT '',
+                       request_meta_json TEXT DEFAULT '',
+                       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                   )""",
+            )
+            db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_app_error_logs_created ON app_error_logs(created_at DESC)')
+            db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_app_error_logs_school_created ON app_error_logs(school_id, created_at DESC)')
+            db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_app_error_logs_role_created ON app_error_logs(role, created_at DESC)')
+            db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_app_error_logs_error_type ON app_error_logs(error_type)')
+        return True
+    except Exception as exc:
+        logging.warning("Failed to ensure error logs schema: %s", exc)
         return False
 
 def ensure_login_security_schema():
@@ -24586,7 +24623,7 @@ def log_app_error(exc, source_page='', endpoint='', extra_meta=None):
             req_meta[str(k)[:40]] = str(v)[:220]
     if role_name == 'super_admin':
         school_id = ''
-    if not ensure_extended_features_schema():
+    if not ensure_error_logs_schema():
         logging.warning("Error log skipped (schema unavailable): uid=%s type=%s msg=%s", error_uid, error_type, error_message[:180])
         return error_uid
     try:
@@ -42428,7 +42465,19 @@ def view_reports():
 def super_admin_error_logs():
     if session.get('role') != 'super_admin':
         return redirect(url_for('login'))
-    ensure_extended_features_schema()
+    if not ensure_error_logs_schema():
+        flash('Error log storage is not available yet. Please run the app migrations and retry.', 'error')
+        return render_template(
+            'super/super_admin_error_logs.html',
+            logs=[],
+            total_rows=0,
+            page=1,
+            per_page=50,
+            total_pages=1,
+            role_filter='',
+            endpoint_filter='',
+            text_filter='',
+        )
     role_filter = (request.args.get('role', '') or '').strip().lower()
     endpoint_filter = (request.args.get('endpoint', '') or '').strip().lower()
     text_filter = (request.args.get('q', '') or '').strip().lower()
