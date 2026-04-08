@@ -7069,9 +7069,12 @@ def is_default_student_password(password_hash):
 
 def mark_terms_accepted(username):
     """Persist one-time terms/privacy acceptance for a user."""
-    with db_connection(commit=True) as conn:
-        c = conn.cursor()
-        db_execute(c, 'UPDATE users SET terms_accepted = 1 WHERE LOWER(username) = LOWER(?)', (username,))
+    try:
+        with db_connection(commit=True) as conn:
+            c = conn.cursor()
+            db_execute(c, 'UPDATE users SET terms_accepted = 1 WHERE LOWER(username) = LOWER(?)', (username,))
+    except Exception as exc:
+        logging.warning("Failed to mark terms accepted for %s: %s", username, exc)
 
 def upsert_user(username, password_hash, role='student', school_id=None, overwrite_identity=False):
     """Insert or update a user.
@@ -13099,11 +13102,20 @@ def build_school_access_state(school):
     """Return effective access state used for login/runtime access checks."""
     school_data = school if isinstance(school, dict) else {}
     status = normalize_school_access_status(school_data.get('access_status', 'trial_free'))
-    trial_end_raw = (school_data.get('trial_end_date') or '').strip()
-    subscription_end_raw = (school_data.get('subscription_end_date') or '').strip()
-    payment_due_raw = (school_data.get('payment_due_date') or '').strip()
+    def _school_text(value):
+        if value is None:
+            return ''
+        if isinstance(value, datetime):
+            return value.date().isoformat()
+        if isinstance(value, date):
+            return value.isoformat()
+        return str(value).strip()
+
+    trial_end_raw = _school_text(school_data.get('trial_end_date'))
+    subscription_end_raw = _school_text(school_data.get('subscription_end_date'))
+    payment_due_raw = _school_text(school_data.get('payment_due_date'))
     payment_grace_days = _normalize_non_negative_int(school_data.get('payment_grace_days', 14), 14, 365)
-    access_note = (school_data.get('access_note') or '').strip()
+    access_note = _school_text(school_data.get('access_note'))
     today = date.today()
 
     trial_end_dt = _parse_iso_date(trial_end_raw)
