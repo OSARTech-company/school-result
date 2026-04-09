@@ -213,6 +213,34 @@
         });
     }
 
+    function parseMaybeJsonResponse(resp) {
+        return resp.text().then(function (text) {
+            var raw = String(text || '');
+            var contentType = String(resp.headers.get('content-type') || '').toLowerCase();
+            var looksJson = contentType.indexOf('application/json') >= 0 || contentType.indexOf('+json') >= 0;
+            if (!looksJson) {
+                var trimmed = raw.trim();
+                if (trimmed && trimmed.charAt(0) === '{') {
+                    looksJson = true;
+                }
+            }
+            if (!looksJson) {
+                var plain = raw.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+                if (!plain) {
+                    plain = 'Assistant request failed.';
+                } else if (plain.length > 220) {
+                    plain = plain.slice(0, 220);
+                }
+                throw new Error(plain);
+            }
+            try {
+                return JSON.parse(raw || '{}');
+            } catch (_err) {
+                throw new Error('Assistant request returned an invalid JSON payload.');
+            }
+        });
+    }
+
     function initAssistant(root) {
         if (!root || root.dataset.bound === '1') return;
         root.dataset.bound = '1';
@@ -322,14 +350,12 @@
                 body: payload.toString()
             }).then(function (resp) {
                 if (!resp.ok) {
-                    return resp.json().then(function (errData) {
+                    return parseMaybeJsonResponse(resp).then(function (errData) {
                         var msg = (errData && errData.error) ? String(errData.error) : 'Assistant request failed.';
                         throw new Error(msg);
-                    }).catch(function () {
-                        throw new Error('Assistant request failed.');
                     });
                 }
-                return resp.json();
+                return parseMaybeJsonResponse(resp);
             }).then(function (data) {
                 if (pendingNode && pendingNode.parentNode) pendingNode.parentNode.removeChild(pendingNode);
                 if (!data || !data.ok) {
@@ -419,14 +445,12 @@
                     body: payload.toString()
                 }).then(function (resp) {
                     if (!resp.ok) {
-                        return resp.json().then(function (errData) {
+                        return parseMaybeJsonResponse(resp).then(function (errData) {
                             var msg = (errData && errData.error) ? String(errData.error) : 'Could not clear memory.';
                             throw new Error(msg);
-                        }).catch(function () {
-                            throw new Error('Could not clear memory.');
                         });
                     }
-                    return resp.json();
+                    return parseMaybeJsonResponse(resp);
                 }).then(function () {
                     resetConversation('Assistant memory cleared. I will respond from scratch now.');
                     setBusy(false);
@@ -457,6 +481,11 @@
                         'X-Requested-With': 'XMLHttpRequest'
                     },
                     body: prefPayload.toString()
+                }).then(function (resp) {
+                    if (!resp.ok) {
+                        return parseMaybeJsonResponse(resp).catch(function () { return null; });
+                    }
+                    return parseMaybeJsonResponse(resp);
                 }).catch(function () {});
             });
         }

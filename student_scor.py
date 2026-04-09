@@ -400,7 +400,7 @@ def inject_school_feature_flags():
     role = (session.get('role') or '').strip().lower()
     if role not in {'school_admin', 'teacher', 'student', 'parent'}:
         return {'school_cbt_enabled': True}
-    school_id = (session.get('school_id') or '').strip()
+    school_id = _normalize_school_id_text(session.get('school_id'))
     if not school_id:
         return {'school_cbt_enabled': True}
     try:
@@ -4246,6 +4246,13 @@ def enforce_role_access(allowed_roles, redirect_endpoint='login', message='You a
     normalized = {(r or '').strip().lower() for r in (allowed_roles or []) if (r or '').strip()}
     if role in normalized:
         return None
+    wants_json = (
+        request.path.startswith('/assistant/')
+        or (request.headers.get('X-Requested-With', '') or '').lower() == 'xmlhttprequest'
+        or 'application/json' in (request.headers.get('Accept', '') or '').lower()
+    )
+    if wants_json:
+        return Response(json.dumps({'ok': False, 'error': message}), status=403, mimetype='application/json')
     flash(message, 'error')
     return redirect(url_for(redirect_endpoint))
 
@@ -4338,6 +4345,17 @@ def require_rate_limit(scope, limit_per_window, window_seconds=60, redirect_endp
             key = f'{scope}:{client_ip}'
             allowed, retry_after = _rate_limit_consume(key, limit_per_window, window_seconds)
             if not allowed:
+                wants_json = (
+                    request.path.startswith('/assistant/')
+                    or (request.headers.get('X-Requested-With', '') or '').lower() == 'xmlhttprequest'
+                    or 'application/json' in (request.headers.get('Accept', '') or '').lower()
+                )
+                if wants_json:
+                    return Response(
+                        json.dumps({'ok': False, 'error': f'Too many requests. Try again in about {retry_after} second(s).'}),
+                        status=429,
+                        mimetype='application/json',
+                    )
                 flash(f'Too many requests. Try again in about {retry_after} second(s).', 'error')
                 return redirect(url_for(redirect_endpoint))
             return fn(*args, **kwargs)
@@ -7147,7 +7165,7 @@ def upsert_user_with_cursor(c, username, password_hash, role='student', school_i
     """Insert or update a user using an existing DB cursor/transaction."""
     uname = (username or '').strip()
     norm_role = (role or 'student').strip().lower() or 'student'
-    norm_school_id = (school_id or '').strip()
+    norm_school_id = _normalize_school_id_text(school_id)
     if norm_role != 'super_admin' and not norm_school_id:
         raise ValueError('school_id is required for non-super-admin accounts.')
     role = norm_role
@@ -7397,6 +7415,10 @@ def format_timestamp(ts):
 
 def save_student_with_cursor(c, school_id, student_id, student_data, school_for_stream=None):
     """Save one student using an existing DB cursor/transaction."""
+    school_key = _normalize_school_id_text(school_id)
+    if not school_key:
+        raise ValueError('School ID is required.')
+    school_id = school_key
     logging.info(f"save_student_with_cursor called: school_id={school_id}, student_id={student_id}")
     firstname = normalize_person_name(student_data.get('firstname', ''))
     email = (student_data.get('email') or student_data.get('student_email') or '').strip().lower()
@@ -13622,10 +13644,13 @@ def update_school_settings_with_cursor(c, school_id, settings):
 
 def update_school_term_year_with_cursor(c, school_id, term, academic_year):
     """Update only current term/year without overwriting other school settings."""
+    school_key = _normalize_school_id_text(school_id)
+    if not school_key:
+        raise ValueError('School ID is required.')
     db_execute(
         c,
         "UPDATE schools SET current_term = ?, academic_year = ?, updated_at = CURRENT_TIMESTAMP WHERE school_id = ?",
-        ((term or '').strip(), (academic_year or '').strip(), school_id),
+        ((term or '').strip(), (academic_year or '').strip(), school_key),
     )
 
 def _increment_academic_year(academic_year):
@@ -13724,29 +13749,35 @@ def update_school_settings(school_id, settings):
 def set_school_operations_enabled(school_id, enabled):
     """Enable/disable teacher/student operations for a school."""
     affected = 0
+    school_key = _normalize_school_id_text(school_id)
+    if not school_key:
+        return 0
     with db_connection(commit=True) as conn:
         c = conn.cursor()
         db_execute(
             c,
             'UPDATE schools SET operations_enabled = ? WHERE school_id = ?',
-            (1 if enabled else 0, school_id)
+            (1 if enabled else 0, school_key)
         )
         affected = int(getattr(c, 'rowcount', 0) or 0)
-    invalidate_school_cache(school_id)
+    invalidate_school_cache(school_key)
     return affected
 
 def set_teacher_operations_enabled(school_id, enabled):
     """Enable/disable teacher editing operations for a school (set by school admin)."""
     affected = 0
+    school_key = _normalize_school_id_text(school_id)
+    if not school_key:
+        return 0
     with db_connection(commit=True) as conn:
         c = conn.cursor()
         db_execute(
             c,
             'UPDATE schools SET teacher_operations_enabled = ? WHERE school_id = ?',
-            (1 if enabled else 0, school_id)
+            (1 if enabled else 0, school_key)
         )
         affected = int(getattr(c, 'rowcount', 0) or 0)
-    invalidate_school_cache(school_id)
+    invalidate_school_cache(school_key)
     return affected
 
 
@@ -14104,7 +14135,7 @@ def update_school_access_policy_with_cursor(
     updated_by='',
 ):
     """Update super-admin controlled access lifecycle for one school using an existing cursor."""
-    sid = (school_id or '').strip()
+    sid = _normalize_school_id_text(school_id)
     if not sid:
         raise ValueError('School ID is required.')
 
@@ -14312,7 +14343,7 @@ def update_school_access_policy(
     updated_by='',
 ):
     """Update super-admin controlled access lifecycle for one school."""
-    sid = (school_id or '').strip()
+    sid = _normalize_school_id_text(school_id)
     if not sid:
         raise ValueError('School ID is required.')
     if not ensure_school_access_schema():
@@ -20339,21 +20370,30 @@ def get_parent_students_by_phone(parent_phone):
 
 def save_student(school_id, student_id, student_data):
     """Save a student."""
-    school_ctx = get_school(school_id) or {}
+    school_key = _normalize_school_id_text(school_id)
+    if not school_key:
+        raise ValueError('School ID is required.')
+    school_ctx = get_school(school_key) or {}
     with db_connection(commit=True) as conn:
         c = conn.cursor()
-        save_student_with_cursor(c, school_id, student_id, student_data, school_for_stream=school_ctx)
+        save_student_with_cursor(c, school_key, student_id, student_data, school_for_stream=school_ctx)
 
 def delete_student(school_id, student_id):
     """Delete a student."""
+    school_key = _normalize_school_id_text(school_id)
+    if not school_key:
+        raise ValueError('School ID is required.')
     with db_connection(commit=True) as conn:
         c = conn.cursor()
-        db_execute(c, 'DELETE FROM students WHERE school_id = ? AND student_id = ?', (school_id, student_id))
+        db_execute(c, 'DELETE FROM students WHERE school_id = ? AND student_id = ?', (school_key, student_id))
 
 def archive_student_account(school_id, student_id, archived_by=''):
     """Soft archive one student within one school."""
     if not students_has_archive_columns():
         raise ValueError('Student archive schema is unavailable. Run migration/startup DDL and retry.')
+    school_key = _normalize_school_id_text(school_id)
+    if not school_key:
+        raise ValueError('School ID is required.')
     with db_connection(commit=True) as conn:
         c = conn.cursor()
         db_execute(
@@ -20362,15 +20402,18 @@ def archive_student_account(school_id, student_id, archived_by=''):
                SET is_archived = 1,
                    archived_at = CURRENT_TIMESTAMP
                WHERE school_id = ? AND student_id = ?""",
-            (school_id, student_id),
+            (school_key, student_id),
         )
     if archived_by:
-        logging.info("Student archived by=%s school_id=%s student_id=%s", archived_by, school_id, student_id)
+        logging.info("Student archived by=%s school_id=%s student_id=%s", archived_by, school_key, student_id)
 
 def restore_student_account(school_id, student_id, restored_by=''):
     """Restore one archived student within one school."""
     if not students_has_archive_columns():
         raise ValueError('Student archive schema is unavailable. Run migration/startup DDL and retry.')
+    school_key = _normalize_school_id_text(school_id)
+    if not school_key:
+        raise ValueError('School ID is required.')
     with db_connection(commit=True) as conn:
         c = conn.cursor()
         db_execute(
@@ -20379,10 +20422,10 @@ def restore_student_account(school_id, student_id, restored_by=''):
                SET is_archived = 0,
                    archived_at = NULL
                WHERE school_id = ? AND student_id = ?""",
-            (school_id, student_id),
+            (school_key, student_id),
         )
     if restored_by:
-        logging.info("Student restored by=%s school_id=%s student_id=%s", restored_by, school_id, student_id)
+        logging.info("Student restored by=%s school_id=%s student_id=%s", restored_by, school_key, student_id)
 
 def get_student_count_by_class(school_id):
     """Get student count by class."""
@@ -23134,6 +23177,9 @@ def restore_school_backup_payload(school_id, payload, mode='merge'):
 
 def set_teacher_signature(school_id, teacher_id, signature_image):
     """Store teacher signature image for result authorization."""
+    school_key = _normalize_school_id_text(school_id)
+    if not school_key:
+        return
     with db_connection(commit=True) as conn:
         c = conn.cursor()
         db_execute(
@@ -23141,12 +23187,15 @@ def set_teacher_signature(school_id, teacher_id, signature_image):
             """UPDATE teachers
                SET signature_image = ?
                WHERE school_id = ? AND user_id = ?""",
-            (signature_image, school_id, teacher_id),
+            (signature_image, school_key, teacher_id),
         )
-    invalidate_school_cache(school_id)
+    invalidate_school_cache(school_key)
 
 def set_teacher_profile_image(school_id, teacher_id, profile_image):
     """Store teacher profile image for dashboard/sidebar avatar."""
+    school_key = _normalize_school_id_text(school_id)
+    if not school_key:
+        return False
     with db_connection(commit=True) as conn:
         c = conn.cursor()
         try:
@@ -23155,8 +23204,9 @@ def set_teacher_profile_image(school_id, teacher_id, profile_image):
                 """UPDATE teachers
                    SET profile_image = ?
                    WHERE school_id = ? AND user_id = ?""",
-                (profile_image, school_id, teacher_id),
+                (profile_image, school_key, teacher_id),
             )
+            invalidate_school_cache(school_key)
             return True
         except Exception:
             try:
@@ -23167,6 +23217,9 @@ def set_teacher_profile_image(school_id, teacher_id, profile_image):
 
 def set_principal_signature(school_id, signature_image):
     """Store principal signature image for result authorization."""
+    school_key = _normalize_school_id_text(school_id)
+    if not school_key:
+        return
     with db_connection(commit=True) as conn:
         c = conn.cursor()
         db_execute(
@@ -23174,9 +23227,9 @@ def set_principal_signature(school_id, signature_image):
             """UPDATE schools
                SET principal_signature_image = ?, updated_at = ?
                WHERE school_id = ?""",
-            (signature_image, datetime.now(), school_id),
+            (signature_image, datetime.now(), school_key),
         )
-    invalidate_school_cache(school_id)
+    invalidate_school_cache(school_key)
 
 def ensure_subject_score_submission_schema():
     """Ensure subject-teacher handoff table exists."""
@@ -23442,6 +23495,9 @@ def get_teachers(school_id, include_archived=False):
 
 def save_teacher(school_id, user_id, firstname, lastname, assigned_classes, subjects_taught=None, phone='', gender=''):
     """Save a teacher."""
+    school_key = _normalize_school_id_text(school_id)
+    if not school_key:
+        raise ValueError('School ID is required.')
     with db_connection(commit=True) as conn:
         c = conn.cursor()
         firstname = normalize_person_name(firstname)
@@ -23451,29 +23507,32 @@ def save_teacher(school_id, user_id, firstname, lastname, assigned_classes, subj
         classes_str = json.dumps(assigned_classes)
         subjects_str = json.dumps(normalize_subjects_list(subjects_taught or []))
         # Check if teacher exists
-        db_execute(c, 'SELECT user_id FROM teachers WHERE school_id = ? AND user_id = ?', (school_id, user_id))
+        db_execute(c, 'SELECT user_id FROM teachers WHERE school_id = ? AND user_id = ?', (school_key, user_id))
         if c.fetchone():
             # Update existing teacher
             db_execute(c, 'UPDATE teachers SET firstname = ?, lastname = ?, phone = ?, gender = ?, assigned_classes = ?, subjects_taught = ? WHERE school_id = ? AND user_id = ?',
-                       (firstname, lastname, phone, gender, classes_str, subjects_str, school_id, user_id))
+                       (firstname, lastname, phone, gender, classes_str, subjects_str, school_key, user_id))
         else:
             # Insert new teacher
-            ensure_school_plan_capacity(school_id, add_students=0, add_teachers=1)
+            ensure_school_plan_capacity(school_key, add_students=0, add_teachers=1)
             try:
                 db_execute(c, 'INSERT INTO teachers (school_id, user_id, firstname, lastname, phone, gender, signature_image, profile_image, assigned_classes, subjects_taught) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                           (school_id, user_id, firstname, lastname, phone, gender, '', '', classes_str, subjects_str))
+                           (school_key, user_id, firstname, lastname, phone, gender, '', '', classes_str, subjects_str))
             except Exception:
                 try:
                     conn.rollback()
                 except Exception as exc:
                     _log_suppressed_exception('save_teacher', exc)
                 db_execute(c, 'INSERT INTO teachers (school_id, user_id, firstname, lastname, phone, gender, signature_image, assigned_classes, subjects_taught) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                           (school_id, user_id, firstname, lastname, phone, gender, '', classes_str, subjects_str))
+                           (school_key, user_id, firstname, lastname, phone, gender, '', classes_str, subjects_str))
 
 def archive_teacher_account(school_id, teacher_id, archived_by=''):
     """Soft archive one teacher and clear active assignments."""
     if not teachers_has_archive_columns():
         raise ValueError('Teacher archive schema is unavailable. Run migration/startup DDL and retry.')
+    school_key = _normalize_school_id_text(school_id)
+    if not school_key:
+        raise ValueError('School ID is required.')
     with db_connection(commit=True) as conn:
         c = conn.cursor()
         db_execute(
@@ -23482,17 +23541,20 @@ def archive_teacher_account(school_id, teacher_id, archived_by=''):
                SET is_archived = 1,
                    archived_at = CURRENT_TIMESTAMP
                WHERE school_id = ? AND user_id = ?""",
-            (school_id, teacher_id),
+            (school_key, teacher_id),
         )
-        db_execute(c, 'DELETE FROM class_assignments WHERE school_id = ? AND teacher_id = ?', (school_id, teacher_id))
-        db_execute(c, 'DELETE FROM teacher_subject_assignments WHERE school_id = ? AND teacher_id = ?', (school_id, teacher_id))
+        db_execute(c, 'DELETE FROM class_assignments WHERE school_id = ? AND teacher_id = ?', (school_key, teacher_id))
+        db_execute(c, 'DELETE FROM teacher_subject_assignments WHERE school_id = ? AND teacher_id = ?', (school_key, teacher_id))
     if archived_by:
-        logging.info("Teacher archived by=%s school_id=%s teacher_id=%s", archived_by, school_id, teacher_id)
+        logging.info("Teacher archived by=%s school_id=%s teacher_id=%s", archived_by, school_key, teacher_id)
 
 def restore_teacher_account(school_id, teacher_id, restored_by=''):
     """Restore one archived teacher."""
     if not teachers_has_archive_columns():
         raise ValueError('Teacher archive schema is unavailable. Run migration/startup DDL and retry.')
+    school_key = _normalize_school_id_text(school_id)
+    if not school_key:
+        raise ValueError('School ID is required.')
     with db_connection(commit=True) as conn:
         c = conn.cursor()
         db_execute(
@@ -23501,17 +23563,20 @@ def restore_teacher_account(school_id, teacher_id, restored_by=''):
                SET is_archived = 0,
                    archived_at = NULL
                WHERE school_id = ? AND user_id = ?""",
-            (school_id, teacher_id),
+            (school_key, teacher_id),
         )
     if restored_by:
-        logging.info("Teacher restored by=%s school_id=%s teacher_id=%s", restored_by, school_id, teacher_id)
+        logging.info("Teacher restored by=%s school_id=%s teacher_id=%s", restored_by, school_key, teacher_id)
 
 def assign_teacher_to_class(school_id, teacher_id, classname, term, academic_year):
     """Assign teacher to a class."""
+    school_key = _normalize_school_id_text(school_id)
+    if not school_key:
+        raise ValueError('School ID is required.')
     with db_connection(commit=True) as conn:
         c = conn.cursor()
         if not academic_year:
-            school = get_school(school_id) or {}
+            school = get_school(school_key) or {}
             academic_year = (school.get('academic_year', '') or '').strip()
         if not academic_year:
             raise ValueError('Academic year is required for class assignment.')
@@ -23522,7 +23587,7 @@ def assign_teacher_to_class(school_id, teacher_id, classname, term, academic_yea
             """SELECT 1 FROM teachers
                WHERE school_id = ? AND user_id = ?
                LIMIT 1""",
-            (school_id, teacher_id),
+            (school_key, teacher_id),
         )
         if not c.fetchone():
             raise ValueError('Selected teacher is not registered in this school.')
@@ -25223,10 +25288,19 @@ def school_admin_invite_setup(token):
 @app.errorhandler(CSRFError)
 def csrf_error(error):
     """Handle CSRF token errors."""
+    message = 'Form token expired/invalid. Please retry your last action.'
+    if 'user_id' not in session:
+        message = 'Your session has expired. Please login again.'
+    wants_json = (
+        request.path.startswith('/assistant/')
+        or (request.headers.get('X-Requested-With', '') or '').lower() == 'xmlhttprequest'
+        or 'application/json' in (request.headers.get('Accept', '') or '').lower()
+    )
+    if wants_json:
+        return Response(json.dumps({'ok': False, 'error': message}), status=400, mimetype='application/json')
+    flash(message, 'error')
     if 'user_id' in session:
-        flash('Form token expired/invalid. Please retry your last action.', 'error')
         return redirect(request.referrer or url_for('menu'))
-    flash('Your session has expired. Please login again.', 'error')
     return redirect(url_for('login'))
 
 @app.errorhandler(500)
@@ -25261,6 +25335,18 @@ def internal_server_error(error):
         back_url = url_for('parent_dashboard')
     else:
         back_url = url_for('home')
+    wants_json = (
+        request.path.startswith('/assistant/')
+        or (request.headers.get('X-Requested-With', '') or '').lower() == 'xmlhttprequest'
+        or 'application/json' in (request.headers.get('Accept', '') or '').lower()
+    )
+    if wants_json:
+        body = {
+            'ok': False,
+            'error': f'Assistant request failed. Reference: {error_uid or "ERR-UNKNOWN"}',
+            'error_uid': error_uid,
+        }
+        return Response(json.dumps(body), status=500, mimetype='application/json')
     return render_template(
         'shared/error_500.html',
         error_uid=error_uid,
@@ -27106,6 +27192,7 @@ def super_admin_onboarding_approve():
                 'UPDATE schools SET class_arm_ranking_mode = ? WHERE school_id = ?',
                 (class_arm_ranking_mode, school_id),
             )
+            school_id = _normalize_school_id_text(school_id)
             update_school_access_policy_with_cursor(
                 c=c,
                 school_id=school_id,
@@ -27737,7 +27824,7 @@ def super_admin_soft_delete_school():
     if session.get('role') != 'super_admin':
         return redirect(url_for('login'))
 
-    school_id = (request.form.get('school_id') or '').strip()
+    school_id = _normalize_school_id_text(request.form.get('school_id'))
     note = (request.form.get('note') or '').strip()
     if not school_id:
         flash('School ID is required.', 'error')
@@ -27798,7 +27885,7 @@ def super_admin_restore_school():
     if session.get('role') != 'super_admin':
         return redirect(url_for('login'))
 
-    school_id = (request.form.get('school_id') or '').strip()
+    school_id = _normalize_school_id_text(request.form.get('school_id'))
     note = (request.form.get('note') or '').strip()
     if not school_id:
         flash('School ID is required.', 'error')
@@ -27866,7 +27953,7 @@ def super_admin_update_school_admin():
     if session.get('role') != 'super_admin':
         return redirect(url_for('login'))
 
-    school_id = request.form.get('school_id', '').strip()
+    school_id = _normalize_school_id_text(request.form.get('school_id'))
     admin_username = request.form.get('admin_username', '').strip().lower()
     admin_password = request.form.get('admin_password', '')
     if not school_id or not admin_username:
@@ -27886,7 +27973,7 @@ def super_admin_update_school_admin():
 def super_admin_update_school():
     if session.get('role') != 'super_admin':
         return redirect(url_for('login'))
-    school_id = request.form.get('school_id', '').strip()
+    school_id = _normalize_school_id_text(request.form.get('school_id'))
     school_name = request.form.get('school_name', '').strip()
     location = request.form.get('location', '').strip()
     phone = request.form.get('phone', '').strip()
@@ -28038,7 +28125,10 @@ def school_admin_dashboard():
     if session.get('role') != 'school_admin':
         return redirect(url_for('login'))
     
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     school = get_school(school_id)
     current_term = get_current_term(school)
     current_year = (school or {}).get('academic_year', '')
@@ -28484,9 +28574,11 @@ def school_admin_teacher_assignments():
         academic_year=current_year,
     ) or []
 
+    configured_classes = set(get_secondary_school_classnames(school_id) or [])
     class_options = filter_secondary_classnames(
         {str(name).strip() for name in class_counts.keys() if str(name).strip()}
         | {str((row.get('classname') or '')).strip() for row in class_assignments if str((row.get('classname') or '')).strip()}
+        | {str(c).strip() for c in configured_classes if str(c).strip()}
     )
 
     class_subject_options = {}
@@ -29678,7 +29770,10 @@ def school_admin_view_parents():
     if session.get('role') != 'school_admin':
         return redirect(url_for('login'))
 
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     school = get_school(school_id) or {}
     parent_links = get_school_parent_links(school_id)
     parent_count = len({(row.get('parent_phone') or '').strip() for row in parent_links if (row.get('parent_phone') or '').strip()})
@@ -29715,7 +29810,10 @@ def school_admin_view_parents():
 def school_admin_link_parent():
     if session.get('role') != 'school_admin':
         return redirect(url_for('login'))
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     if not students_has_parent_access_columns():
         flash('Parent access is not available yet. Run migration/startup schema updates and retry.', 'error')
         return redirect(url_for('school_admin_view_parents'))
@@ -29824,7 +29922,10 @@ def school_admin_parent_directory():
     if session.get('role') != 'school_admin':
         return redirect(url_for('login'))
 
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     school = get_school(school_id) or {}
     directory = get_school_parent_directory(school_id)
     parent_count = len(directory)
@@ -29845,7 +29946,10 @@ def school_admin_parent_directory():
 def school_admin_upload_principal_signature():
     if session.get('role') != 'school_admin':
         return redirect(url_for('login'))
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     school = get_school(school_id) or {}
     leadership_label = get_school_leadership_label((school or {}).get('leadership_title', 'principal'))
     admin_password = request.form.get('admin_password', '')
@@ -29872,7 +29976,10 @@ def school_admin_class_subjects():
     if session.get('role') != 'school_admin':
         return redirect(url_for('login'))
 
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     subject_catalog_map = get_school_subject_catalog_map(school_id)
 
     if request.method == 'POST':
@@ -30005,7 +30112,10 @@ def teacher_cbt():
         flash('CBT module is not available right now. Please retry.', 'error')
         return redirect(url_for('teacher_dashboard'))
 
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     teacher_id = (session.get('user_id') or '').strip()
     school = get_school(school_id) or {}
     current_term = get_current_term(school)
@@ -30068,7 +30178,10 @@ def teacher_cbt_create():
         flash('CBT module is not available right now. Please retry.', 'error')
         return redirect(url_for('teacher_cbt'))
 
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     teacher_id = (session.get('user_id') or '').strip()
     school = get_school(school_id) or {}
     current_term = get_current_term(school)
@@ -30135,7 +30248,10 @@ def teacher_cbt_questions(test_id):
     if not ensure_cbt_schema():
         flash('CBT module is not available right now. Please retry.', 'error')
         return redirect(url_for('teacher_cbt'))
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     teacher_id = (session.get('user_id') or '').strip()
     school = get_school(school_id) or {}
     test_row = get_cbt_test(school_id, test_id)
@@ -30166,7 +30282,10 @@ def teacher_cbt_add_question(test_id):
         flash('CBT module is not available right now. Please retry.', 'error')
         return redirect(url_for('teacher_cbt'))
 
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     teacher_id = (session.get('user_id') or '').strip()
     test_row = get_cbt_test(school_id, test_id)
     if not test_row:
@@ -30218,7 +30337,10 @@ def teacher_cbt_delete_question(test_id):
     if not ensure_cbt_schema():
         flash('CBT module is not available right now. Please retry.', 'error')
         return redirect(url_for('teacher_cbt'))
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     teacher_id = (session.get('user_id') or '').strip()
     test_row = get_cbt_test(school_id, test_id)
     if not test_row:
@@ -30247,7 +30369,10 @@ def teacher_cbt_set_status(test_id):
     if not ensure_cbt_schema():
         flash('CBT module is not available right now. Please retry.', 'error')
         return redirect(url_for('teacher_cbt'))
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     teacher_id = (session.get('user_id') or '').strip()
     test_row = get_cbt_test(school_id, test_id)
     if not test_row:
@@ -30277,7 +30402,10 @@ def teacher_cbt_set_status(test_id):
 def teacher_cbt_results(test_id):
     if session.get('role') != 'teacher':
         return redirect(url_for('login'))
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     teacher_id = (session.get('user_id') or '').strip()
     school = get_school(school_id) or {}
     test_row = get_cbt_test(school_id, test_id)
@@ -30383,7 +30511,10 @@ def teacher_cbt_results(test_id):
 def teacher_cbt_monitor(test_id):
     if session.get('role') != 'teacher':
         return redirect(url_for('login'))
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     teacher_id = (session.get('user_id') or '').strip()
     school = get_school(school_id) or {}
     test_row = get_cbt_test(school_id, test_id)
@@ -30464,7 +30595,10 @@ def teacher_cbt_monitor(test_id):
 def teacher_cbt_save_accommodation(test_id):
     if session.get('role') != 'teacher':
         return redirect(url_for('login'))
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     teacher_id = (session.get('user_id') or '').strip()
     test_row = get_cbt_test(school_id, test_id)
     if not test_row:
@@ -30507,7 +30641,10 @@ def teacher_cbt_save_accommodation(test_id):
 def teacher_cbt_retrieve(test_id):
     if session.get('role') != 'teacher':
         return redirect(url_for('login'))
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     teacher_id = (session.get('user_id') or '').strip()
     test_row = get_cbt_test(school_id, test_id)
     if not test_row:
@@ -30531,7 +30668,10 @@ def school_admin_cbt():
         flash('CBT module is not available right now. Please retry.', 'error')
         return redirect(url_for('school_admin_dashboard'))
 
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     school = get_school(school_id) or {}
     current_term = get_current_term(school)
     current_year = str((school or {}).get('academic_year', '') or '').strip()
@@ -30584,7 +30724,10 @@ def school_admin_cbt_create():
         flash('CBT module is not available right now. Please retry.', 'error')
         return redirect(url_for('school_admin_cbt'))
 
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     try:
         test_id = create_cbt_test(
             school_id=school_id,
@@ -30616,7 +30759,10 @@ def school_admin_cbt_questions(test_id):
     if not ensure_cbt_schema():
         flash('CBT module is not available right now. Please retry.', 'error')
         return redirect(url_for('school_admin_cbt'))
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     school = get_school(school_id) or {}
     test_row = get_cbt_test(school_id, test_id)
     if not test_row:
@@ -30641,7 +30787,10 @@ def school_admin_cbt_add_question(test_id):
         flash('CBT module is not available right now. Please retry.', 'error')
         return redirect(url_for('school_admin_cbt'))
 
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     test_row = get_cbt_test(school_id, test_id)
     if not test_row:
         flash('CBT test not found.', 'error')
@@ -30689,7 +30838,10 @@ def school_admin_cbt_delete_question(test_id):
         flash('CBT module is not available right now. Please retry.', 'error')
         return redirect(url_for('school_admin_cbt'))
 
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     counts = get_cbt_attempt_counts(school_id, test_id)
     if safe_int(counts.get('submitted'), 0) > 0:
         flash('Questions cannot be edited because students already submitted this CBT.', 'error')
@@ -30709,7 +30861,10 @@ def school_admin_cbt_set_status(test_id):
     if not ensure_cbt_schema():
         flash('CBT module is not available right now. Please retry.', 'error')
         return redirect(url_for('school_admin_cbt'))
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     test_row = get_cbt_test(school_id, test_id)
     if not test_row:
         flash('CBT test not found.', 'error')
@@ -31153,7 +31308,10 @@ def school_admin_settings():
 def school_admin_new_term_wizard():
     if session.get('role') != 'school_admin':
         return redirect(url_for('login'))
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     school = get_school(school_id) or {}
     current_term = get_current_term(school)
     current_year = (school.get('academic_year', '') or '').strip()
@@ -31601,7 +31759,7 @@ def school_admin_change_password():
         
         # Update password
         password_hash = hash_password(new_password)
-        upsert_user(session.get('user_id'), password_hash, 'school_admin', session.get('school_id'))
+        upsert_user(session.get('user_id'), password_hash, 'school_admin', _normalize_school_id_text(session.get('school_id')))
         session.pop('force_password_change', None)
         
         flash('Password changed successfully!', 'success')
@@ -31642,8 +31800,11 @@ def school_admin_add_teacher():
     if session.get('role') != 'school_admin':
         return redirect(url_for('login'))
     
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
     fallback_redirect = request.referrer or url_for('school_admin_dashboard')
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     username = request.form.get('username', '').strip().lower()
     firstname = normalize_person_name(request.form.get('firstname', '').strip())
     lastname = normalize_person_name(request.form.get('lastname', '').strip())
@@ -31842,7 +32003,10 @@ def school_admin_promote():
 def school_admin_promotion_audit():
     if session.get('role') != 'school_admin':
         return redirect(url_for('login'))
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     ensure_extended_features_schema()
     classname = (request.args.get('classname', '') or '').strip()
     action = (request.args.get('action', '') or '').strip().lower()
@@ -31884,7 +32048,10 @@ def school_admin_promotion_audit():
 def school_admin_timetable():
     if session.get('role') != 'school_admin':
         return redirect(url_for('login'))
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     ensure_extended_features_schema()
     school = get_school(school_id) or {}
     current_term = get_current_term(school)
@@ -32968,7 +33135,10 @@ def school_admin_bulk_tools():
     if session.get('role') != 'school_admin':
         return redirect(url_for('login'))
     error_token = (request.args.get('error_token', '') or '').strip()
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     schedule = get_backup_schedule_settings(school_id)
     storage_usage = compute_school_storage_usage(school_id)
     backup_health = get_backup_health_summary(school_id, days=30)
@@ -33336,7 +33506,10 @@ def school_admin_attendance_summary():
 def school_admin_timetable_coverage():
     if session.get('role') != 'school_admin':
         return redirect(url_for('login'))
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     school = get_school(school_id) or {}
     with db_connection() as conn:
         c = conn.cursor()
@@ -33546,7 +33719,10 @@ def school_admin_export_target(target):
 def school_admin_import_target(target):
     if session.get('role') != 'school_admin':
         return redirect(url_for('login'))
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     target_key = (target or '').strip().lower()
     dry_run = (request.form.get('dry_run', '') or '').strip().lower() in {'1', 'true', 'yes', 'on'}
     file = request.files.get('file')
@@ -33973,7 +34149,10 @@ def school_admin_backup():
 def school_admin_backup_encrypted():
     if session.get('role') != 'school_admin':
         return redirect(url_for('login'))
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     passphrase = (request.form.get('backup_passphrase', '') or '').strip()
     def _redirect_target():
         target = (request.args.get('return_to', '') or request.form.get('return_to', '')).strip().lower()
@@ -34007,7 +34186,10 @@ def school_admin_restore():
         if target in {'recovery', 'recovery_drill', 'drill'}:
             return 'school_admin_disaster_recovery_drill'
         return 'school_admin_bulk_tools'
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     mode = (request.form.get('mode', 'merge') or 'merge').strip().lower()
     dry_run = (request.form.get('dry_run', '') or '').strip().lower() in {'1', 'true', 'yes', 'on'}
     file = request.files.get('backup_file')
@@ -34324,7 +34506,10 @@ def school_admin_disaster_recovery_drill():
     if session.get('role') != 'school_admin':
         return redirect(url_for('login'))
     ensure_extended_features_schema()
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     school = get_school(school_id) or {}
     backup_schedule = get_backup_schedule_settings(school_id)
     backup_health = get_backup_health_summary(school_id, days=30)
@@ -34464,7 +34649,10 @@ def school_admin_add_students_by_class():
     if session.get('role') != 'school_admin':
         return redirect(url_for('login'))
     
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     school = get_school(school_id) or {}
     added_students = []
     selected_class = canonicalize_classname((request.args.get('class', '') or '').strip())
@@ -34986,7 +35174,10 @@ def school_admin_send_student_message():
     if session.get('role') != 'school_admin':
         return redirect(url_for('login'))
 
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     admin_user_id = session.get('user_id')
     title = (request.form.get('title', '') or '').strip()
     message = (request.form.get('message', '') or '').strip()
@@ -36609,7 +36800,10 @@ def teacher_send_student_message():
     if session.get('role') != 'teacher':
         return redirect(url_for('login'))
 
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     teacher_id = session.get('user_id')
     school = get_school(school_id) or {}
     current_term = get_current_term(school)
@@ -36708,7 +36902,10 @@ def teacher_send_student_message():
 def teacher_mark_message_read():
     if session.get('role') != 'teacher':
         return redirect(url_for('login'))
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     teacher_id = session.get('user_id')
     message_id_raw = (request.form.get('message_id', '') or '').strip()
     try:
@@ -36727,7 +36924,10 @@ def teacher_mark_message_read():
 def teacher_mark_all_messages_read():
     if session.get('role') != 'teacher':
         return redirect(url_for('login'))
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     teacher_id = session.get('user_id')
     school = get_school(school_id) or {}
     current_term = get_current_term(school)
@@ -36759,7 +36959,10 @@ def teacher_messages():
     if session.get('role') != 'teacher':
         return redirect(url_for('login'))
 
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     teacher_id = session.get('user_id')
     school = get_school(school_id) or {}
     current_term = get_current_term(school)
@@ -36802,7 +37005,10 @@ def teacher_messages():
 def teacher_assistant_analytics():
     if session.get('role') != 'teacher':
         return redirect(url_for('login'))
-    school_id = (session.get('school_id') or '').strip()
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     teacher_id = (session.get('user_id') or '').strip().lower()
     school = get_school(school_id) or {}
     teacher = get_teacher(school_id, teacher_id) or {}
@@ -36855,7 +37061,10 @@ def teacher_attendance():
     if session.get('role') != 'teacher':
         return redirect(url_for('login'))
 
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     teacher_id = session.get('user_id')
     school = get_school(school_id) or {}
     current_term = get_current_term(school)
@@ -36991,7 +37200,10 @@ def teacher_attendance():
 def teacher_behaviour_assessment():
     if session.get('role') != 'teacher':
         return redirect(url_for('login'))
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     teacher_id = session.get('user_id')
     school = get_school(school_id) or {}
     current_term = get_current_term(school)
@@ -37065,12 +37277,15 @@ def teacher_behaviour_assessment():
 def teacher_update_profile():
     if session.get('role') != 'teacher':
         return redirect(url_for('login'))
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
     teacher_id = session.get('user_id')
     phone = (request.form.get('phone', '') or '').strip()
     if phone and not re.fullmatch(r'^[0-9+\-\s()]{7,25}$', phone):
         flash('Invalid phone number format.', 'error')
         return redirect(url_for('teacher_dashboard'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     with db_connection(commit=True) as conn:
         c = conn.cursor()
         db_execute(
@@ -37085,8 +37300,11 @@ def teacher_update_profile():
 def teacher_upload_signature():
     if session.get('role') != 'teacher':
         return redirect(url_for('login'))
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
     teacher_id = session.get('user_id')
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     school = get_school(school_id) or {}
     current_term = get_current_term(school)
     current_year = (school or {}).get('academic_year', '')
@@ -37111,8 +37329,11 @@ def teacher_upload_signature():
 def teacher_upload_profile_image():
     if session.get('role') != 'teacher':
         return redirect(url_for('login'))
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
     teacher_id = session.get('user_id')
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     image_data, err = parse_uploaded_profile_image(request.files.get('profile_image'))
     if err:
         flash(err, 'error')
@@ -37128,8 +37349,11 @@ def teacher_publish_results():
     if session.get('role') != 'teacher':
         return redirect(url_for('login'))
 
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
     teacher_id = session.get('user_id')
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     classname = canonicalize_classname(request.form.get('classname', '').strip())
     if not classname:
         flash('Select a class to submit for approval.', 'error')
@@ -37245,8 +37469,11 @@ def teacher_publish_results():
 def teacher_submit_to_class_teacher():
     if session.get('role') != 'teacher':
         return redirect(url_for('login'))
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
     teacher_id = session.get('user_id')
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     classname = canonicalize_classname((request.form.get('classname', '') or '').strip())
     if not classname:
         flash('Class is required.', 'error')
@@ -37498,8 +37725,11 @@ def school_admin_relock_term_edit():
 def school_admin_reset_class_student_passwords():
     if session.get('role') != 'school_admin':
         return redirect(url_for('login'))
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
     admin_user_id = session.get('user_id')
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     classname = canonicalize_classname((request.form.get('classname', '') or '').strip())
     if not classname:
         flash('Class is required for password reset.', 'error')
@@ -37520,8 +37750,11 @@ def school_admin_reset_class_student_passwords():
 def school_admin_archive_student():
     if session.get('role') != 'school_admin':
         return redirect(url_for('login'))
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
     student_id = (request.form.get('student_id', '') or '').strip()
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     if not student_id:
         flash('Student ID is required.', 'error')
         return redirect(safe_referrer_or(url_for('school_admin_add_students_by_class')))
@@ -37533,8 +37766,11 @@ def school_admin_archive_student():
 def school_admin_restore_student():
     if session.get('role') != 'school_admin':
         return redirect(url_for('login'))
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
     student_id = (request.form.get('student_id', '') or '').strip()
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     if not student_id:
         flash('Student ID is required.', 'error')
         return redirect(safe_referrer_or(url_for('school_admin_add_students_by_class')))
@@ -37546,8 +37782,11 @@ def school_admin_restore_student():
 def school_admin_archive_teacher():
     if session.get('role') != 'school_admin':
         return redirect(url_for('login'))
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
     teacher_id = (request.form.get('teacher_id', '') or '').strip().lower()
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     if not teacher_id:
         flash('Teacher ID is required.', 'error')
         return redirect(safe_referrer_or(url_for('school_admin_dashboard')))
@@ -37559,8 +37798,11 @@ def school_admin_archive_teacher():
 def school_admin_restore_teacher():
     if session.get('role') != 'school_admin':
         return redirect(url_for('login'))
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
     teacher_id = (request.form.get('teacher_id', '') or '').strip().lower()
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     if not teacher_id:
         flash('Teacher ID is required.', 'error')
         return redirect(safe_referrer_or(url_for('school_admin_dashboard')))
@@ -37573,8 +37815,11 @@ def teacher_allocate_stream():
     if session.get('role') != 'teacher':
         return redirect(url_for('login'))
 
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
     teacher_id = session.get('user_id')
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     school = get_school(school_id) or {}
     current_term = get_current_term(school)
     current_year = school.get('academic_year', '')
@@ -37700,8 +37945,11 @@ def teacher_enter_scores():
     if session.get('role') != 'teacher':
         return redirect(url_for('login'))
     
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
     teacher_id = session.get('user_id')
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     school = get_school(school_id)
     current_term = get_current_term(school)
     current_year = (school or {}).get('academic_year', '')
@@ -38122,8 +38370,11 @@ def teacher_upload_csv():
     if session.get('role') != 'teacher':
         return redirect(url_for('login'))
     
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
     teacher_id = session.get('user_id')
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     school = get_school(school_id) or {}
     teacher_profile = get_teachers(school_id).get(teacher_id, {})
     current_term = get_current_term(school)
@@ -38893,7 +39144,7 @@ def student_change_password():
         return redirect(url_for('login'))
 
     username = session.get('user_id')
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
     user = get_user(username)
     if not user or (user.get('role') or '').strip().lower() != 'student':
         flash('Student account not found.', 'error')
@@ -38937,8 +39188,11 @@ def student_change_password():
 def student_profile():
     if session.get('role') != 'student':
         return redirect(url_for('login'))
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
     student_id = session.get('user_id')
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     student = load_student(school_id, student_id)
     if not student:
         flash('Student data not found.', 'error')
@@ -38994,8 +39248,11 @@ def student_profile():
 def student_subject_requests():
     if session.get('role') != 'student':
         return redirect(url_for('login'))
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
     student_id = session.get('user_id')
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     student = load_student(school_id, student_id)
     if not student:
         flash('Student data not found.', 'error')
@@ -39228,8 +39485,10 @@ def student_cbt_autosave(test_id):
         return jsonify({'ok': False, 'error': 'unauthorized'}), 403
     if not ensure_cbt_schema():
         return jsonify({'ok': False, 'error': 'cbt_unavailable'}), 503
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
     student_id = session.get('user_id')
+    if not school_id or not student_id:
+        return jsonify({'ok': False, 'error': 'school_session_missing'}), 401
     student = load_student(school_id, student_id)
     if not student:
         return jsonify({'ok': False, 'error': 'student_not_found'}), 404
@@ -39301,8 +39560,11 @@ def student_cbt_autosave(test_id):
 def student_update_parent_access():
     if session.get('role') != 'student':
         return redirect(url_for('login'))
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
     student_id = session.get('user_id')
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
     student = load_student(school_id, student_id)
     if not student:
         flash('Student data not found.', 'error')

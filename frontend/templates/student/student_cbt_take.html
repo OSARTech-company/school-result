@@ -613,6 +613,33 @@
             autosaveStatus.style.borderColor = isError ? '#fecaca' : '#cfe0f8';
             autosaveStatus.style.background = isError ? '#fef2f2' : '#eef5ff';
         }
+        function parseMaybeJsonResponse(resp) {
+            return resp.text().then(function (text) {
+                var raw = String(text || '');
+                var contentType = String(resp.headers.get('content-type') || '').toLowerCase();
+                var looksJson = contentType.indexOf('application/json') >= 0 || contentType.indexOf('+json') >= 0;
+                if (!looksJson) {
+                    var trimmed = raw.trim();
+                    if (trimmed && trimmed.charAt(0) === '{') {
+                        looksJson = true;
+                    }
+                }
+                if (!looksJson) {
+                    var plain = raw.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+                    if (!plain) {
+                        plain = 'Draft save pending...';
+                    } else if (plain.length > 220) {
+                        plain = plain.slice(0, 220);
+                    }
+                    throw new Error(plain);
+                }
+                try {
+                    return JSON.parse(raw || '{}');
+                } catch (_err) {
+                    throw new Error('Autosave returned an invalid JSON payload.');
+                }
+            });
+        }
         function setModalMessage(text) {
             if (modalMessageNode) {
                 modalMessageNode.textContent = text;
@@ -639,11 +666,15 @@
             });
             fetch(autosaveUrl, {
                 method: 'POST',
+                headers: {
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
                 body: body,
                 credentials: 'same-origin',
                 keepalive: !!force
             }).then(function (resp) {
-                return resp.json().catch(function () { return { ok: false }; });
+                return parseMaybeJsonResponse(resp).catch(function () { return { ok: false }; });
             }).then(function (payload) {
                 if (payload && payload.ok) {
                     lastAutosaveAtMs = Date.now();
