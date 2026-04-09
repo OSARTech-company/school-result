@@ -4820,6 +4820,7 @@ _STUDENTS_PROMOTED_IS_BOOL = None
 _STUDENTS_HAS_USER_ID = None
 _STUDENTS_HAS_PARENT_ACCESS_COLS = None
 _STUDENTS_HAS_PARENT_MULTI_COLS = None
+_STUDENTS_HAS_EMAIL_COL = None
 _STUDENTS_HAS_ARCHIVE_COLS = None
 _STUDENTS_HAS_PHONE_COL = None
 _TEACHERS_HAS_ARCHIVE_COLS = None
@@ -4904,6 +4905,28 @@ def students_has_parent_multi_access_columns():
     except Exception:
         _STUDENTS_HAS_PARENT_MULTI_COLS = False
     return _STUDENTS_HAS_PARENT_MULTI_COLS
+
+def students_has_email_column():
+    """Detect whether students.email exists."""
+    global _STUDENTS_HAS_EMAIL_COL
+    if _STUDENTS_HAS_EMAIL_COL is not None:
+        return _STUDENTS_HAS_EMAIL_COL
+    try:
+        with db_connection() as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """SELECT 1
+                   FROM information_schema.columns
+                   WHERE table_schema = 'public'
+                     AND table_name = 'students'
+                     AND column_name = 'email'
+                   LIMIT 1""",
+            )
+            _STUDENTS_HAS_EMAIL_COL = bool(c.fetchone())
+    except Exception:
+        _STUDENTS_HAS_EMAIL_COL = False
+    return _STUDENTS_HAS_EMAIL_COL
 
 def students_has_phone_column():
     """Detect whether students.student_phone exists."""
@@ -7427,8 +7450,12 @@ def save_student_with_cursor(c, school_id, student_id, student_data, school_for_
     parent_gender_2 = normalize_parent_gender(student_data.get('parent_gender_2', ''))
     has_parent_cols = students_has_parent_access_columns()
     has_parent_multi_cols = students_has_parent_multi_access_columns()
+    has_email_col = students_has_email_column()
     promoted_value = normalize_promoted_db_value(student_data.get('promoted', 0))
     has_phone_col = students_has_phone_column()
+    email_insert_col = ", email" if has_email_col else ""
+    email_update_col = " email = excluded.email," if has_email_col else ""
+    email_value = [email] if has_email_col else []
     phone_insert_col = ", student_phone" if has_phone_col else ""
     phone_update_col = " student_phone = excluded.student_phone," if has_phone_col else ""
     phone_value = [student_phone] if has_phone_col else []
@@ -7476,12 +7503,12 @@ def save_student_with_cursor(c, school_id, student_id, student_data, school_for_
         db_execute(
             c,
             f"""INSERT INTO students
-                   (user_id, school_id, student_id, firstname, email, date_of_birth, gender, classname, first_year_class, term, stream,
+                   (user_id, school_id, student_id, firstname{email_insert_col}, date_of_birth, gender, classname, first_year_class, term, stream,
                     number_of_subject, subjects, scores, promoted{phone_insert_col}{parent_insert_cols})
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?{phone_insert_col and ', ?' or ''}{parent_placeholders})
+                   VALUES (?, ?, ?, ?{', ?' if has_email_col else ''}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?{phone_insert_col and ', ?' or ''}{parent_placeholders})
                    ON CONFLICT(school_id, student_id) DO UPDATE SET
                      firstname = excluded.firstname,
-                     email = excluded.email,
+                     {email_update_col}
                      {phone_update_col}
                      date_of_birth = excluded.date_of_birth,
                      gender = excluded.gender,
@@ -7499,7 +7526,7 @@ def save_student_with_cursor(c, school_id, student_id, student_data, school_for_
                 school_id,
                 student_id,
                 firstname,
-                email,
+            ] + email_value + [
                 date_of_birth,
                 gender,
                 student_data['classname'],
@@ -7516,12 +7543,12 @@ def save_student_with_cursor(c, school_id, student_id, student_data, school_for_
         db_execute(
             c,
             f"""INSERT INTO students
-                   (school_id, student_id, firstname, email, date_of_birth, gender, classname, first_year_class, term, stream,
+                   (school_id, student_id, firstname{email_insert_col}, date_of_birth, gender, classname, first_year_class, term, stream,
                     number_of_subject, subjects, scores, promoted{phone_insert_col}{parent_insert_cols})
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?{phone_insert_col and ', ?' or ''}{parent_placeholders})
+                   VALUES (?, ?, ?{', ?' if has_email_col else ''}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?{phone_insert_col and ', ?' or ''}{parent_placeholders})
                    ON CONFLICT(school_id, student_id) DO UPDATE SET
                      firstname = excluded.firstname,
-                     email = excluded.email,
+                     {email_update_col}
                      {phone_update_col}
                      date_of_birth = excluded.date_of_birth,
                      gender = excluded.gender,
@@ -7537,7 +7564,7 @@ def save_student_with_cursor(c, school_id, student_id, student_data, school_for_
                 school_id,
                 student_id,
                 firstname,
-                email,
+            ] + email_value + [
                 date_of_birth,
                 gender,
                 student_data['classname'],
@@ -13906,18 +13933,25 @@ def run_school_backup_dry_run(school_id, actor_user_id='', actor_role='super_adm
         raise ValueError('School ID is required.')
     ensure_extended_features_schema()
     started = datetime.now()
-    payload = build_school_backup_payload(sid)
-    payload_json = json.dumps(payload)
-    verify = verify_backup_payload_summary(payload)
+    school = get_school(sid) or {}
+    if not school:
+        raise ValueError('School not found for backup drill.')
+    summary = build_school_backup_drill_summary(sid, school=school)
+    verify = verify_backup_payload_summary(summary)
     missing_sections = verify.get('missing_sections', []) if isinstance(verify, dict) else []
     ok = bool(verify.get('ok')) if isinstance(verify, dict) else False
     duration_ms = int((datetime.now() - started).total_seconds() * 1000)
     result = {
         'ok': ok,
+        'checked_at': format_timestamp(datetime.now()),
         'duration_ms': duration_ms,
         'missing_sections': list(missing_sections),
-        'backup_size_bytes': len(payload_json.encode('utf-8')),
+        'backup_size_bytes': int(summary.get('backup_size_bytes') or 0),
         'error_text': '',
+        'students_count': int(summary.get('students_count') or 0),
+        'teachers_count': int(summary.get('teachers_count') or 0),
+        'parents_count': int(summary.get('parents_count') or 0),
+        'messages_count': int(summary.get('messages_count') or 0),
     }
     with db_connection(commit=True) as conn:
         c = conn.cursor()
@@ -13938,6 +13972,79 @@ def run_school_backup_dry_run(school_id, actor_user_id='', actor_role='super_adm
             ),
         )
     return result
+
+
+def build_school_backup_drill_summary(school_id, school=None):
+    sid = (school_id or '').strip()
+    if not sid:
+        raise ValueError('School ID is required.')
+    school_data = school if isinstance(school, dict) and school else get_school(sid) or {}
+    if not school_data:
+        raise ValueError('School not found for backup drill.')
+    counts = {
+        'students_count': 0,
+        'teachers_count': 0,
+        'parents_count': 0,
+        'messages_count': 0,
+    }
+    missing_sections = []
+    with db_connection() as conn:
+        c = conn.cursor()
+        if _backup_table_exists(c, 'students'):
+            db_execute(c, 'SELECT COUNT(*) FROM students WHERE school_id = ?', (sid,))
+            counts['students_count'] = int((c.fetchone() or [0])[0] or 0)
+        if counts['students_count'] == 0:
+            missing_sections.append('students')
+
+        if _backup_table_exists(c, 'teachers'):
+            db_execute(c, 'SELECT COUNT(*) FROM teachers WHERE school_id = ?', (sid,))
+            counts['teachers_count'] = int((c.fetchone() or [0])[0] or 0)
+        if counts['teachers_count'] == 0:
+            missing_sections.append('teachers')
+
+        if _backup_table_exists(c, 'students') and _backup_table_has_column(c, 'students', 'parent_phone'):
+            phone_queries = []
+            params = [sid]
+            phone_queries.append("SELECT TRIM(COALESCE(parent_phone, '')) AS phone FROM students WHERE school_id = ? AND TRIM(COALESCE(parent_phone, '')) <> ''")
+            if _backup_table_has_column(c, 'students', 'parent_phone_2'):
+                phone_queries.append("SELECT TRIM(COALESCE(parent_phone_2, '')) AS phone FROM students WHERE school_id = ? AND TRIM(COALESCE(parent_phone_2, '')) <> ''")
+                params.append(sid)
+            if phone_queries:
+                db_execute(
+                    c,
+                    f"""SELECT COUNT(DISTINCT phone)
+                        FROM (
+                            {' UNION ALL '.join(phone_queries)}
+                        ) AS parent_phone_list""",
+                    tuple(params),
+                )
+                counts['parents_count'] = int((c.fetchone() or [0])[0] or 0)
+        if counts['parents_count'] == 0:
+            missing_sections.append('parents')
+
+        message_count = 0
+        if _backup_table_exists(c, 'student_messages'):
+            db_execute(c, 'SELECT COUNT(*) FROM student_messages WHERE school_id = ?', (sid,))
+            message_count += int((c.fetchone() or [0])[0] or 0)
+        if _backup_table_exists(c, 'teacher_messages'):
+            db_execute(c, 'SELECT COUNT(*) FROM teacher_messages WHERE school_id = ?', (sid,))
+            message_count += int((c.fetchone() or [0])[0] or 0)
+        counts['messages_count'] = message_count
+        if counts['messages_count'] == 0:
+            missing_sections.append('messages')
+
+    summary_payload = {
+        'backup_version': BACKUP_VERSION_CURRENT,
+        'created_at': datetime.now().isoformat(),
+        'school_id': sid,
+        'school': school_data,
+        **counts,
+        'missing_sections': list(missing_sections),
+    }
+    summary_payload['backup_size_bytes'] = len(
+        json.dumps(summary_payload, sort_keys=True, ensure_ascii=True).encode('utf-8')
+    )
+    return summary_payload
 
 
 def get_latest_school_backup_drill(school_id):
@@ -16213,6 +16320,41 @@ def mark_backup_generated(school_id):
 
 def verify_backup_payload_summary(payload):
     required_sections = {'school', 'students', 'teachers', 'parents', 'messages'}
+    if isinstance(payload, dict) and any(key.endswith('_count') for key in payload.keys()):
+        students_count = int(payload.get('students_count') or 0)
+        teachers_count = int(payload.get('teachers_count') or 0)
+        parents_count = int(payload.get('parents_count') or 0)
+        messages_count = int(payload.get('messages_count') or 0)
+        missing = list(payload.get('missing_sections') or [])
+        if not payload.get('school'):
+            missing.append('school')
+        if students_count == 0 and 'students' not in missing:
+            missing.append('students')
+        if teachers_count == 0 and 'teachers' not in missing:
+            missing.append('teachers')
+        if parents_count == 0 and 'parents' not in missing:
+            missing.append('parents')
+        if messages_count == 0 and 'messages' not in missing:
+            missing.append('messages')
+        missing = sorted(set(missing))
+        warnings = []
+        if students_count == 0:
+            warnings.append('Backup contains zero students.')
+        if teachers_count == 0:
+            warnings.append('Backup contains zero teachers.')
+        if parents_count == 0:
+            warnings.append('Backup contains zero parents.')
+        if messages_count == 0:
+            warnings.append('Backup contains zero messages.')
+        return {
+            'ok': len(missing) == 0,
+            'missing_sections': missing,
+            'students_count': students_count,
+            'teachers_count': teachers_count,
+            'parents_count': parents_count,
+            'messages_count': messages_count,
+            'warnings': warnings,
+        }
     present = set(payload.keys()) if isinstance(payload, dict) else set()
     missing = sorted([s for s in required_sections if s not in present])
     students_count = len(payload.get('students') or []) if isinstance(payload, dict) and isinstance(payload.get('students'), list) else 0
@@ -19738,24 +19880,26 @@ def load_students(school_id, class_filter='', term_filter='', include_archived=F
     """Load students for a school."""
     has_parent_cols = students_has_parent_access_columns()
     has_parent_multi_cols = students_has_parent_multi_access_columns()
+    has_email_col = students_has_email_column()
     has_archive_cols = students_has_archive_columns()
     has_phone_col = students_has_phone_column()
+    email_col = 'email' if has_email_col else "'' AS email"
     with db_connection() as conn:
         c = conn.cursor()
         if has_parent_cols:
             archive_col = ', COALESCE(is_archived, 0)' if has_archive_cols else ''
             phone_col = ', student_phone' if has_phone_col else ''
             if has_parent_multi_cols:
-                query = f"""SELECT student_id, firstname, email, date_of_birth, gender, classname, first_year_class, term, stream,
+                query = f"""SELECT student_id, firstname, {email_col}, date_of_birth, gender, classname, first_year_class, term, stream,
                             number_of_subject, subjects, scores, promoted, parent_phone, parent_password_hash, parent_name, parent_gender,
                             parent_name_2, parent_phone_2, parent_password_hash_2, parent_gender_2{archive_col}{phone_col}
                             FROM students WHERE school_id = ?"""
             else:
-                query = f'SELECT student_id, firstname, email, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects, scores, promoted, parent_phone, parent_password_hash{archive_col}{phone_col} FROM students WHERE school_id = ?'
+                query = f'SELECT student_id, firstname, {email_col}, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects, scores, promoted, parent_phone, parent_password_hash{archive_col}{phone_col} FROM students WHERE school_id = ?'
         else:
             archive_col = ', COALESCE(is_archived, 0)' if has_archive_cols else ''
             phone_col = ', student_phone' if has_phone_col else ''
-            query = f'SELECT student_id, firstname, email, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects, scores, promoted{archive_col}{phone_col} FROM students WHERE school_id = ?'
+            query = f'SELECT student_id, firstname, {email_col}, date_of_birth, gender, classname, first_year_class, term, stream, number_of_subject, subjects, scores, promoted{archive_col}{phone_col} FROM students WHERE school_id = ?'
         params = [school_id]
         
         if class_filter:
@@ -19855,8 +19999,10 @@ def load_students_for_classes(school_id, classnames, term_filter='', include_arc
         return {}
     has_parent_cols = students_has_parent_access_columns()
     has_parent_multi_cols = students_has_parent_multi_access_columns()
+    has_email_col = students_has_email_column()
     has_archive_cols = students_has_archive_columns()
     has_phone_col = students_has_phone_column()
+    email_col = 'email' if has_email_col else "'' AS email"
     with db_connection() as conn:
         c = conn.cursor()
         placeholders = ','.join(['?'] * len(class_list))
@@ -19865,13 +20011,13 @@ def load_students_for_classes(school_id, classnames, term_filter='', include_arc
             phone_col = ', student_phone' if has_phone_col else ''
             if has_parent_multi_cols:
                 query = (
-                    'SELECT student_id, firstname, email, date_of_birth, gender, classname, first_year_class, term, stream, '
+                    f'SELECT student_id, firstname, {email_col}, date_of_birth, gender, classname, first_year_class, term, stream, '
                     f'number_of_subject, subjects, scores, promoted, parent_phone, parent_password_hash, parent_name, parent_gender, parent_name_2, parent_phone_2, parent_password_hash_2, parent_gender_2{archive_col}{phone_col} '
                     f"FROM students WHERE school_id = ? AND REGEXP_REPLACE(UPPER(COALESCE(classname, '')), '[^A-Z0-9]+', '', 'g') IN ({placeholders})"
                 )
             else:
                 query = (
-                    'SELECT student_id, firstname, email, date_of_birth, gender, classname, first_year_class, term, stream, '
+                    f'SELECT student_id, firstname, {email_col}, date_of_birth, gender, classname, first_year_class, term, stream, '
                     f'number_of_subject, subjects, scores, promoted, parent_phone, parent_password_hash{archive_col}{phone_col} '
                     f"FROM students WHERE school_id = ? AND REGEXP_REPLACE(UPPER(COALESCE(classname, '')), '[^A-Z0-9]+', '', 'g') IN ({placeholders})"
                 )
@@ -19879,7 +20025,7 @@ def load_students_for_classes(school_id, classnames, term_filter='', include_arc
             archive_col = ', COALESCE(is_archived, 0)' if has_archive_cols else ''
             phone_col = ', student_phone' if has_phone_col else ''
             query = (
-                'SELECT student_id, firstname, email, date_of_birth, gender, classname, first_year_class, term, stream, '
+                f'SELECT student_id, firstname, {email_col}, date_of_birth, gender, classname, first_year_class, term, stream, '
                 f'number_of_subject, subjects, scores, promoted{archive_col}{phone_col} '
                 f"FROM students WHERE school_id = ? AND REGEXP_REPLACE(UPPER(COALESCE(classname, '')), '[^A-Z0-9]+', '', 'g') IN ({placeholders})"
             )
@@ -20025,8 +20171,10 @@ def load_student(school_id, student_id, include_archived=False):
     """Load a single student."""
     has_parent_cols = students_has_parent_access_columns()
     has_parent_multi_cols = students_has_parent_multi_access_columns()
+    has_email_col = students_has_email_column()
     has_archive_cols = students_has_archive_columns()
     has_phone_col = students_has_phone_column()
+    email_col = 'email' if has_email_col else "'' AS email"
     with db_connection() as conn:
         c = conn.cursor()
         if has_parent_cols:
@@ -20034,13 +20182,13 @@ def load_student(school_id, student_id, include_archived=False):
             archive_col = ', COALESCE(is_archived, 0)' if has_archive_cols else ''
             phone_col = ', student_phone' if has_phone_col else ''
             if has_parent_multi_cols:
-                db_execute(c, f"""SELECT student_id, firstname, email, date_of_birth, gender, classname, first_year_class, term, stream,
+                db_execute(c, f"""SELECT student_id, firstname, {email_col}, date_of_birth, gender, classname, first_year_class, term, stream,
                                number_of_subject, subjects, scores, promoted, parent_phone, parent_password_hash, parent_name, parent_gender,
                                parent_name_2, parent_phone_2, parent_password_hash_2, parent_gender_2{archive_col}{phone_col} FROM students
                                WHERE school_id = ? AND student_id = ?{archived_sql}""",
                            (school_id, student_id))
             else:
-                db_execute(c, f"""SELECT student_id, firstname, email, date_of_birth, gender, classname, first_year_class, term, stream,
+                db_execute(c, f"""SELECT student_id, firstname, {email_col}, date_of_birth, gender, classname, first_year_class, term, stream,
                                number_of_subject, subjects, scores, promoted, parent_phone, parent_password_hash{archive_col}{phone_col} FROM students
                                WHERE school_id = ? AND student_id = ?{archived_sql}""",
                            (school_id, student_id))
@@ -20048,7 +20196,7 @@ def load_student(school_id, student_id, include_archived=False):
             archived_sql = '' if (include_archived or not has_archive_cols) else ' AND COALESCE(is_archived, 0) = 0'
             archive_col = ', COALESCE(is_archived, 0)' if has_archive_cols else ''
             phone_col = ', student_phone' if has_phone_col else ''
-            db_execute(c, f"""SELECT student_id, firstname, email, date_of_birth, gender, classname, first_year_class, term, stream, 
+            db_execute(c, f"""SELECT student_id, firstname, {email_col}, date_of_birth, gender, classname, first_year_class, term, stream, 
                            number_of_subject, subjects, scores, promoted{archive_col}{phone_col} FROM students 
                            WHERE school_id = ? AND student_id = ?{archived_sql}""",
                        (school_id, student_id))
@@ -30680,6 +30828,11 @@ def school_admin_settings():
             flash('Settings were changed by another admin. Reload page and apply your changes again.', 'error')
             return redirect(url_for('school_admin_settings', calendar_term=calendar_target_term, calendar_year=calendar_target_year))
 
+        # Make sure the optional tables/columns used by this screen exist before saving.
+        ensure_school_access_schema()
+        ensure_school_term_calendar_schema()
+        ensure_extended_features_schema()
+
         open_date = (request.form.get('term_open_date', '') or '').strip()
         close_date = (request.form.get('term_close_date', '') or '').strip()
         next_term_begin_date = (request.form.get('next_term_begin_date', '') or '').strip()
@@ -30856,11 +31009,20 @@ def school_admin_settings():
                 )
                 return redirect(url_for('school_admin_settings'))
         rollover_affected_rows = 0
+        save_warnings = []
         try:
             with db_connection(commit=True) as conn:
                 c = conn.cursor()
                 update_school_settings_with_cursor(c, school_id, settings)
-                if changed_term_or_year:
+        except Exception:
+            logging.exception("Failed to update school settings.")
+            flash('Failed to update school settings. Please retry.', 'error')
+            return redirect(url_for('school_admin_settings'))
+
+        if changed_term_or_year:
+            try:
+                with db_connection(commit=True) as conn:
+                    c = conn.cursor()
                     rollover_affected_rows = rollover_school_term_data_with_cursor(
                         c,
                         school_id=school_id,
@@ -30869,7 +31031,14 @@ def school_admin_settings():
                         from_year=previous_year,
                         to_year=new_year,
                     )
-                for cfg in assessment_updates:
+            except Exception as exc:
+                logging.exception("Term/year rollover failed for school settings.")
+                save_warnings.append(f'Term/year rollover skipped: {exc}')
+
+        for cfg in assessment_updates:
+            try:
+                with db_connection(commit=True) as conn:
+                    c = conn.cursor()
                     save_assessment_config_with_cursor(
                         c,
                         school_id=school_id,
@@ -30879,6 +31048,13 @@ def school_admin_settings():
                         theory_max=cfg['theory_max'],
                         exam_score_max=cfg['exam_score_max'],
                     )
+            except Exception as exc:
+                logging.exception("Assessment config save failed for level %s.", cfg.get('level'))
+                save_warnings.append(f"{str(cfg.get('level', '')).upper()} assessment settings were not saved: {exc}")
+
+        try:
+            with db_connection(commit=True) as conn:
+                c = conn.cursor()
                 save_school_term_calendar_with_cursor(
                     c,
                     school_id=school_id,
@@ -30890,10 +31066,9 @@ def school_admin_settings():
                     break_end=break_end,
                     next_term_begin_date=next_term_begin_date,
                 )
-        except Exception:
-            logging.exception("Failed to update school settings.")
-            flash('Failed to update school settings. Please retry.', 'error')
-            return redirect(url_for('school_admin_settings'))
+        except Exception as exc:
+            logging.exception("School term calendar save failed.")
+            save_warnings.append(f'School term calendar was not saved: {exc}')
 
         if changed_term_or_year:
             log_promotion_audit_row(
@@ -30912,6 +31087,8 @@ def school_admin_settings():
                 ),
             )
             flash('Term/year changed: student working term moved forward, scores reset for new term, and teacher class assignments copied to the new term/year.', 'info')
+        for warning in save_warnings:
+            flash(warning, 'warning')
 
         record_admin_action_audit(
             school_id,
