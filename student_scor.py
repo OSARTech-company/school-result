@@ -5274,6 +5274,22 @@ def _normalize_school_id_text(value):
             value = str(value)
     return str(value).strip()
 
+def _normalize_session_text(value, lower=False):
+    """Return a safe string for session fields that may have legacy non-string values."""
+    text = _normalize_school_id_text(value)
+    return text.lower() if lower else text
+
+def _normalize_session_identity_context():
+    """Normalize legacy session identity fields once per request."""
+    for key in ('school_id', 'super_admin_2fa_auth_school_id', 'super_admin_2fa_pending_school_id'):
+        if key in session and session.get(key) is not None:
+            session[key] = _normalize_session_text(session.get(key))
+    for key in ('user_id', 'parent_phone', 'super_admin_2fa_auth_user', 'super_admin_2fa_pending_user'):
+        if key in session and session.get(key) is not None:
+            session[key] = _normalize_session_text(session.get(key), lower=True)
+    if 'role' in session and session.get('role') is not None:
+        session['role'] = _normalize_session_text(session.get('role'), lower=True)
+
 # Short-lived in-memory store for teacher CSV error exports.
 CSV_ERROR_EXPORTS = {}
 
@@ -12974,6 +12990,9 @@ def get_school_leadership_label(value, default='Principal'):
 
 def ensure_school_access_schema():
     """Ensure school access control columns exist for legacy deployments."""
+    global _SCHOOL_ACCESS_SCHEMA_READY
+    if _SCHOOL_ACCESS_SCHEMA_READY is True:
+        return True
     try:
         with db_connection(commit=True) as conn:
             c = conn.cursor()
@@ -12995,6 +13014,7 @@ def ensure_school_access_schema():
             db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS access_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
             db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS access_updated_by TEXT DEFAULT ''")
             db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS leadership_title TEXT DEFAULT 'principal'")
+        _SCHOOL_ACCESS_SCHEMA_READY = True
         return True
     except Exception as exc:
         logging.warning("Failed to ensure schools access schema: %s", exc)
@@ -13519,6 +13539,9 @@ def update_school_admin_account(school_id, new_username, new_password=''):
 
 def update_school_settings_with_cursor(c, school_id, settings):
     """Update school settings using an existing DB cursor."""
+    school_key = _normalize_school_id_text(school_id)
+    if not school_key:
+        raise ValueError('School ID is required.')
     # Runtime schema guard for older DBs where settings columns may be missing.
     db_execute(c, 'ALTER TABLE schools ADD COLUMN IF NOT EXISTS grade_a_min INTEGER DEFAULT 70')
     db_execute(c, 'ALTER TABLE schools ADD COLUMN IF NOT EXISTS grade_b_min INTEGER DEFAULT 60')
@@ -13567,7 +13590,7 @@ def update_school_settings_with_cursor(c, school_id, settings):
                 normalize_hex_color(settings.get('theme_secondary_color', ''), '#2A5298'),
                 normalize_hex_color(settings.get('theme_accent_color', ''), '#1F7A8C'),
                 normalize_school_leadership_title(settings.get('leadership_title', 'principal')),
-                school_id))
+                school_key))
 
 def update_school_term_year_with_cursor(c, school_id, term, academic_year):
     """Update only current term/year without overwriting other school settings."""
@@ -13668,7 +13691,7 @@ def update_school_settings(school_id, settings):
     with db_connection(commit=True) as conn:
         c = conn.cursor()
         update_school_settings_with_cursor(c, school_id, settings)
-    invalidate_school_cache(school_id)
+    invalidate_school_cache(_normalize_school_id_text(school_id))
 
 def set_school_operations_enabled(school_id, enabled):
     """Enable/disable teacher/student operations for a school."""
@@ -14317,8 +14340,15 @@ def ensure_student_attendance_schema():
         logging.warning("Failed to ensure attendance schema: %s", exc)
         return False
 
+_SCHOOL_ACCESS_SCHEMA_READY = None
+_EXTENDED_FEATURES_SCHEMA_READY = None
+_LOGIN_SECURITY_SCHEMA_READY = None
+
 def ensure_extended_features_schema():
     """Best-effort schema guard for optional advanced modules."""
+    global _EXTENDED_FEATURES_SCHEMA_READY
+    if _EXTENDED_FEATURES_SCHEMA_READY is True:
+        return True
     try:
         with db_connection(commit=True) as conn:
             c = conn.cursor()
@@ -14915,6 +14945,7 @@ def ensure_extended_features_schema():
                    )""",
             )
             db_execute(c, 'CREATE INDEX IF NOT EXISTS idx_school_auto_backups_school_created ON school_auto_backups(school_id, created_at DESC)')
+        _EXTENDED_FEATURES_SCHEMA_READY = True
         return True
     except Exception as exc:
         logging.warning("Failed to ensure extended features schema: %s", exc)
@@ -14955,6 +14986,9 @@ def ensure_error_logs_schema():
 
 def ensure_login_security_schema():
     """Best-effort schema guard for login tracking tables/columns."""
+    global _LOGIN_SECURITY_SCHEMA_READY
+    if _LOGIN_SECURITY_SCHEMA_READY is True:
+        return True
     try:
         with db_connection(commit=True) as conn:
             c = conn.cursor()
@@ -14974,6 +15008,7 @@ def ensure_login_security_schema():
             )
             db_execute(c, "ALTER TABLE users ADD COLUMN IF NOT EXISTS current_login_at TIMESTAMP")
             db_execute(c, "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP")
+        _LOGIN_SECURITY_SCHEMA_READY = True
         return True
     except Exception as exc:
         logging.warning("Failed to ensure login security schema: %s", exc)
@@ -17089,9 +17124,9 @@ def _complete_authenticated_login(user, user_school_id):
     username = (user.get('username') or '').strip().lower()
     session.clear()
     session.permanent = True
-    session['user_id'] = username
+    session['user_id'] = _normalize_session_text(username, lower=True)
     session['role'] = role
-    session['school_id'] = user_school_id
+    session['school_id'] = _normalize_session_text(user_school_id)
     session.pop('must_change_password', None)
     session.pop('force_password_change', None)
     session.pop('show_first_login_tutorial', None)
@@ -21337,6 +21372,7 @@ def get_school_term_calendar(school_id, academic_year, term):
             'next_term_begin_date': '',
             'days_open': 0,
         }
+    school_key = _normalize_school_id_text(school_id)
     with db_connection() as conn:
         c = conn.cursor()
         db_execute(
@@ -21345,7 +21381,7 @@ def get_school_term_calendar(school_id, academic_year, term):
                FROM school_term_calendars
                WHERE school_id = ? AND academic_year = ? AND term = ?
                LIMIT 1""",
-            (school_id, (academic_year or '').strip(), (term or '').strip()),
+            (school_key, (academic_year or '').strip(), (term or '').strip()),
         )
         row = c.fetchone()
         if not row:
@@ -21373,6 +21409,7 @@ def get_school_term_calendar(school_id, academic_year, term):
 def list_school_term_calendars(school_id):
     if not ensure_school_term_calendar_schema():
         return []
+    school_key = _normalize_school_id_text(school_id)
     with db_connection() as conn:
         c = conn.cursor()
         db_execute(
@@ -21381,7 +21418,7 @@ def list_school_term_calendars(school_id):
                FROM school_term_calendars
                WHERE school_id = ?
                ORDER BY academic_year DESC, term""",
-            (school_id,),
+            (school_key,),
         )
         rows = []
         for row in c.fetchall() or []:
@@ -21398,6 +21435,7 @@ def list_school_term_calendars(school_id):
         return rows
 
 def save_school_term_calendar_with_cursor(c, school_id, academic_year, term, open_date, close_date, break_start, break_end, next_term_begin_date=''):
+    school_key = _normalize_school_id_text(school_id)
     db_execute(
         c,
         """INSERT INTO school_term_calendars
@@ -21412,7 +21450,7 @@ def save_school_term_calendar_with_cursor(c, school_id, academic_year, term, ope
              next_term_begin_date = excluded.next_term_begin_date,
              updated_at = excluded.updated_at""",
         (
-            school_id,
+            school_key,
             (academic_year or '').strip(),
             (term or '').strip(),
             (open_date or '').strip(),
@@ -21441,6 +21479,7 @@ def get_school_term_program(school_id, academic_year, term):
             'next_term_begin_date': '',
             'school_events': '',
         }
+    school_key = _normalize_school_id_text(school_id)
     with db_connection() as conn:
         c = conn.cursor()
         db_execute(
@@ -21454,7 +21493,7 @@ def get_school_term_program(school_id, academic_year, term):
                FROM school_term_calendars
                WHERE school_id = ? AND academic_year = ? AND term = ?
                LIMIT 1""",
-            (school_id, (academic_year or '').strip(), (term or '').strip()),
+            (school_key, (academic_year or '').strip(), (term or '').strip()),
         )
         row = c.fetchone()
         if not row:
@@ -25121,6 +25160,10 @@ def safe_auth_route(template_name):
     return _decorator
 
 @app.before_request
+def normalize_session_identity_fields():
+    _normalize_session_identity_context()
+
+@app.before_request
 def enforce_school_operations_toggle():
     """Apply school-level operation lock set by super admin."""
     endpoint = request.endpoint or ''
@@ -25451,7 +25494,7 @@ def enforce_role_namespace_and_session_binding():
             session['parent_student_keys'] = normalized_keys
             first_school = (normalized_keys[0].split('::', 1)[0] if normalized_keys and '::' in normalized_keys[0] else '').strip()
             if first_school:
-                session['school_id'] = first_school
+                session['school_id'] = _normalize_session_text(first_school)
             session['_auth_binding_checked_at'] = time.time()
             return None
 
@@ -25473,7 +25516,7 @@ def enforce_role_namespace_and_session_binding():
         session['parent_student_keys'] = normalized_keys
         first_school = (normalized_keys[0].split('::', 1)[0] if normalized_keys and '::' in normalized_keys[0] else '').strip()
         if first_school:
-            session['school_id'] = first_school
+            session['school_id'] = _normalize_session_text(first_school)
         session['_auth_binding_checked_at'] = now_ts
         return None
 
@@ -25947,7 +25990,7 @@ def login():
             clear_failed_login('login', username, client_ip)
             if role == 'super_admin' and SUPER_ADMIN_EMAIL_2FA_ENABLED:
                 session['super_admin_2fa_auth_user'] = username
-                session['super_admin_2fa_auth_school_id'] = user_school_id
+                session['super_admin_2fa_auth_school_id'] = _normalize_session_text(user_school_id)
                 if not _begin_super_admin_email_2fa(user, client_ip=client_ip):
                     flash('Could not send 2FA code email. Check SMTP settings.', 'error')
                     return render_template('shared/login.html', terms_read=terms_read)
@@ -25982,7 +26025,7 @@ def login():
                     session.permanent = True
                     session['role'] = 'parent'
                     session['parent_phone'] = parent_phone
-                    session['school_id'] = (matched[0].get('school_id') or '').strip()
+                    session['school_id'] = _normalize_session_text(matched[0].get('school_id'))
                     session['post_login_welcome_name'] = (matched[0].get('parent_name') or parent_phone).strip()
                     session['parent_student_keys'] = sorted(
                         {f"{row.get('school_id', '')}::{row.get('student_id', '')}" for row in matched},
@@ -30340,10 +30383,10 @@ def school_admin_cbt():
     school_id = session.get('school_id')
     school = get_school(school_id) or {}
     current_term = get_current_term(school)
-    current_year = (school or {}).get('academic_year', '')
-    selected_term = (request.args.get('term', current_term) or current_term).strip()
-    selected_year = (request.args.get('academic_year', current_year) or current_year).strip()
-    status_filter = (request.args.get('status', '') or '').strip().lower()
+    current_year = str((school or {}).get('academic_year', '') or '').strip()
+    selected_term = str((request.args.get('term') or current_term or '')).strip()
+    selected_year = str((request.args.get('academic_year') or current_year or '')).strip()
+    status_filter = str(request.args.get('status') or '').strip().lower()
 
     tests = list_cbt_tests_for_school(school_id, limit=500)
     if selected_term:
@@ -30540,7 +30583,7 @@ def school_admin_settings():
     if session.get('role') != 'school_admin':
         return redirect(url_for('login'))
     
-    school_id = session.get('school_id')
+    school_id = _normalize_school_id_text(session.get('school_id'))
     current_school = get_school(school_id) or {}
     def _to_int(value, default):
         try:
@@ -30741,9 +30784,9 @@ def school_admin_settings():
             flash('School logo URL was converted to a direct image link automatically.', 'info')
 
         settings = {
-            'school_name': request.form.get('school_name'),
+            'school_name': (request.form.get('school_name') or current_school.get('school_name', '') or '').strip(),
             # Preserve location when settings form does not include it.
-            'location': request.form.get('location', current_school.get('location', '')),
+            'location': (request.form.get('location', current_school.get('location', '')) or '').strip(),
             'school_logo': normalized_school_logo,
             'academic_year': new_year,
             'current_term': new_term,
@@ -38833,9 +38876,9 @@ def student_cbt():
 
     school = get_school(school_id) or {}
     current_term = get_current_term(school)
-    current_year = (school or {}).get('academic_year', '')
-    selected_term = (request.args.get('term', current_term) or current_term).strip()
-    selected_year = (request.args.get('academic_year', current_year) or current_year).strip()
+    current_year = str((school or {}).get('academic_year', '') or '').strip()
+    selected_term = str(request.args.get('term') or current_term or '').strip()
+    selected_year = str(request.args.get('academic_year') or current_year or '').strip()
 
     with db_connection() as conn:
         c = conn.cursor()
