@@ -66,11 +66,139 @@ PWA_HEAD_SNIPPET = """
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#1e3c72">
 <meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="School Result">
+<link rel="apple-touch-icon" sizes="180x180" href="/static/img/apple-touch-icon.png?v=20260409a">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/img/pwa-192.png?v=20260409a">
+<link rel="icon" type="image/png" sizes="512x512" href="/static/img/pwa-512.png?v=20260409a">
 """
 
 PWA_BODY_SNIPPET = """
 <script>
 (function () {
+  var deferredPrompt = null;
+  var bannerDismissed = false;
+
+  function isStandalone() {
+    try {
+      return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+    } catch (e) {
+      return window.navigator.standalone === true;
+    }
+  }
+
+  function isIOS() {
+    return /iphone|ipad|ipod/i.test(navigator.userAgent || '');
+  }
+
+  function createInstallBanner() {
+    if (document.getElementById('pwa-install-banner')) return;
+    var style = document.createElement('style');
+    style.textContent = [
+      '#pwa-install-banner{position:fixed;right:12px;bottom:12px;z-index:99999;max-width:340px;display:none;padding:12px 14px;border-radius:14px;background:#0f172a;color:#fff;box-shadow:0 12px 30px rgba(15,23,42,.28);font:600 14px/1.4 Arial,sans-serif}',
+      '#pwa-install-banner .row{display:flex;gap:10px;align-items:center;justify-content:space-between}',
+      '#pwa-install-banner .text{margin:0 0 10px 0;font-weight:600}',
+      '#pwa-install-banner .actions{display:flex;gap:8px;flex-wrap:wrap}',
+      '#pwa-install-banner button{border:0;border-radius:999px;padding:9px 12px;font:600 13px Arial,sans-serif;cursor:pointer}',
+      '#pwa-install-banner .install{background:#22c55e;color:#052e16}',
+      '#pwa-install-banner .help{background:#e2e8f0;color:#0f172a}',
+      '#pwa-install-banner .close{background:transparent;color:#cbd5e1;padding:4px 6px;font-size:18px;line-height:1}',
+      '@media (max-width: 480px){#pwa-install-banner{left:12px;right:12px;max-width:none}}'
+    ].join('');
+    document.head.appendChild(style);
+
+    var banner = document.createElement('div');
+    banner.id = 'pwa-install-banner';
+    banner.setAttribute('role', 'dialog');
+    banner.setAttribute('aria-live', 'polite');
+    banner.innerHTML = [
+      '<div class="row">',
+      '<div>',
+      '<div class="text" id="pwa-install-title">Install this app</div>',
+      '<div id="pwa-install-copy" style="font-weight:500;color:#cbd5e1">Open it like a phone or desktop app.</div>',
+      '</div>',
+      '<button class="close" type="button" aria-label="Dismiss">×</button>',
+      '</div>',
+      '<div class="actions" style="margin-top:10px">',
+      '<button class="install" type="button">Install</button>',
+      '<button class="help" type="button">How to install</button>',
+      '</div>'
+    ].join('');
+    document.body.appendChild(banner);
+
+    var closeBtn = banner.querySelector('.close');
+    var installBtn = banner.querySelector('.install');
+    var helpBtn = banner.querySelector('.help');
+    var titleEl = banner.querySelector('#pwa-install-title');
+    var copyEl = banner.querySelector('#pwa-install-copy');
+
+    function hideBanner() {
+      banner.style.display = 'none';
+    }
+
+    closeBtn.addEventListener('click', function () {
+      bannerDismissed = true;
+      hideBanner();
+    });
+
+    installBtn.addEventListener('click', async function () {
+      if (deferredPrompt) {
+        deferredPrompt.prompt();
+        try {
+          await deferredPrompt.userChoice;
+        } catch (e) {}
+        deferredPrompt = null;
+        hideBanner();
+      } else if (isIOS()) {
+        titleEl.textContent = 'Install on iPhone';
+        copyEl.textContent = 'Tap Share, then choose Add to Home Screen in Safari.';
+      } else {
+        titleEl.textContent = 'Install app';
+        copyEl.textContent = 'Use your browser menu and choose Install app or Create shortcut.';
+      }
+    });
+
+    helpBtn.addEventListener('click', function () {
+      if (isIOS()) {
+        alert('On iPhone/iPad: tap Share, then Add to Home Screen.');
+      } else {
+        alert('In Chrome/Edge: open the browser menu and choose Install app or Create shortcut.');
+      }
+    });
+
+    window.__showPwaInstallBanner = function () {
+      bannerDismissed = false;
+      banner.style.display = 'block';
+      return banner;
+    };
+    window.__hidePwaInstallBanner = function () {
+      bannerDismissed = true;
+      hideBanner();
+    };
+
+    return banner;
+  }
+
+  function showBannerForInstall() {
+    if (bannerDismissed || isStandalone()) return;
+    var banner = createInstallBanner();
+    if (!banner) return;
+    banner.style.display = 'block';
+    var titleEl = banner.querySelector('#pwa-install-title');
+    var copyEl = banner.querySelector('#pwa-install-copy');
+    if (deferredPrompt) {
+      titleEl.textContent = 'Install this app';
+      copyEl.textContent = 'Get faster access from your phone or Windows desktop.';
+      banner.querySelector('.install').style.display = 'inline-block';
+      banner.querySelector('.help').style.display = 'inline-block';
+    } else if (isIOS()) {
+      titleEl.textContent = 'Install on iPhone';
+      copyEl.textContent = 'Tap Share, then choose Add to Home Screen in Safari.';
+      banner.querySelector('.install').style.display = 'inline-block';
+      banner.querySelector('.help').style.display = 'inline-block';
+    }
+  }
+
   function ensureOfflineBanner() {
     if (document.getElementById('offline-status-banner')) return;
     var style = document.createElement('style');
@@ -105,6 +233,25 @@ PWA_BODY_SNIPPET = """
   } else {
     ensureOfflineBanner();
   }
+
+  window.addEventListener('beforeinstallprompt', function (event) {
+    event.preventDefault();
+    deferredPrompt = event;
+    showBannerForInstall();
+  });
+
+  window.addEventListener('appinstalled', function () {
+    deferredPrompt = null;
+    bannerDismissed = true;
+    var banner = document.getElementById('pwa-install-banner');
+    if (banner) banner.style.display = 'none';
+  });
+
+  window.addEventListener('load', function () {
+    if (!isStandalone()) {
+      setTimeout(showBannerForInstall, 2500);
+    }
+  });
 
   if (!('serviceWorker' in navigator)) return;
   var isSecure = window.isSecureContext || location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
@@ -1084,6 +1231,66 @@ APP_ASSISTANT_MICRO_FAQ = {
             'use': 'Report Issue sends role, school, and page context to support so super admin can trace quickly.',
             'steps': ['Open Report Issue from current page.', 'Paste exact error text and what you clicked before the error.'],
             'next_question': 'Do you want a sample report message format?',
+        },
+        {
+            'aliases': ["unexpected token '<'", '<!doctype', 'not valid json', 'json parse error', 'unexpected token'],
+            'use': 'This means the page or fetch call received HTML instead of JSON, usually because the backend returned a login page or 500 error page.',
+            'steps': [
+                'Open the failing request in the browser network tab.',
+                'Check whether the response is HTML, a redirect, or a 500 page.',
+                'Fix the backend error or make the endpoint return JSON for XHR/fetch requests.',
+            ],
+            'next_question': 'Do you want the exact fetch endpoint to inspect?',
+        },
+        {
+            'aliases': ['column does not exist', 'undefinedcolumn', 'relation does not exist', 'no such table', 'missing column'],
+            'use': 'This means the live database schema is behind the app code and the page is reading a missing table or column.',
+            'steps': [
+                'Run the app migration or startup DDL against the target database.',
+                'Add the missing column/table in PostgreSQL if migration is unavailable.',
+                'Restart the app and retry the same page.',
+            ],
+            'next_question': 'Do you want the pgAdmin SQL for the missing table or column?',
+        },
+        {
+            'aliases': ['object has no attribute strip', "int object has no attribute strip", 'strip error', 'non text strip error'],
+            'use': 'A number or null value reached code that expected text and called `strip()` on it.',
+            'steps': [
+                'Normalize the value with `str(value or "")` before stripping it.',
+                'Check request args, session values, and database fields used on that page.',
+                'Refresh the page and retry after the code fix is deployed.',
+            ],
+            'next_question': 'Do you want the safe normalization pattern to use in code?',
+        },
+        {
+            'aliases': ['there is no unique or exclusion constraint matching the on conflict specification', 'on conflict no unique constraint', 'unique constraint matching the on conflict specification'],
+            'use': 'The code is trying to use ON CONFLICT on a table that does not have the expected unique index.',
+            'steps': [
+                'Check for duplicate rows first.',
+                'Add the missing unique index or change the code to insert/update without ON CONFLICT.',
+                'Remove or merge duplicates before creating the index.',
+            ],
+            'next_question': 'Do you want the SQL to add the missing unique index safely?',
+        },
+        {
+            'aliases': ['sign-in temporarily failed', 'signin temporarily failed', 'login temporarily failed'],
+            'use': 'Login got past password check, then failed in a later validation step such as schema lookup, role binding, or school lookup.',
+            'steps': [
+                'Open the error log entry for the exact reference.',
+                'Check for missing columns or invalid session/school values.',
+                'Retry login after the schema or route fix is deployed.',
+            ],
+            'next_question': 'Do you want me to explain the exact traceback line?',
+        },
+        {
+            'aliases': ['could not translate host name', 'operationalerror', 'connection refused', 'password authentication failed'],
+            'use': 'The app cannot reach PostgreSQL because the host, credentials, or SSL settings are wrong.',
+            'steps': [
+                'Check DATABASE_URL, host, port, username, password, and sslmode.',
+                'Confirm the database is reachable from the running host.',
+                'Restart the app after correcting the database connection settings.',
+            ],
+            'next_question': 'Do you want a quick DATABASE_URL checklist?',
         },
         {
             'aliases': ['data request', 'privacy request', 'privacy requests', 'personal data request', 'the data request is for what'],
@@ -2755,7 +2962,21 @@ def _assistant_extract_error_guidance(question_text, q_norm=''):
             fix_snippet="<input type=\"hidden\" name=\"csrf_token\" value=\"{{ csrf_token() }}\">"
         )
 
-    if 'password authentication failed' in low and '5432' in low:
+    if 'unexpected token \'<\'' in low or '<!doctype' in low or 'not valid json' in low or 'json parse' in low:
+        return _guidance(
+            'The server returned HTML instead of JSON, so the frontend tried to parse an error page as JSON.',
+            [
+                'Check whether the request was redirected to login or returned a 500 error page.',
+                'Open the browser network tab or server logs and inspect the real response body.',
+                'Make the endpoint return JSON for fetch/XHR requests, not HTML redirects.',
+                'If this happens after login, refresh the page and try again with a fresh session.',
+            ],
+            confidence=0.92,
+            unresolved=False,
+            next_question='Do you want the exact fetch endpoint or route that should return JSON?'
+        )
+
+    if 'could not translate host name' in low or 'connection refused' in low or 'could not connect' in low or 'operationalerror' in low or 'password authentication failed' in low:
         return _guidance(
             'Database credentials are failing for PostgreSQL connection.',
             [
@@ -2768,6 +2989,99 @@ def _assistant_extract_error_guidance(question_text, q_norm=''):
             unresolved=False
         )
 
+    if 'undefinedcolumn' in low or ('column' in low and 'does not exist' in low):
+        missing = ''
+        m = re.search(r'column\s+"?([a-z0-9_]+)"?\s+does not exist', low, flags=re.IGNORECASE)
+        if m:
+            missing = (m.group(1) or '').strip()
+        summary = 'Database schema is behind application code (missing column).'
+        if missing:
+            summary = f'Database schema is missing the `{missing}` column.'
+        return _guidance(
+            summary,
+            [
+                'Run migration/startup DDL and restart the app.',
+                'Verify the missing column exists in PostgreSQL for the target table.',
+                'Retry the page after schema update.',
+            ],
+            confidence=0.96,
+            unresolved=False,
+            next_question='Do you want the exact SQL to add that column?'
+        )
+
+    if 'relation' in low and 'does not exist' in low or 'no such table' in low or 'undefinedtable' in low:
+        table_name = ''
+        m = re.search(r'relation\s+"?([a-z0-9_]+)"?\s+does not exist', low, flags=re.IGNORECASE)
+        if m:
+            table_name = (m.group(1) or '').strip()
+        summary = 'Database table is missing from the current schema.'
+        if table_name:
+            summary = f'Database table `{table_name}` is missing from PostgreSQL.'
+        return _guidance(
+            summary,
+            [
+                'Run the app migrations on the target database.',
+                'If this is a new table, create it with the app schema or startup DDL.',
+                'Restart the app and try the same page again.',
+            ],
+            confidence=0.95,
+            unresolved=False,
+            next_question='Do you want a pgAdmin SQL snippet for the missing table?'
+        )
+
+    if "has no attribute 'strip'" in low or 'has no attribute "strip"' in low or ('object has no attribute' in low and 'strip' in low):
+        summary = 'A value is not text before calling `strip()`. Normalize it first.'
+        return _guidance(
+            summary,
+            [
+                'Wrap the value with `str(value or \"\")` before calling `strip()`.',
+                'Check session values, request args, and DB fields used on that page.',
+                'Restart the app and retry the same flow.',
+            ],
+            confidence=0.97,
+            unresolved=False,
+            next_question='Do you want me to show the exact normalization pattern?'
+        )
+
+    if 'unique constraint' in low or ('on conflict' in low and ('no unique' in low or 'no exclusion constraint' in low)) or ('there is no unique or exclusion constraint' in low):
+        return _guidance(
+            'The insert/update expects a unique index or constraint that the table does not currently have.',
+            [
+                'Check the table for duplicate rows first.',
+                'Add the missing unique index/constraint, or change the code to select-then-insert.',
+                'If duplicates already exist, remove or merge them before creating the constraint.',
+            ],
+            confidence=0.96,
+            unresolved=False,
+            next_question='Do you want the SQL to add the missing unique index safely?'
+        )
+
+    if 'sign-in temporarily failed' in low or ('login' in low and 'failed' in low and 'temporarily' in low):
+        return _guidance(
+            'Login failed during an internal check after password verification.',
+            [
+                'Open the error log entry for the exact reference and inspect the traceback.',
+                'Check for schema mismatches in users, schools, or session-related tables.',
+                'Retry login after the database/schema fix and clear any stale session.',
+            ],
+            confidence=0.9,
+            unresolved=False,
+            next_question='Do you want me to explain the traceback line by line?'
+        )
+
+    if 'worker timeout' in low or 'sigkill' in low or 'out of memory' in low or 'timed out' in low:
+        return _guidance(
+            'The request is too heavy and the web worker was killed or timed out.',
+            [
+                'Make the query or backup/report flow lighter.',
+                'Add pagination, narrower filters, or a dry-run mode.',
+                'Move expensive work out of the request path if possible.',
+            ],
+            confidence=0.91,
+            unresolved=False,
+            next_question='Do you want help shrinking the specific slow route?'
+        )
+
     if 'traceback' in low or 'exception' in low or 'error' in norm:
         return _guidance(
             'I can help troubleshoot this error if you paste the exact first error line and file/line number.',
@@ -2775,8 +3089,9 @@ def _assistant_extract_error_guidance(question_text, q_norm=''):
                 'Share the first error message (not only the last one).',
                 'Include file path and line number from traceback/diagnostics.',
                 'Tell me what action you did before the error appeared.',
+                'If this is a server error page, also share the page URL and your role.',
             ],
-            confidence=0.52,
+            confidence=0.62,
             unresolved=True,
             next_question='Paste the exact error text and I will give a targeted fix.'
         )
@@ -2875,11 +3190,23 @@ def _assistant_rank_role_topics(role, question):
     ranked.sort(key=lambda row: row[0], reverse=True)
     return ranked
 
-def _assistant_build_knowledge_context(role, ranked_topics, teacher_scope=None):
+def _assistant_build_knowledge_context(role, ranked_topics, teacher_scope=None, page_guidance=None, source_page=''):
     kb = _assistant_role_kb(role)
     top = [topic for _, topic in (ranked_topics or [])[:3]]
     selected = top if top else kb[:4]
     lines = []
+    if page_guidance:
+        page_title = str(page_guidance.get('title') or '').strip()
+        page_summary = str(page_guidance.get('summary') or '').strip()
+        page_steps = [str(s).strip() for s in (page_guidance.get('steps') or []) if str(s).strip()][:4]
+        if page_title:
+            lines.append(f'Current page: {page_title}')
+        if source_page:
+            lines.append(f'Route: {source_page}')
+        if page_summary:
+            lines.append(f'Page summary: {page_summary}')
+        for idx, step in enumerate(page_steps, start=1):
+            lines.append(f'Page step {idx}: {step}')
     for item in selected:
         title = str(item.get('title') or '').strip()
         summary = str(item.get('summary') or '').strip()
@@ -3226,13 +3553,19 @@ def _assistant_build_response(role, question, teacher_scope=None, source_page=''
     links = _assistant_nav_links(role, teacher_scope=teacher_scope)
     quick_prompts = _assistant_role_quick_prompts(role, teacher_scope=teacher_scope)
     ranked_topics = _assistant_rank_role_topics(role, q_norm)
-    knowledge_context = _assistant_build_knowledge_context(role, ranked_topics, teacher_scope=teacher_scope)
     route_hint = _assistant_extract_route_hint(q_low)
     effective_page = route_hint or source_page
     page_guidance = _assistant_page_guidance(role, effective_page)
     nav_group_hint = _assistant_grouped_nav_hint(role, effective_page)
     page_relevance_score = _assistant_page_relevance_score(q_norm, page_guidance)
     role_scope_note = _assistant_role_scope_note(role, q_norm, teacher_scope=teacher_scope)
+    knowledge_context = _assistant_build_knowledge_context(
+        role,
+        ranked_topics,
+        teacher_scope=teacher_scope,
+        page_guidance=page_guidance,
+        source_page=effective_page,
+    )
 
     def _default_followups():
         suggestions = []
@@ -4183,10 +4516,13 @@ def _assistant_call_openai(role, question, links, knowledge_context='', response
     system_prompt = (
         'You are an in-app assistant for a school result management web app. '
         'Give concise, practical guidance for the current user role only. '
+        'Use the provided knowledge context and page guidance as the primary source of truth. '
         'Interpret misspelled or unclear prompts when reasonable. '
+        'When the user asks how to do something, answer with the exact page name, the relevant fields/buttons, and the shortest correct workflow. '
         'You MUST NOT claim to execute actions, update data, publish results, send messages, or change settings. '
         'You only explain steps users should perform in the app UI. '
-        'If unsure, state uncertainty and direct user to Help or Report Issue.'
+        'If the request is missing key context, ask one short clarifying question instead of guessing. '
+        'If unsure, state uncertainty and direct the user to Help or Report Issue.'
     )
     user_prompt = (
         f'Role: {role}\n'
@@ -4195,6 +4531,7 @@ def _assistant_call_openai(role, question, links, knowledge_context='', response
         f'Known app context:\n{(knowledge_context or "No extra context.")}\n\n'
         f'Useful links:\n{links_text}\n\n'
         'Return JSON with keys: answer (string), steps (array of up to 6 short strings). '
+        'Prefer concrete app actions, exact menu names, and short examples when helpful. '
         'If response mode is ultra_simple, use very short words and max 2 short steps. '
         'If response mode is simple, use very plain language. '
         'If detailed, include extra clarity. '
@@ -22028,11 +22365,16 @@ def rollover_school_term_data_with_cursor(c, school_id, from_term, to_term, from
     )
     db_execute(
         c,
+        """DELETE FROM teacher_subject_assignments
+           WHERE school_id = ? AND LOWER(term) = LOWER(?) AND COALESCE(academic_year, '') = COALESCE(?, '')""",
+        (school_id, dst_term, dst_year),
+    )
+    db_execute(
+        c,
         """INSERT INTO teacher_subject_assignments (school_id, teacher_id, classname, subject, term, academic_year)
            SELECT school_id, teacher_id, classname, subject, ?, ?
            FROM teacher_subject_assignments
-           WHERE school_id = ? AND LOWER(term) = LOWER(?) AND COALESCE(academic_year, '') = COALESCE(?, '')
-           ON CONFLICT(school_id, classname, subject, term, academic_year) DO NOTHING""",
+           WHERE school_id = ? AND LOWER(term) = LOWER(?) AND COALESCE(academic_year, '') = COALESCE(?, '')""",
         (dst_term, dst_year, school_id, src_term, src_year),
     )
     promoted_reset_sql = 'FALSE' if students_promoted_is_boolean() else '0'
@@ -22924,9 +23266,18 @@ def restore_school_backup_payload(school_id, payload, mode='merge'):
                 continue
             db_execute(
                 c,
+                """DELETE FROM teacher_subject_assignments
+                   WHERE school_id = ?
+                     AND LOWER(COALESCE(classname, '')) = LOWER(COALESCE(?, ''))
+                     AND LOWER(COALESCE(subject, '')) = LOWER(COALESCE(?, ''))
+                     AND LOWER(COALESCE(term, '')) = LOWER(COALESCE(?, ''))
+                     AND COALESCE(academic_year, '') = COALESCE(?, '')""",
+                (school_id, row.get('classname', ''), row.get('subject', ''), row.get('term', ''), row.get('academic_year', '')),
+            )
+            db_execute(
+                c,
                 """INSERT INTO teacher_subject_assignments (school_id, teacher_id, classname, subject, term, academic_year)
-                   VALUES (?, ?, ?, ?, ?, ?)
-                   ON CONFLICT (school_id, classname, subject, term, academic_year) DO NOTHING""",
+                   VALUES (?, ?, ?, ?, ?, ?)""",
                 (school_id, row.get('teacher_id', ''), row.get('classname', ''), row.get('subject', ''), row.get('term', ''), row.get('academic_year', '')),
             )
 
@@ -23666,13 +24017,13 @@ def assign_teacher_to_subjects(school_id, teacher_id, classname, subjects, term,
                     f'{subject} in {classname} ({term}, {academic_year}) is already assigned to another teacher. '
                     'Remove the current assignment first.'
                 )
+            if owner_teacher_id == teacher_id:
+                return
             db_execute(
                 c,
                 """INSERT INTO teacher_subject_assignments
                    (school_id, teacher_id, classname, subject, term, academic_year)
-                   VALUES (?, ?, ?, ?, ?, ?)
-                   ON CONFLICT(school_id, classname, subject, term, academic_year)
-                   DO NOTHING""",
+                   VALUES (?, ?, ?, ?, ?, ?)""",
                 (school_id, teacher_id, classname, subject, term, academic_year),
             )
 
@@ -43207,12 +43558,26 @@ def suggest_error_resolution(error_type='', error_message='', endpoint='', path=
         'Review server logs around the error timestamp for earlier failures.',
     ]
 
-    if 'undefinedcolumn' in et or 'column' in em and 'does not exist' in em:
+    if 'unexpected token \'<\'' in em or '<!doctype' in em or 'not valid json' in em or 'json parse' in em:
+        summary = 'Frontend expected JSON, but the server returned HTML or an error page.'
+        steps = [
+            'Check the network response for redirects, login pages, or 500 HTML output.',
+            'Make the endpoint return JSON for fetch/XHR requests.',
+            'Refresh and retry after the backend error is fixed.',
+        ]
+    elif 'undefinedcolumn' in et or ('column' in em and 'does not exist' in em):
         summary = 'Database schema is behind application code (missing column).'
         steps = [
             'Run migration/startup DDL and restart the app.',
             'Verify the missing column exists in PostgreSQL for the target table.',
             'Retry the page after schema update.',
+        ]
+    elif 'relation' in em and 'does not exist' in em or 'no such table' in em:
+        summary = 'Database table is missing from the current schema.'
+        steps = [
+            'Run migrations against the target database.',
+            'Create the missing table with startup DDL if migration is unavailable.',
+            'Restart the app and test the same route again.',
         ]
     elif 'nameerror' in et or 'is not defined' in em:
         summary = 'Python symbol missing or renamed in code path.'
@@ -43221,12 +43586,26 @@ def suggest_error_resolution(error_type='', error_message='', endpoint='', path=
             'Replace old helper names with the current helper where required.',
             'Run syntax check and retest the endpoint.',
         ]
-    elif 'integrityerror' in et or 'duplicate key' in em or 'unique constraint' in em:
+    elif 'attributeerror' in et and 'strip' in em or "has no attribute 'strip'" in em or 'has no attribute "strip"' in em:
+        summary = 'A non-text value reached `.strip()` in the request or DB path.'
+        steps = [
+            'Normalize the value with `str(value or \"\")` before stripping it.',
+            'Check request args, session values, and DB fields used by the route.',
+            'Restart the app and retry the same action.',
+        ]
+    elif 'integrityerror' in et or 'duplicate key' in em or 'unique constraint' in em or ('on conflict' in tb and 'no unique' in tb):
         summary = 'Duplicate or conflicting record violates unique constraint.'
         steps = [
             'Check whether the entity already exists (ID/username/class+term pair).',
             'Use update flow instead of insert when record exists.',
             'Add pre-insert validation to prevent duplicates.',
+        ]
+    elif 'operationalerror' in et or 'could not translate host name' in em or 'password authentication failed' in em or 'connection refused' in em:
+        summary = 'Database connection problem or wrong PostgreSQL credentials/host.'
+        steps = [
+            'Check DATABASE_URL, host, port, username, password, and SSL mode.',
+            'Confirm the target database is reachable from the running host.',
+            'Restart the app after fixing credentials or environment variables.',
         ]
     elif 'csrf' in et or 'csrf' in em:
         summary = 'CSRF token missing/expired for form or request.'
@@ -43234,6 +43613,13 @@ def suggest_error_resolution(error_type='', error_message='', endpoint='', path=
             'Refresh the page to get a new token.',
             'Ensure the form includes csrf_token hidden input.',
             'For API calls, send CSRF header/token consistently.',
+        ]
+    elif 'sign-in temporarily failed' in em or ('login' in ep and 'failed' in em and 'temporarily' in em):
+        summary = 'Login reached an internal error after the password check.'
+        steps = [
+            'Open the error log for the exact reference and traceback.',
+            'Check for missing columns in users, schools, or session tables.',
+            'Retry login after the schema or logic fix is deployed.',
         ]
     elif 'permission' in et or 'forbidden' in em or ep in {'login', 'logout'}:
         summary = 'Role/session permission mismatch for endpoint access.'
@@ -43263,6 +43649,13 @@ def suggest_error_resolution(error_type='', error_message='', endpoint='', path=
             'Run migration/startup DDL to add reporter_role/reporter_school_id/source_page.',
             'Re-open Super Admin reports page after migration.',
             'Confirm reports_has_context_columns() returns true.',
+        ]
+    elif 'unexpected token \'<\'' in tb or '<!doctype' in tb:
+        summary = 'Client parsed HTML as JSON because the backend returned an error page.'
+        steps = [
+            'Inspect the failing endpoint response in the browser network tab.',
+            'Return JSON for fetch/XHR requests instead of HTML redirects.',
+            'Fix the backend error first, then retry the same action.',
         ]
 
     return {'summary': summary, 'steps': steps}

@@ -204,6 +204,10 @@
                 <i class="fas fa-upload"></i>
                 Upload CSV
             </a>
+            <button type="button" class="action-btn" id="install-app-btn" style="border:0;cursor:pointer;">
+                <i class="fas fa-download"></i>
+                Install App
+            </button>
         </div>
 
         <div class="feature-grid">
@@ -252,6 +256,17 @@
                 card.style.animationDelay = `${index * 0.1}s`;
                 card.classList.add('fade-in');
             });
+
+            const installBtn = document.getElementById('install-app-btn');
+            if (installBtn) {
+                installBtn.addEventListener('click', function () {
+                    if (window.__showPwaInstallBanner) {
+                        window.__showPwaInstallBanner();
+                    } else {
+                        alert('Use your browser menu to install this app.');
+                    }
+                });
+            }
         });
     </script>
 </body>
