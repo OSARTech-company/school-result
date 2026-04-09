@@ -34149,37 +34149,20 @@ def school_admin_disaster_recovery_drill():
     backup_health = get_backup_health_summary(school_id, days=30)
     result = None
     if request.method == 'POST':
-        started = datetime.now()
         try:
-            payload = build_school_backup_payload(school_id)
-            payload_json = json.dumps(payload)
-            parsed = json.loads(payload_json)
-            required_sections = {'school', 'students', 'teachers', 'parents', 'messages'}
-            available_sections = set(parsed.keys()) if isinstance(parsed, dict) else set()
-            missing_sections = sorted([section for section in required_sections if section not in available_sections])
-            duration_ms = int((datetime.now() - started).total_seconds() * 1000)
-            ok = len(missing_sections) == 0
-            result = {
-                'ok': ok,
-                'duration_ms': duration_ms,
-                'missing_sections': missing_sections,
-                'backup_size_bytes': len(payload_json.encode('utf-8')),
-                'checked_at': format_timestamp(datetime.now()),
-            }
-            record_admin_action_audit(
-                school_id,
-                'disaster_recovery_drill',
-                target_scope='school_backup',
-                payload=result,
+            result = run_school_backup_dry_run(
+                school_id=school_id,
+                actor_user_id=session.get('user_id', ''),
+                actor_role='school_admin',
             )
-            if ok:
+            if result.get('ok'):
                 flash('Disaster recovery drill completed successfully.', 'success')
             else:
                 flash('Drill completed with warnings. Review missing backup sections.', 'warning')
         except Exception as exc:
             result = {
                 'ok': False,
-                'duration_ms': int((datetime.now() - started).total_seconds() * 1000),
+                'duration_ms': 0,
                 'missing_sections': [],
                 'backup_size_bytes': 0,
                 'error': str(exc)[:300],
