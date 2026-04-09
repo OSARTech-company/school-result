@@ -13596,7 +13596,8 @@ def update_school_settings_with_cursor(c, school_id, settings):
                 "grade_a_min = ?, grade_b_min = ?, grade_c_min = ?, grade_d_min = ?, pass_mark = ?, "
                 "show_positions = ?, ss_ranking_mode = ?, class_arm_ranking_mode = ?, "
                 "combine_third_term_results = ?, ss1_stream_mode = ?, ss_arm_mode = ?, parent_timetable_show_teacher = ?, "
-                "theme_primary_color = ?, theme_secondary_color = ?, theme_accent_color = ?, leadership_title = ? "
+                "theme_primary_color = ?, theme_secondary_color = ?, theme_accent_color = ?, leadership_title = ?, "
+                "updated_at = CURRENT_TIMESTAMP "
                 "WHERE school_id = ?"),
                (settings.get('school_name'), settings.get('location', ''), settings.get('school_logo'),
                 settings.get('academic_year'), settings.get('current_term'),
@@ -23142,6 +23143,7 @@ def set_teacher_signature(school_id, teacher_id, signature_image):
                WHERE school_id = ? AND user_id = ?""",
             (signature_image, school_id, teacher_id),
         )
+    invalidate_school_cache(school_id)
 
 def set_teacher_profile_image(school_id, teacher_id, profile_image):
     """Store teacher profile image for dashboard/sidebar avatar."""
@@ -23174,6 +23176,7 @@ def set_principal_signature(school_id, signature_image):
                WHERE school_id = ?""",
             (signature_image, datetime.now(), school_id),
         )
+    invalidate_school_cache(school_id)
 
 def ensure_subject_score_submission_schema():
     """Ensure subject-teacher handoff table exists."""
@@ -31089,6 +31092,7 @@ def school_admin_settings():
             flash('Term/year changed: student working term moved forward, scores reset for new term, and teacher class assignments copied to the new term/year.', 'info')
         for warning in save_warnings:
             flash(warning, 'warning')
+        invalidate_school_cache(school_id)
 
         record_admin_action_audit(
             school_id,
