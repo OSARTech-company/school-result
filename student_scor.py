@@ -7359,7 +7359,7 @@ def reset_student_passwords_for_class(school_id, classname, default_password, re
             existing = c.fetchone()
             if existing:
                 existing_role = (existing[0] or '').strip().lower()
-                existing_school = (existing[1] or '').strip()
+                existing_school = _normalize_school_id_text(existing[1])
                 if existing_role != 'student' or existing_school != scoped_school_id:
                     skipped += 1
                     continue
