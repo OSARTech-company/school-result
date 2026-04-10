@@ -226,7 +226,7 @@
     <div class="help-container">
         <div class="help-header">
             <h1><i class="fas fa-question-circle"></i> How to Use Student Score Management System</h1>
-            <p>Role-based guide for Super Admin, School Admin, Teacher, and Student usage in the current app version.</p>
+            <p>Role-based guide for Super Admin, School Admin, Teacher, Student, and Parent usage in the current app version.</p>
         </div>
 
         <div class="video-tutorial">
@@ -270,14 +270,44 @@
                 </div>
             </div>
 
-            <div class="help-section">
-                <h2><i class="fas fa-user-graduate"></i> School Admin Tasks</h2>
+            <div class="help-section" id="school-admin-handbook" tabindex="-1" style="scroll-margin-top: 24px;">
+                <h2><i class="fas fa-user-graduate"></i> School Admin Handbook</h2>
+                <p><strong>Role summary:</strong> The school admin manages one school tenant. They handle setup, people, academics, communication, monitoring, and recovery for that school.</p>
+                <h3>Can Do</h3>
                 <ul>
-                    <li><strong>Configure School:</strong> Set current term/year, grading thresholds, tests/exam options, and stream/ranking modes.</li>
-                    <li><strong>Configure Subjects:</strong> Set class subjects and optional limits by class/track.</li>
-                    <li><strong>Manage Teachers:</strong> Add teacher accounts and assign one teacher per class/term/year.</li>
-                    <li><strong>Add Students:</strong> Add class students with generated/manual IDs and subject lists from class config.</li>
-                    <li><strong>Approval Review:</strong> Approve or reject class result submissions from teachers.</li>
+                    <li>Manage students, teachers, parents, subjects, timetable, and school settings.</li>
+                    <li>Publish results, approve or reject submissions, and correct result records where allowed.</li>
+                    <li>Send messages to students and teachers.</li>
+                    <li>Review disputes, data requests, audits, analytics, and system health.</li>
+                    <li>Run backups, restore checks, and disaster recovery drills.</li>
+                    <li>Control school-specific operations and access state.</li>
+                </ul>
+                <h3>Cannot Do</h3>
+                <ul>
+                    <li>Manage other schools.</li>
+                    <li>Use super-admin-only global controls.</li>
+                    <li>Bypass access restrictions or locked-school states.</li>
+                    <li>Edit platform-wide settings for every tenant.</li>
+                </ul>
+                <h3>Main Menu Guide</h3>
+                <ul>
+                    <li><strong>Dashboard:</strong> School overview, alerts, and shortcuts.</li>
+                    <li><strong>Student:</strong> View Students, Add Students, Reset Requests, Subject Requests, Parent records, Parent Directory.</li>
+                    <li><strong>Teachers:</strong> Teacher List, Assign Teacher, Teacher Workload.</li>
+                    <li><strong>Academics:</strong> Publish Results, Class Subjects, CBT, Timetable, Term Programs, New Term Wizard, Promote Students.</li>
+                    <li><strong>Monitoring:</strong> Analytics, Data Integrity, Score Audit Log, Attendance Integrity, Attendance Summary, Timetable Coverage, Result Disputes, Reports, Promotion Audit.</li>
+                    <li><strong>Communication:</strong> Messages, SMS Health, SMS Logs.</li>
+                    <li><strong>System:</strong> School Settings, Bulk/Backup, Security Logs, Action Audit, System Health, Recovery Drill.</li>
+                    <li><strong>Support:</strong> Report Issue, Data Requests, Help, Change Password, Logout.</li>
+                </ul>
+                <h3>Recommended Setup Order</h3>
+                <ul>
+                    <li>Open School Settings and confirm term/year, grading, and access state.</li>
+                    <li>Configure Class Subjects and Timetable.</li>
+                    <li>Add Teachers and assign class/subject roles.</li>
+                    <li>Add Students and confirm class placement.</li>
+                    <li>Test Messages and then review Analytics/Data Integrity.</li>
+                    <li>Take a Backup before major changes.</li>
                 </ul>
             </div>
 
@@ -421,6 +451,7 @@
     <script>
         // Simple FAQ toggle functionality
         document.addEventListener('DOMContentLoaded', function() {
+            const helpFocusAnchor = {{ help_focus_anchor|tojson }};
             const faqQuestions = document.querySelectorAll('.faq-question');
 
             faqQuestions.forEach(question => {
@@ -437,6 +468,18 @@
                     }
                 });
             });
+
+            if (helpFocusAnchor) {
+                const target = document.getElementById(helpFocusAnchor);
+                if (target) {
+                    window.requestAnimationFrame(function() {
+                        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        if (typeof target.focus === 'function') {
+                            target.focus({ preventScroll: true });
+                        }
+                    });
+                }
+            }
         });
     </script>
 </body>

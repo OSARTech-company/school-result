@@ -11190,6 +11190,32 @@ def sync_student_subjects_to_class_config(student, school_id, school=None):
     student['stream'] = desired_stream
     return True, None
 
+
+def get_student_offered_subjects_for_class(student, school_id, school=None):
+    """Return a student's offered subjects, falling back to class config when legacy rows lag behind."""
+    if not isinstance(student, dict):
+        return []
+    current_subjects = normalize_subjects_list(student.get('subjects', []))
+    if current_subjects:
+        return current_subjects
+    classname = student.get('classname', '')
+    if not classname:
+        return []
+    school = school or get_school(school_id) or {}
+    config = get_class_subject_config(school_id, classname) or {}
+    if not config:
+        return []
+    fallback_subjects, _, err = build_subjects_from_config(
+        classname=classname,
+        stream=student.get('stream', 'N/A'),
+        config=config,
+        selected_optional_subjects=[],
+        school=school,
+    )
+    if err or not fallback_subjects:
+        return []
+    return normalize_subjects_list(fallback_subjects)
+
 def _default_assessment_config(level):
     """Default exam setup per level."""
     defaults = {
@@ -23967,6 +23993,7 @@ def assign_teacher_to_subjects(school_id, teacher_id, classname, subjects, term,
     cleaned_subjects = normalize_subjects_list(subjects or [])
     if not cleaned_subjects:
         raise ValueError('Select at least one subject.')
+    inserted_count = 0
     with db_connection(commit=True) as conn:
         c = conn.cursor()
         if not academic_year:
@@ -24018,7 +24045,7 @@ def assign_teacher_to_subjects(school_id, teacher_id, classname, subjects, term,
                     'Remove the current assignment first.'
                 )
             if owner_teacher_id == teacher_id:
-                return
+                continue
             db_execute(
                 c,
                 """INSERT INTO teacher_subject_assignments
@@ -24026,6 +24053,8 @@ def assign_teacher_to_subjects(school_id, teacher_id, classname, subjects, term,
                    VALUES (?, ?, ?, ?, ?, ?)""",
                 (school_id, teacher_id, classname, subject, term, academic_year),
             )
+            inserted_count += 1
+    return inserted_count
 
 def remove_teacher_subject_assignment(school_id, teacher_id, classname, subject, term, academic_year):
     """Remove one teacher-subject assignment."""
@@ -24060,7 +24089,7 @@ def get_teacher_subject_assignments(school_id, teacher_id='', classname='', term
             where.append("LOWER(TRIM(COALESCE(tsa.term, ''))) = LOWER(TRIM(?))")
             params.append(term)
         if academic_year:
-            where.append('tsa.academic_year = ?')
+            where.append("(LOWER(TRIM(COALESCE(tsa.academic_year, ''))) = LOWER(TRIM(?)) OR LOWER(TRIM(COALESCE(tsa.academic_year, ''))) = '')")
             params.append(academic_year)
         db_execute(
             c,
@@ -24190,6 +24219,13 @@ def get_teacher_subjects_for_class_term(school_id, teacher_id, classname, term='
         term=term,
         academic_year=academic_year,
     )
+    if not rows and academic_year:
+        rows = get_teacher_subject_assignments(
+            school_id,
+            teacher_id=teacher_id,
+            classname=canonicalize_classname(classname),
+            term=term,
+        )
     return normalize_subjects_list([r.get('subject', '') for r in rows])
 
 def get_teacher_subject_assignment_history(school_id, teacher_id):
@@ -28854,7 +28890,6 @@ def school_admin_teachers():
     subject_assignments = get_teacher_subject_assignments(
         school_id,
         term=current_term,
-        academic_year=current_year,
     ) or []
 
     class_map = {}
@@ -35501,8 +35536,9 @@ def school_admin_assign_subject_teacher():
             )
             return redirect(fallback_redirect)
 
+        inserted_count = 0
         for cls in target_classes:
-            assign_teacher_to_subjects(school_id, teacher_id, cls, subjects, term, academic_year)
+            inserted_count += int(assign_teacher_to_subjects(school_id, teacher_id, cls, subjects, term, academic_year) or 0)
         record_admin_action_audit(
             school_id,
             'assign_teacher_subject',
@@ -35510,11 +35546,18 @@ def school_admin_assign_subject_teacher():
             payload={'classes': target_classes, 'subjects': subjects, 'term': term, 'academic_year': academic_year},
         )
 
-        flash(
-            f'Subject assignment saved for {len(target_classes)} class(es): ' + ', '.join(target_classes[:8])
-            + ('...' if len(target_classes) > 8 else ''),
-            'success',
-        )
+        if inserted_count:
+            flash(
+                f'Subject assignment saved for {inserted_count} new class-subject link(s): '
+                + ', '.join(target_classes[:8])
+                + ('...' if len(target_classes) > 8 else ''),
+                'success',
+            )
+        else:
+            flash(
+                'No new subject assignment was needed because the selected teacher already had those class-subject links.',
+                'info',
+            )
     except Exception as e:
         flash(f'Error assigning subject teacher: {str(e)}', 'error')
 
@@ -36055,7 +36098,6 @@ def teacher_dashboard():
         school_id,
         teacher_id=teacher_id,
         term=current_term,
-        academic_year=current_year,
     )
     subject_assignment_by_class = {}
     subject_assignment_set = set()
@@ -36127,7 +36169,7 @@ def teacher_dashboard():
     ):
         classname = (s.get('classname') or '').strip()
         is_class_owner = classname.lower() in class_owner_set if classname else False
-        offered_subjects = normalize_subjects_list(s.get('subjects', []))
+        offered_subjects = get_student_offered_subjects_for_class(s, school_id, school=school)
         matched_subjects = []
         if not is_class_owner:
             allowed_for_class = subject_map_by_class.get(classname, set())
@@ -36163,7 +36205,7 @@ def teacher_dashboard():
             (item[0] or '').strip().lower(),
         )
     ):
-        class_subjects = normalize_subjects_list(s.get('subjects', []))
+        class_subjects = get_student_offered_subjects_for_class(s, school_id, school=school)
         allowed_for_class = subject_map_by_class.get(s.get('classname', ''), set())
         if not allowed_for_class:
             continue
@@ -36265,7 +36307,7 @@ def teacher_dashboard():
                 academic_year=current_year,
             ):
                 continue
-            offered_subjects = normalize_subjects_list(student.get('subjects', []))
+            offered_subjects = get_student_offered_subjects_for_class(student, school_id, school=school)
             subj_map = {s.lower(): s for s in offered_subjects}
             subject_key = subj_map.get(selected_rank_subject.lower(), '')
             if not subject_key:
@@ -36400,7 +36442,7 @@ def teacher_dashboard():
         for _sid, student in subject_students_lookup.items():
             if not _class_match(student.get('classname', ''), classname):
                 continue
-            offered = {x.lower(): x for x in normalize_subjects_list(student.get('subjects', []))}
+            offered = {x.lower(): x for x in get_student_offered_subjects_for_class(student, school_id, school=school)}
             subject_key = offered.get(subject.lower(), '')
             if not subject_key:
                 continue
@@ -36795,7 +36837,7 @@ def teacher_notifications():
         for student in (term_students_all if term_students_all is not None else subject_students_data).values():
             if not _class_match(student.get('classname', ''), classname):
                 continue
-            offered = {x.lower(): x for x in normalize_subjects_list(student.get('subjects', []))}
+            offered = {x.lower(): x for x in get_student_offered_subjects_for_class(student, school_id, school=school)}
             subject_key = offered.get(subject.lower(), '')
             if not subject_key:
                 continue
@@ -36921,7 +36963,7 @@ def teacher_subject_comments():
             continue
         allowed_subjects = set()
         if classname in class_teacher_classes:
-            allowed_subjects.update(normalize_subjects_list(student.get('subjects', [])))
+            allowed_subjects.update(get_student_offered_subjects_for_class(student, school_id, school=school))
         if classname in subject_assignment_by_class:
             allowed_subjects.update(subject_assignment_by_class.get(classname, set()))
         if not allowed_subjects:
@@ -37288,7 +37330,6 @@ def teacher_mark_all_messages_read():
         school_id,
         teacher_id=teacher_id,
         term=current_term,
-        academic_year=current_year,
     )
     subject_set = {normalize_subject_name(row.get('subject', '')) for row in subject_rows if normalize_subject_name(row.get('subject', ''))}
     class_set = sorted(set(classes) | {str(row.get('classname') or '').strip() for row in subject_rows if (row.get('classname') or '').strip()})
@@ -38343,7 +38384,10 @@ def teacher_enter_scores():
         student['principal_comment'] = ''
     is_locked = is_result_published(school_id, student.get('classname', ''), current_term, current_year)
     exam_config = get_assessment_config_for_class(school_id, student.get('classname', ''))
-    all_subjects = sorted(student.get('subjects', []), key=lambda x: str(x).lower())
+    all_subjects = sorted(
+        get_student_offered_subjects_for_class(student, school_id, school=school),
+        key=lambda x: str(x).lower(),
+    )
     assigned_subjects = get_teacher_subjects_for_class_term(
         school_id,
         teacher_id,
@@ -38675,7 +38719,7 @@ def teacher_enter_scores():
                 completed = 0
                 target = (subj or '').strip().lower()
                 for _sid, st_now in class_students_now.items():
-                    offered = normalize_subjects_list(st_now.get('subjects', []))
+                    offered = get_student_offered_subjects_for_class(st_now, school_id, school=school)
                     offered_map = {x.lower(): x for x in offered}
                     offered_key = offered_map.get(target, '')
                     if not offered_key:
@@ -42877,7 +42921,7 @@ def view_students():
                 allowed_subjects = subject_map_by_class.get(classname, set())
                 if not allowed_subjects:
                     continue
-                offered_subjects = normalize_subjects_list(student_data.get('subjects', []))
+                offered_subjects = get_student_offered_subjects_for_class(student_data, school_id, school=school)
                 subject_actions = [s for s in offered_subjects if s in allowed_subjects]
                 if not subject_actions:
                     continue
@@ -43229,7 +43273,8 @@ def help():
     elif role == 'student':
         fallback = url_for('student_dashboard')
     back_url = ref or fallback
-    return render_template('shared/help.html', back_url=back_url)
+    help_focus_anchor = 'school-admin-handbook' if role == 'school_admin' else ''
+    return render_template('shared/help.html', back_url=back_url, help_focus_anchor=help_focus_anchor, role=role)
 
 @app.route('/report_issue', methods=['GET', 'POST'])
 @require_rate_limit('report_issue', RATE_LIMIT_REPORT_ISSUE_PER_MIN, 60, redirect_endpoint='report_issue', methods=('POST',))
