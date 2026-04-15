@@ -42971,7 +42971,7 @@ def parent_compare_results():
 
 @app.route('/school-admin/student-result')
 def school_admin_student_result():
-    """School admin can view any student's published result and switch terms."""
+    """School admin can view any student's published result and current draft preview."""
     if session.get('role') != 'school_admin':
         return redirect(url_for('login'))
 
@@ -42991,9 +42991,14 @@ def school_admin_student_result():
     current_term = get_current_term(school)
     current_year = (school or {}).get('academic_year', '')
     published_terms = get_published_terms_for_student(school_id, sid)
-    if not published_terms:
-        flash('No published result available yet for this student.', 'error')
-        return redirect(url_for('school_admin_dashboard'))
+    current_term_token = _term_token(current_year, current_term)
+    published_current = resolve_requested_published_term(
+        published_terms,
+        current_term_token,
+        current_term=current_term,
+        current_year=current_year,
+    ) if published_terms else None
+    preview_current_term = False
 
     if requested_term:
         target_entry = resolve_requested_published_term(
@@ -43003,80 +43008,183 @@ def school_admin_student_result():
             current_year=current_year,
         )
         if not target_entry:
-            flash(f'{requested_term} result is not published for this student.', 'error')
-            return redirect(url_for('school_admin_student_result', student_id=sid))
-    else:
+            req_year, req_term = _parse_term_token(requested_term)
+            req_term = (req_term or requested_term).strip()
+            req_year = (req_year or current_year).strip()
+            if req_term == current_term and req_year == (current_year or '').strip():
+                preview_current_term = True
+            else:
+                flash(f'{requested_term} result is not published for this student.', 'error')
+                return redirect(url_for('school_admin_student_result', student_id=sid))
+    elif published_current:
         target_entry = pick_default_published_term(published_terms, current_term, current_year)
+    else:
+        target_entry = None
+        preview_current_term = True
 
-    target_term = target_entry['term']
-    target_year = target_entry.get('academic_year', '')
-    current_term_token = target_entry['token']
+    if preview_current_term:
+        target_term = current_term
+        target_year = current_year
+        current_term_token = _term_token(target_year, target_term)
+        classname = student.get('classname', '')
+        exam_config = get_assessment_config_for_class(school_id, classname)
+        preview_scores = student.get('scores', {}) if isinstance(student.get('scores', {}), dict) else {}
+        preview_subjects = student.get('subjects', []) if isinstance(student.get('subjects', []), list) else []
+        average_marks = compute_average_marks_from_scores(preview_scores, subjects=preview_subjects)
+        grade_cfg = get_grade_config(school_id)
+        class_results_rows = load_students(school_id, class_filter=classname, term_filter=target_term)
+        ranking_students = []
+        for peer_id, peer in (class_results_rows or {}).items():
+            peer_year = (peer.get('academic_year') or target_year or '').strip()
+            if target_year and peer_year and peer_year != target_year:
+                continue
+            peer_scores = peer.get('scores', {}) if isinstance(peer.get('scores', {}), dict) else {}
+            peer_subjects = peer.get('subjects', []) if isinstance(peer.get('subjects', []), list) else []
+            ranking_students.append({
+                'student_id': peer_id,
+                'class_name': peer.get('classname', classname),
+                'term': target_term,
+                'stream': peer.get('stream', ''),
+                'average_marks': compute_average_marks_from_scores(peer_scores, subjects=peer_subjects),
+            })
+        if not any((row.get('student_id') or '') == sid for row in ranking_students):
+            ranking_students.append({
+                'student_id': sid,
+                'class_name': classname,
+                'term': target_term,
+                'stream': student.get('stream', ''),
+                'average_marks': average_marks,
+            })
+        position = calculate_positions(ranking_students, school.get('ss_ranking_mode', 'together'), school=school).get(sid)
+        preview_student_for_positions = dict(student)
+        preview_student_for_positions['student_id'] = sid
+        preview_student_for_positions['term'] = target_term
+        preview_student_for_positions['classname'] = classname
+        subject_positions = build_subject_positions_for_student(school_id, preview_student_for_positions, school)
+        result_student = {
+            'first_name': student.get('firstname', ''),
+            'student_id': sid,
+            'date_of_birth': (student.get('date_of_birth', '') or '').strip(),
+            'gender': (student.get('gender', '') or '').strip(),
+            'class_name': classname,
+            'class_size': len(ranking_students or []),
+            'term': target_term,
+            'academic_year': target_year,
+            'number_of_subject': student.get('number_of_subject', len(preview_subjects)),
+            'subjects': preview_scores,
+            'behaviour_assessment': student.get('behaviour_assessment', {}) if isinstance(student.get('behaviour_assessment', {}), dict) else {},
+            'teacher_comment': student.get('teacher_comment', ''),
+            'principal_comment': student.get('principal_comment', ''),
+            'average_marks': average_marks,
+            'Grade': grade_from_score(average_marks, grade_cfg),
+            'Status': status_from_score(average_marks, grade_cfg),
+        }
+        result_student.update(
+            build_result_term_attendance_data(
+                school_id=school_id,
+                student_id=sid,
+                classname=classname,
+                term=target_term,
+                academic_year=target_year,
+            )
+        )
+        result_max_tests = detect_max_tests_from_scores(preview_scores, school.get('max_tests', 3))
+        signoff = get_result_signoff_details(
+            school_id,
+            classname,
+            target_term,
+            target_year,
+        )
+        teacher_signature = signoff.get('teacher_signature', '')
+        principal_signature = signoff.get('principal_signature', '')
+        teacher_name = signoff.get('teacher_name', '')
+        principal_name = signoff.get('principal_name', '')
+        verify_ctx = {}
+        preview_entry = {
+            'term': target_term,
+            'academic_year': target_year,
+            'token': current_term_token,
+            'label': f'{target_term} ({target_year}) Draft'.strip(),
+        }
+        term_choices = list(published_terms or [])
+        if not any((row.get('token') or '') == current_term_token for row in term_choices):
+            term_choices.append(preview_entry)
+        current_index = next((i for i, item in enumerate(term_choices) if item['token'] == current_term_token), 0)
+        prev_term = term_choices[current_index - 1] if current_index > 0 else None
+        next_term = term_choices[current_index + 1] if current_index < len(term_choices) - 1 else None
+        term_notice = 'Draft preview: this sheet uses currently entered scores and may still be incomplete because results have not been submitted/published yet.'
+        published_terms = term_choices
+    else:
+        target_term = target_entry['term']
+        target_year = target_entry.get('academic_year', '')
+        current_term_token = target_entry['token']
 
-    snapshot = load_published_student_result(school_id, sid, target_term, target_year)
-    if not snapshot:
-        flash('Published result snapshot not found.', 'error')
-        return redirect(url_for('school_admin_dashboard'))
+        snapshot = load_published_student_result(school_id, sid, target_term, target_year)
+        if not snapshot:
+            flash('Published result snapshot not found.', 'error')
+            return redirect(url_for('school_admin_dashboard'))
 
-    exam_config = get_assessment_config_for_class(school_id, snapshot.get('classname', ''))
-    class_results = load_published_class_results(school_id, snapshot.get('classname', ''), target_term, target_year, school=school)
-    position, subject_positions = build_positions_from_published_results(
-        school=school,
-        classname=snapshot.get('classname', ''),
-        term=target_term,
-        class_results=class_results,
-        student_id=sid,
-        student_stream=snapshot.get('stream', ''),
-        subjects=snapshot.get('subjects', []),
-    )
+        exam_config = get_assessment_config_for_class(school_id, snapshot.get('classname', ''))
+        class_results = load_published_class_results(school_id, snapshot.get('classname', ''), target_term, target_year, school=school)
+        position, subject_positions = build_positions_from_published_results(
+            school=school,
+            classname=snapshot.get('classname', ''),
+            term=target_term,
+            class_results=class_results,
+            student_id=sid,
+            student_stream=snapshot.get('stream', ''),
+            subjects=snapshot.get('subjects', []),
+        )
 
-    result_student = {
-        'first_name': snapshot.get('firstname', student.get('firstname', '')),
-        'student_id': sid,
-        'date_of_birth': (student.get('date_of_birth', '') or '').strip(),
-        'gender': (student.get('gender', '') or '').strip(),
-        'class_name': snapshot.get('classname', student.get('classname', '')),
-        'class_size': len(class_results or []),
-        'term': target_term,
-        'academic_year': target_year,
-        'number_of_subject': snapshot.get('number_of_subject', student.get('number_of_subject', 0)),
-        'subjects': snapshot.get('scores', {}),
-        'behaviour_assessment': snapshot.get('behaviour_assessment', {}),
-        'teacher_comment': snapshot.get('teacher_comment', ''),
-        'principal_comment': snapshot.get('principal_comment', ''),
-        'average_marks': snapshot.get('average_marks', 0),
-        'Grade': snapshot.get('Grade', 'F'),
-        'Status': snapshot.get('Status', 'Fail'),
-    }
-    result_student.update(
-        build_result_term_attendance_data(
+        result_student = {
+            'first_name': snapshot.get('firstname', student.get('firstname', '')),
+            'student_id': sid,
+            'date_of_birth': (student.get('date_of_birth', '') or '').strip(),
+            'gender': (student.get('gender', '') or '').strip(),
+            'class_name': snapshot.get('classname', student.get('classname', '')),
+            'class_size': len(class_results or []),
+            'term': target_term,
+            'academic_year': target_year,
+            'number_of_subject': snapshot.get('number_of_subject', student.get('number_of_subject', 0)),
+            'subjects': snapshot.get('scores', {}),
+            'behaviour_assessment': snapshot.get('behaviour_assessment', {}),
+            'teacher_comment': snapshot.get('teacher_comment', ''),
+            'principal_comment': snapshot.get('principal_comment', ''),
+            'average_marks': snapshot.get('average_marks', 0),
+            'Grade': snapshot.get('Grade', 'F'),
+            'Status': snapshot.get('Status', 'Fail'),
+        }
+        result_student.update(
+            build_result_term_attendance_data(
+                school_id=school_id,
+                student_id=sid,
+                classname=snapshot.get('classname', student.get('classname', '')),
+                term=target_term,
+                academic_year=target_year,
+            )
+        )
+        result_max_tests = detect_max_tests_from_scores(snapshot.get('scores', {}), school.get('max_tests', 3))
+        signoff = get_result_signoff_details(
+            school_id,
+            snapshot.get('classname', ''),
+            target_term,
+            target_year,
+        )
+        teacher_signature = signoff.get('teacher_signature', '')
+        principal_signature = signoff.get('principal_signature', '')
+        teacher_name = signoff.get('teacher_name', '')
+        principal_name = signoff.get('principal_name', '')
+        verify_ctx = build_result_verification_context(
             school_id=school_id,
             student_id=sid,
-            classname=snapshot.get('classname', student.get('classname', '')),
             term=target_term,
             academic_year=target_year,
+            classname=snapshot.get('classname', ''),
         )
-    )
-    result_max_tests = detect_max_tests_from_scores(snapshot.get('scores', {}), school.get('max_tests', 3))
-    signoff = get_result_signoff_details(
-        school_id,
-        snapshot.get('classname', ''),
-        target_term,
-        target_year,
-    )
-    teacher_signature = signoff.get('teacher_signature', '')
-    principal_signature = signoff.get('principal_signature', '')
-    teacher_name = signoff.get('teacher_name', '')
-    principal_name = signoff.get('principal_name', '')
-    verify_ctx = build_result_verification_context(
-        school_id=school_id,
-        student_id=sid,
-        term=target_term,
-        academic_year=target_year,
-        classname=snapshot.get('classname', ''),
-    )
-    current_index = next((i for i, item in enumerate(published_terms) if item['token'] == current_term_token), 0)
-    prev_term = published_terms[current_index - 1] if current_index > 0 else None
-    next_term = published_terms[current_index + 1] if current_index < len(published_terms) - 1 else None
+        current_index = next((i for i, item in enumerate(published_terms) if item['token'] == current_term_token), 0)
+        prev_term = published_terms[current_index - 1] if current_index > 0 else None
+        next_term = published_terms[current_index + 1] if current_index < len(published_terms) - 1 else None
+        term_notice = ''
 
     return render_template(
         'student/student_result.html',
@@ -43088,7 +43196,7 @@ def school_admin_student_result():
         current_term_token=current_term_token,
         available_result_classes=[],
         selected_result_class='',
-        term_notice='',
+        term_notice=term_notice,
         term_view_endpoint='school_admin_student_result',
         prev_term=prev_term,
         next_term=next_term,

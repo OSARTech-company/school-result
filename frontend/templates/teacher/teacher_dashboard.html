@@ -458,13 +458,28 @@
                 </div>
                 <div class="layout-primary">
                 {% if active_tab == 'score' %}
-                {% if has_class_assignment or selected_score_subject or selected_score_class %}
+                {% if selected_score_subject %}
                 <div class="card">
                     <h2><i class="fas fa-book"></i> Subject Score Entry</h2>
-                    <p><strong>Current Term:</strong> {{ current_term }}</p>
-                    {% if selected_score_subject %}
-                    <p><strong>Selected Subject:</strong> {{ selected_score_subject }}{% if selected_score_class %} | <strong>Class:</strong> {{ selected_score_class }}{% endif %}</p>
-                    {% endif %}
+                    <div class="info-grid" style="margin-bottom: 14px;">
+                        <div class="info-tile">
+                            <span class="info-tile-label">Current Term</span>
+                            <strong>{{ current_term }}</strong>
+                        </div>
+                        <div class="info-tile">
+                            <span class="info-tile-label">Selected Subject</span>
+                            <strong>{{ selected_score_subject }}</strong>
+                        </div>
+                        <div class="info-tile">
+                            <span class="info-tile-label">Class Filter</span>
+                            <strong>{{ selected_score_class or 'All assigned classes' }}</strong>
+                        </div>
+                        <div class="info-tile">
+                            <span class="info-tile-label">Students</span>
+                            <strong>{{ filtered_subject_student_rows|length }}</strong>
+                        </div>
+                    </div>
+                    <p class="note">Subjects are already listed in the sidebar. This page now focuses on the selected subject only.</p>
                     <table>
                         <thead>
                             <tr>
@@ -472,7 +487,7 @@
                                 <th>Name</th>
                                 <th>Class</th>
                                 <th>Stream</th>
-                                <th>Your Subjects</th>
+                                <th>Status</th>
                                 <th>Action</th>
                             </tr>
                         </thead>
@@ -483,33 +498,44 @@
                                     <td>{{ item.firstname }}</td>
                                     <td>{{ item.classname }}</td>
                                     <td>{{ item.stream }}</td>
-                                    <td>{{ item.subjects|join(', ') }}</td>
                                     <td>
                                         {% set class_locked_subjects = (locked_subjects_by_class.get(item.classname, []) if locked_subjects_by_class is defined else []) %}
-                                        {% for subject in item.subjects %}
-                                        {% if subject in class_locked_subjects %}
-                                        <span class="btn btn-warning btn-sm" title="Locked until subject teacher submits to class teacher." style="opacity:0.78; cursor:not-allowed;">
-                                            <i class="fas fa-lock"></i> {{ subject }}
+                                        {% if selected_score_subject in class_locked_subjects %}
+                                        <span class="chip chip-warning">
+                                            <i class="fas fa-lock"></i> Locked
                                         </span>
                                         {% else %}
-                                        <a href="{{ url_for('teacher_enter_subject_scores', student_id=item.student_id, subject=subject) }}" class="btn btn-primary btn-sm">{{ subject }}</a>
+                                        <span class="chip chip-success">
+                                            <i class="fas fa-circle-check"></i> Ready
+                                        </span>
                                         {% endif %}
-                                        {% endfor %}
+                                    </td>
+                                    <td>
+                                        {% if selected_score_subject in class_locked_subjects %}
+                                        <span class="btn btn-warning btn-sm" title="Locked until subject teacher submits to class teacher." style="opacity:0.78; cursor:not-allowed;">
+                                            <i class="fas fa-lock"></i> {{ selected_score_subject }}
+                                        </span>
+                                        {% else %}
+                                        <a href="{{ url_for('teacher_enter_subject_scores', student_id=item.student_id, subject=selected_score_subject) }}" class="btn btn-primary btn-sm">
+                                            <i class="fas fa-pen-to-square"></i> Enter {{ selected_score_subject }}
+                                        </a>
+                                        {% endif %}
                                     </td>
                                 </tr>
                             {% else %}
                                 <tr>
                                     <td colspan="6" class="text-center">
-                                        {% if selected_score_subject %}
                                         No students found for the selected subject/class.
-                                        {% else %}
-                                        Choose a subject from the left Score Entry menu to begin.
-                                        {% endif %}
                                     </td>
                                 </tr>
                             {% endfor %}
                         </tbody>
                     </table>
+                </div>
+                {% elif selected_score_class %}
+                <div class="card">
+                    <h2><i class="fas fa-book"></i> Subject Score Entry</h2>
+                    <p class="note">Class filter is active for <strong>{{ selected_score_class }}</strong>. Choose a subject from the left `Score Entry` menu to load the matching students.</p>
                 </div>
                 {% elif score_nav_tree %}
                 <div class="card">
