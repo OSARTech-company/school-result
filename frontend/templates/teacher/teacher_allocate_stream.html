@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Allocate Stream</title>
-    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico', v='20260411b') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260308f') }}">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
@@ -41,6 +41,16 @@
         .modal-title { margin: 0 0 10px; font-size: 1.1rem; color: #0f172a; }
         .modal-text { margin: 0 0 16px; color: #334155; }
         .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+        .inline-status {
+            margin-top: 14px;
+            padding: 12px 14px;
+            border-radius: 8px;
+            display: none;
+            font-weight: 600;
+        }
+        .inline-status.show { display: block; }
+        .inline-status.success { background: #ecfdf3; color: #166534; border: 1px solid #bbf7d0; }
+        .inline-status.error { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
     </style>
 </head>
 <body>
@@ -77,9 +87,10 @@
                     </div>
                 </div>
                 {% endif %}
-                <button type="submit" class="btn btn-primary">Save Allocation</button>
-                <a href="{{ url_for('teacher_dashboard', tab='score') }}" class="btn btn-secondary">Cancel</a>
+                <button type="button" id="saveAllocationBtn" class="btn btn-primary">Save Allocation</button>
+                <a href="{% if session.get('role') == 'school_admin' %}{{ url_for('school_admin_view_students', **{'class': student.classname}) }}{% else %}{{ url_for('teacher_class_list') }}{% endif %}" class="btn btn-secondary">Cancel</a>
             </form>
+            <div id="inlineStatus" class="inline-status" role="status" aria-live="polite"></div>
         </div>
     </div>
     </div>
@@ -96,19 +107,41 @@
             </div>
         </div>
     </div>
+    <div class="modal-overlay" id="timeoutModal" aria-hidden="true">
+        <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="timeoutTitle">
+            <h3 class="modal-title" id="timeoutTitle">Saving is Taking Longer Than Usual</h3>
+            <p class="modal-text" id="timeoutText">
+                The server is taking too long to save. You can wait a bit more or cancel and try again.
+            </p>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" id="timeoutCancel">Close</button>
+            </div>
+        </div>
+    </div>
     <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260306e') }}"></script>
     <script>
         (function () {
             var form = document.getElementById('streamForm');
             var streamSelect = document.getElementById('stream');
             var overlay = document.getElementById('confirmModal');
+            var timeoutOverlay = document.getElementById('timeoutModal');
+            var timeoutCancel = document.getElementById('timeoutCancel');
             var cancelBtn = document.getElementById('cancelConfirm');
             var acceptBtn = document.getElementById('acceptConfirm');
+            var saveBtn = document.getElementById('saveAllocationBtn');
             var text = document.getElementById('confirmText');
-            if (!form || !streamSelect || !overlay || !cancelBtn || !acceptBtn || !text) return;
+            if (!form || !streamSelect || !overlay || !cancelBtn || !acceptBtn || !text || !timeoutOverlay || !timeoutCancel || !saveBtn) return;
 
             var currentStream = "{{ (student.stream or 'N/A')|e }}";
-            var allowSubmit = false;
+            var submitTimer = null;
+            var inlineStatus = document.getElementById('inlineStatus');
+            var submitButton = saveBtn;
+
+            function setInlineStatus(message, kind) {
+                if (!inlineStatus) return;
+                inlineStatus.textContent = message || '';
+                inlineStatus.className = 'inline-status show ' + (kind || 'error');
+            }
 
             function openModal(message) {
                 text.textContent = message;
@@ -120,10 +153,17 @@
                 overlay.classList.remove('show');
                 overlay.setAttribute('aria-hidden', 'true');
             }
+            function openTimeoutModal() {
+                timeoutOverlay.classList.add('show');
+                timeoutOverlay.setAttribute('aria-hidden', 'false');
+            }
+            function closeTimeoutModal() {
+                timeoutOverlay.classList.remove('show');
+                timeoutOverlay.setAttribute('aria-hidden', 'true');
+            }
 
-            form.addEventListener('submit', function (event) {
-                if (allowSubmit) return;
-                event.preventDefault();
+            function beginConfirmation() {
+                hideLoadingOverlay();
                 var targetStream = (streamSelect.value || '').trim();
                 if (!targetStream) return;
                 if (!currentStream || currentStream === 'N/A') {
@@ -133,22 +173,72 @@
                 } else {
                     openModal('Change stream from ' + currentStream + ' to ' + targetStream + '? This may remove scores for dropped subjects.');
                 }
+            }
+
+            saveBtn.addEventListener('click', function () {
+                beginConfirmation();
             });
 
             cancelBtn.addEventListener('click', function () {
                 closeModal();
             });
             acceptBtn.addEventListener('click', function () {
-                allowSubmit = true;
                 closeModal();
-                form.submit();
+                if (submitTimer) clearTimeout(submitTimer);
+                hideLoadingOverlay();
+                if (submitButton) submitButton.disabled = true;
+                setInlineStatus('Saving stream allocation...', 'success');
+                var controller = new AbortController();
+                submitTimer = setTimeout(function () {
+                    controller.abort();
+                    openTimeoutModal();
+                    setInlineStatus('Saving timed out. The server did not respond in time.', 'error');
+                    if (submitButton) submitButton.disabled = false;
+                }, 15000);
+
+                fetch(form.action || window.location.href, {
+                    method: 'POST',
+                    body: new FormData(form),
+                    headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' },
+                    signal: controller.signal,
+                    credentials: 'same-origin'
+                }).then(function (response) {
+                    return response.json().catch(function () {
+                        return { ok: false, message: 'Unexpected server response.' };
+                    });
+                }).then(function (payload) {
+                    if (submitTimer) clearTimeout(submitTimer);
+                    closeTimeoutModal();
+                    if (payload && payload.ok && payload.redirect_url) {
+                        setInlineStatus(payload.message || 'Saved successfully.', 'success');
+                        window.location.href = payload.redirect_url;
+                        return;
+                    }
+                    setInlineStatus((payload && payload.message) || 'Could not save stream allocation.', 'error');
+                    if (submitButton) submitButton.disabled = false;
+                }).catch(function (error) {
+                    if (submitTimer) clearTimeout(submitTimer);
+                    if (error && error.name === 'AbortError') {
+                        return;
+                    }
+                    closeTimeoutModal();
+                    setInlineStatus('Could not reach the server. Please try again.', 'error');
+                    if (submitButton) submitButton.disabled = false;
+                });
             });
             overlay.addEventListener('click', function (event) {
                 if (event.target === overlay) closeModal();
+            });
+            timeoutCancel.addEventListener('click', function () {
+                closeTimeoutModal();
+            });
+            timeoutOverlay.addEventListener('click', function (event) {
+                if (event.target === timeoutOverlay) closeTimeoutModal();
             });
         })();
     </script>
 </body>
 </html>
+
 
 

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>View Students - Student Score Management System</title>
-    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico', v='20260411b') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
@@ -600,7 +600,7 @@
 
             <!-- Search and Filter Controls -->
             <div class="controls-section">
-                <form class="search-filter-row" method="GET" action="{{ url_for('view_students') }}" style="margin-bottom: 16px;">
+                <form class="search-filter-row" method="GET" action="{{ url_for(view_students_endpoint) }}" style="margin-bottom: 16px;">
                     <select class="filter-select" name="class">
                         <option value="">All Classes (Server)</option>
                         {% for class_name in available_classes %}
@@ -623,7 +623,7 @@
                     <button type="submit" class="btn">
                         <i class="fas fa-filter"></i> Apply
                     </button>
-                    <a href="{{ url_for('view_students') }}" class="btn clear-btn" style="text-align:center; text-decoration:none; line-height: 1.4;">
+                    <a href="{{ url_for(view_students_endpoint) }}" class="btn clear-btn" style="text-align:center; text-decoration:none; line-height: 1.4;">
                         <i class="fas fa-undo"></i> Reset
                     </a>
                 </form>
@@ -756,6 +756,11 @@
                                     <a href="{{ url_for('school_admin_student_result', student_id=student.student_id) }}" class="action-btn view" title="View Published Result">
                                         <i class="fas fa-file-alt"></i> Result
                                     </a>
+                                    {% if student.can_edit_full %}
+                                    <a href="{{ url_for('teacher_enter_scores', student_id=student.student_id) }}" class="action-btn edit" title="Enter Scores" style="background: #9b59b6;">
+                                        <i class="fas fa-chart-bar"></i> Scores
+                                    </a>
+                                    {% endif %}
                                     <a href="{{ url_for('school_admin_correct_result', student_id=student.student_id) }}" class="action-btn edit" title="Correct & Republish">
                                         <i class="fas fa-pen"></i> Correct
                                     </a>
@@ -771,10 +776,10 @@
                 <div class="pagination-summary">Page {{ page }} of {{ total_pages }} | Total {{ total_students }} students</div>
                 <div class="pagination-controls">
                     {% if page > 1 %}
-                    <a class="btn clear-btn" style="text-decoration:none;" href="{{ url_for('view_students') }}?class={{ selected_class|urlencode }}&term={{ selected_term|urlencode }}&per_page={{ per_page }}&page=1">
+                    <a class="btn clear-btn" style="text-decoration:none;" href="{{ url_for(view_students_endpoint) }}?class={{ selected_class|urlencode }}&term={{ selected_term|urlencode }}&per_page={{ per_page }}&page=1">
                         <i class="fas fa-angles-left"></i> First
                     </a>
-                    <a class="btn clear-btn" style="text-decoration:none;" href="{{ url_for('view_students') }}?class={{ selected_class|urlencode }}&term={{ selected_term|urlencode }}&per_page={{ per_page }}&page={{ page - 1 }}">
+                    <a class="btn clear-btn" style="text-decoration:none;" href="{{ url_for(view_students_endpoint) }}?class={{ selected_class|urlencode }}&term={{ selected_term|urlencode }}&per_page={{ per_page }}&page={{ page - 1 }}">
                         <i class="fas fa-arrow-left"></i> Prev
                     </a>
                     {% endif %}
@@ -795,7 +800,7 @@
                         <a
                             class="btn {% if p == page %}btn-primary{% else %}clear-btn{% endif %}"
                             style="text-decoration:none; min-width:42px; text-align:center; flex:0 0 auto;"
-                            href="{{ url_for('view_students') }}?class={{ selected_class|urlencode }}&term={{ selected_term|urlencode }}&per_page={{ per_page }}&page={{ p }}"
+                            href="{{ url_for(view_students_endpoint) }}?class={{ selected_class|urlencode }}&term={{ selected_term|urlencode }}&per_page={{ per_page }}&page={{ p }}"
                         >
                             {{ p }}
                         </a>
@@ -804,10 +809,10 @@
                     {% endif %}
 
                     {% if page < total_pages %}
-                    <a class="btn clear-btn" style="text-decoration:none;" href="{{ url_for('view_students') }}?class={{ selected_class|urlencode }}&term={{ selected_term|urlencode }}&per_page={{ per_page }}&page={{ page + 1 }}">
+                    <a class="btn clear-btn" style="text-decoration:none;" href="{{ url_for(view_students_endpoint) }}?class={{ selected_class|urlencode }}&term={{ selected_term|urlencode }}&per_page={{ per_page }}&page={{ page + 1 }}">
                         Next <i class="fas fa-arrow-right"></i>
                     </a>
-                    <a class="btn clear-btn" style="text-decoration:none;" href="{{ url_for('view_students') }}?class={{ selected_class|urlencode }}&term={{ selected_term|urlencode }}&per_page={{ per_page }}&page={{ total_pages }}">
+                    <a class="btn clear-btn" style="text-decoration:none;" href="{{ url_for(view_students_endpoint) }}?class={{ selected_class|urlencode }}&term={{ selected_term|urlencode }}&per_page={{ per_page }}&page={{ total_pages }}">
                         Last <i class="fas fa-angles-right"></i>
                     </a>
                     {% endif %}
@@ -826,7 +831,7 @@
                             Nothing was found for the current selection. Reset the filter or switch class/term.
                         </p>
                         <div class="empty-state-actions">
-                            <a href="{{ url_for('view_students') }}" class="export-btn">
+                            <a href="{{ url_for(view_students_endpoint) }}" class="export-btn">
                                 <i class="fas fa-rotate-left"></i> Reset Filter
                             </a>
                             <a href="{{ url_for('school_admin_add_students_by_class') }}" class="clear-btn" style="text-decoration:none;">
@@ -966,4 +971,5 @@
     </script>
 </body>
 </html>
+
 

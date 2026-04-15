@@ -4,10 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Teacher Dashboard - Student Score Management System</title>
-    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico', v='20260411b') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260308f') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-enhanced.css', v='20260322a') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-enhanced.css', v='20260411b') }}">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         .school-logo, .school-logo-fallback { position: absolute; top: 14px; right: 14px; object-fit: contain; padding: 4px; }
@@ -159,7 +159,7 @@
                         <strong>Teacher:</strong> {{ teacher_name }} |
                         <strong>Phone:</strong> {{ teacher_phone or 'Not set' }} |
                         <strong>Assigned Classes:</strong> {{ classes|join(', ') if classes else 'None' }} |
-                        <strong>Subject Assignments:</strong> {{ subject_assignment_count or 0 }} |
+                        <strong>{% if school and school.score_entry_mode == 'dean_led' %}Class Subjects{% else %}Subject Assignments{% endif %}:</strong> {{ subject_assignment_count or 0 }} |
                         <strong>Last Login:</strong> {{ last_login_at }}
                     </p>
                     {% if school_access_state %}
@@ -225,7 +225,7 @@
                     </div>
                     <div class="stat-card">
                         <h3>{{ subject_assignment_subject_count or 0 }}</h3>
-                        <p>Assigned Subjects</p>
+                        <p>{% if school and school.score_entry_mode == 'dean_led' %}Class Subjects{% else %}Assigned Subjects{% endif %}</p>
                     </div>
                 </div>
 
@@ -242,9 +242,10 @@
                                 {% endfor %}
                             </ul>
                             {% else %}
-                            <p class="note">No class assignment yet.</p>
+                                <p class="note">No class assignment yet.</p>
                             {% endif %}
                         </div>
+                        {% if not school or school.score_entry_mode != 'dean_led' %}
                         <div class="assignment-box">
                             <h3>Subject Teacher Assignment</h3>
                             <div class="assignment-count">{{ subject_assignment_count or 0 }}</div>
@@ -258,13 +259,23 @@
                             <p class="note">No subject assignment yet.</p>
                             {% endif %}
                         </div>
+                        {% else %}
+                        <div class="assignment-box">
+                            <h3>Dean-led Score Entry</h3>
+                            <div class="assignment-count"><i class="fas fa-user-shield"></i></div>
+                            <p class="note">This school uses class-based score entry. Teachers can enter all subjects for assigned classes.</p>
+                        </div>
+                        {% endif %}
                     </div>
+                    {% if school and school.score_entry_mode == 'dean_led' %}
+                    <p class="note" style="margin-top:10px;">Subject assignment is hidden for this school mode. Use Score Entry to work from class subjects.</p>
+                    {% endif %}
                     <div class="assignment-table-wrap">
                         <table>
                             <thead>
                                 <tr>
                                     <th>Class</th>
-                                    <th>Subjects You Teach</th>
+                                    <th>{% if school and school.score_entry_mode == 'dean_led' %}Class Subjects{% else %}Subjects You Teach{% endif %}</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -404,9 +415,15 @@
         
                 <div class="card">
                     <h2><i class="fas fa-route"></i> Your Workflow</h2>
+                    {% if school and school.score_entry_mode == 'dean_led' %}
+                    <p class="workflow-step">1. Open Score Entry from the class list.</p>
+                    <p class="workflow-step">2. Enter scores for all subjects offered by the student.</p>
+                    <p class="workflow-step">3. Review and save before class result approval.</p>
+                    {% else %}
                     <p class="workflow-step">1. Enter your assigned subject scores for students.</p>
                     <p class="workflow-step">2. If you are class teacher, wait until all class subjects are complete.</p>
                     <p class="workflow-step">3. Class teacher submits class result to school admin for approval.</p>
+                    {% endif %}
                 </div>
                 <div class="card">
                     <h2><i class="fas fa-calendar-check"></i> Term Programs (Visible to Teachers)</h2>
@@ -790,9 +807,11 @@
     </div>
     {% endif %}
     <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260306e') }}"></script>
-    <script src="{{ url_for('static', filename='js/dashboard-enhanced.js', v='20260322a') }}"></script>
+    <script src="{{ url_for('static', filename='js/dashboard-enhanced.js', v='20260411b') }}"></script>
     {% include "shared/_loading_overlay.html" %}
 </body>
 </html>
+
+
 
 

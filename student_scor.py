@@ -505,6 +505,46 @@ def inject_first_login_tutorial_context():
         'first_login_tutorial': build_first_login_tutorial(role, display_name=display_name) if show else {},
     }
 
+
+@app.context_processor
+def inject_school_setup_wizard_context():
+    role = (session.get('role') or '').strip().lower()
+    if role != 'school_admin':
+        return {'school_setup_wizard': {'show_banner': False}}
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        return {'school_setup_wizard': {'show_banner': False}}
+    try:
+        completed = has_school_setup_wizard_completed(school_id)
+        setup_flow = build_school_setup_wizard_flow(school_id)
+        steps = setup_flow.get('steps') or []
+        current_step = next((step for step in steps if not step.get('done')), steps[0] if steps else {})
+        current_key = str(current_step.get('key') or 'welcome').strip()
+        current_title = str(current_step.get('title') or 'School Setup').strip()
+        endpoint = (request.endpoint or '').strip().lower() if has_request_context() else ''
+        page_key_map = {
+            'school_admin_settings': 'profile',
+            'school_admin_class_subjects': 'classes',
+            'school_admin_teachers': 'teachers',
+            'school_admin_add_students_by_class': 'students',
+            'school_admin_timetable': 'schedule',
+            'school_admin_dashboard': current_key,
+        }
+        banner_key = page_key_map.get(endpoint, current_key)
+        banner_step = next((step for step in steps if step.get('key') == banner_key), current_step)
+        return {
+            'school_setup_wizard': {
+                'show_banner': not completed,
+                'current_index': next((idx + 1 for idx, step in enumerate(steps) if step.get('key') == (banner_step.get('key') or '')), 1),
+                'total_steps': len(steps) or 1,
+                'current_key': banner_step.get('key') or current_key,
+                'current_title': banner_step.get('title') or current_title,
+            }
+        }
+    except Exception as exc:
+        logging.warning("School setup wizard context failed for school_id=%s: %s", school_id, exc)
+        return {'school_setup_wizard': {'show_banner': False}}
+
 @app.context_processor
 def inject_post_login_welcome_context():
     welcome_name = (session.pop('post_login_welcome_name', '') or '').strip()
@@ -4613,6 +4653,12 @@ ROLE_ROUTE_NAMESPACE_RULES = {
     '/parent': {'parent'},
 }
 
+ROLE_ROUTE_NAMESPACE_EXCEPTIONS = {
+    '/teacher/enter-scores': {'teacher', 'school_admin'},
+    '/teacher/enter-subject-scores': {'teacher', 'school_admin'},
+    '/teacher/allocate-stream': {'teacher', 'school_admin'},
+}
+
 ROLE_SESSION_BINDING_ROLES = {'super_admin', 'school_admin', 'teacher', 'student'}
 
 def _role_home_endpoint(role):
@@ -5844,6 +5890,7 @@ def init_db():
                         theme_primary_color TEXT DEFAULT '#1E3C72',
                         theme_secondary_color TEXT DEFAULT '#2A5298',
                         theme_accent_color TEXT DEFAULT '#1F7A8C',
+                        score_entry_mode TEXT DEFAULT 'teacher_subject',
                         access_status TEXT DEFAULT 'trial_free',
                         trial_start_date TEXT,
                         trial_end_date TEXT,
@@ -5881,6 +5928,7 @@ def init_db():
     safe_exec_ignore("ALTER TABLE schools ADD COLUMN theme_primary_color TEXT DEFAULT '#1E3C72'")
     safe_exec_ignore("ALTER TABLE schools ADD COLUMN theme_secondary_color TEXT DEFAULT '#2A5298'")
     safe_exec_ignore("ALTER TABLE schools ADD COLUMN theme_accent_color TEXT DEFAULT '#1F7A8C'")
+    safe_exec_ignore("ALTER TABLE schools ADD COLUMN score_entry_mode TEXT DEFAULT 'teacher_subject'")
     safe_exec_ignore("ALTER TABLE schools ADD COLUMN parent_timetable_show_teacher INTEGER DEFAULT 1")
     safe_exec_ignore("ALTER TABLE schools ADD COLUMN location TEXT")
     safe_exec_ignore("ALTER TABLE schools ADD COLUMN phone TEXT")
@@ -13393,6 +13441,38 @@ def normalize_school_leadership_title(value, default='principal'):
     return raw if raw in SCHOOL_LEADERSHIP_TITLES else fallback
 
 
+SCHOOL_SCORE_ENTRY_MODES = {'teacher_subject', 'dean_led'}
+
+
+def normalize_school_score_entry_mode(value, default='teacher_subject'):
+    raw = (value or '').strip().lower().replace('-', '_').replace(' ', '_')
+    fallback = (default or 'teacher_subject').strip().lower().replace('-', '_').replace(' ', '_')
+    if fallback not in SCHOOL_SCORE_ENTRY_MODES:
+        fallback = 'teacher_subject'
+    if raw in {'dean', 'dean_led', 'dean-led', 'deanled'}:
+        raw = 'dean_led'
+    if raw in {'teacher', 'teacher_subject', 'subject_teacher', 'subject-led', 'subject_teacher_led'}:
+        raw = 'teacher_subject'
+    return raw if raw in SCHOOL_SCORE_ENTRY_MODES else fallback
+
+
+def get_school_score_entry_mode(school_or_value):
+    if isinstance(school_or_value, dict):
+        return normalize_school_score_entry_mode(
+            school_or_value.get('score_entry_mode', 'teacher_subject'),
+            default='teacher_subject',
+        )
+    return normalize_school_score_entry_mode(school_or_value, default='teacher_subject')
+
+
+def school_uses_dean_led_score_entry(school_or_value):
+    return get_school_score_entry_mode(school_or_value) == 'dean_led'
+
+
+def get_school_score_entry_mode_label(school_or_value):
+    return 'Dean-led score entry' if school_uses_dean_led_score_entry(school_or_value) else 'Teacher subject assignment'
+
+
 def get_school_leadership_label(value, default='Principal'):
     leadership_title = normalize_school_leadership_title(value)
     if leadership_title == 'head_teacher':
@@ -13426,6 +13506,7 @@ def ensure_school_access_schema():
             db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS access_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
             db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS access_updated_by TEXT DEFAULT ''")
             db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS leadership_title TEXT DEFAULT 'principal'")
+            db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS score_entry_mode TEXT DEFAULT 'teacher_subject'")
         _SCHOOL_ACCESS_SCHEMA_READY = True
         return True
     except Exception as exc:
@@ -13541,6 +13622,303 @@ def build_school_profile_completeness(school_id):
     }
 
 
+def build_school_setup_wizard_summary(school_id):
+    """Return wizard progress and actionable school-admin setup steps."""
+    sid = (school_id or '').strip()
+    school = get_school(sid) or {}
+    current_term = get_current_term(school)
+    current_year = (school.get('academic_year', '') or '').strip()
+    profile = build_school_profile_completeness(sid)
+    profile_rows = {str(row.get('label') or '').strip().lower(): bool(row.get('ok')) for row in (profile.get('rows') or [])}
+    class_names = get_school_classnames(sid) or []
+    teacher_count = get_total_teacher_count(sid, include_archived=False)
+    student_count = get_total_student_count(sid)
+    class_assignments = get_class_assignments(sid) or []
+    subject_assignments = get_teacher_subject_assignments(sid, term=current_term) or []
+    timetable_rows = get_school_timetable_rows(sid) or []
+    term_program = get_school_term_program(sid, current_year, current_term) or {}
+    term_events = build_term_program_events(term_program)
+
+    steps = [
+        {
+            'key': 'profile',
+            'title': 'Complete School Profile',
+            'description': 'Set the school name, location, academic year, and current term.',
+            'done': all(profile_rows.get(label, False) for label in ('school name set', 'location set', 'academic year set', 'current term set')),
+            'required': True,
+            'action_endpoint': 'school_admin_settings',
+            'action_label': 'Open School Settings',
+        },
+        {
+            'key': 'branding',
+            'title': 'Upload Branding',
+            'description': 'Add the school logo and principal signature so dashboards and reports look complete.',
+            'done': bool((school.get('school_logo') or '').strip()) and bool((school.get('principal_signature_image') or '').strip()),
+            'required': True,
+            'action_endpoint': 'school_admin_settings',
+            'action_label': 'Upload Logo / Signature',
+        },
+        {
+            'key': 'classes',
+            'title': 'Configure Classes and Subjects',
+            'description': 'Create secondary class subjects so score entry and teacher assignment work correctly.',
+            'done': bool(class_names) and bool(profile_rows.get('class subject config exists', False)),
+            'required': True,
+            'action_endpoint': 'school_admin_class_subjects',
+            'action_label': 'Open Class Subjects',
+            'count': len(class_names),
+        },
+        {
+            'key': 'teachers',
+            'title': 'Add Teachers',
+            'description': 'Register active teachers before you assign classes or subjects.',
+            'done': teacher_count > 0,
+            'required': True,
+            'action_endpoint': 'school_admin_teachers',
+            'action_label': 'Manage Teachers',
+            'count': int(teacher_count or 0),
+        },
+        {
+            'key': 'students',
+            'title': 'Add Students',
+            'description': 'Create student records for each class so attendance and results can work.',
+            'done': student_count > 0,
+            'required': True,
+            'action_endpoint': 'school_admin_add_students_by_class',
+            'action_label': 'Add Students',
+            'count': int(student_count or 0),
+        },
+        {
+            'key': 'assignments',
+            'title': 'Assign Teachers',
+            'description': 'Assign class teachers and subject teachers for the current term.',
+            'done': bool(class_assignments) and bool(subject_assignments),
+            'required': True,
+            'action_endpoint': 'school_admin_teacher_assignments',
+            'action_label': 'Assign Teachers',
+            'count': int(len(class_assignments or [])) + int(len(subject_assignments or [])),
+        },
+        {
+            'key': 'schedule',
+            'title': 'Set Term Programs and Timetable',
+            'description': 'Add term events, timetables, and class schedules for the school year.',
+            'done': bool(term_events) or bool(timetable_rows),
+            'required': False,
+            'action_endpoint': 'school_admin_term_programs',
+            'action_label': 'Open Term Programs',
+            'count': int(len(term_events or [])) + int(len(timetable_rows or [])),
+        },
+    ]
+    completed = sum(1 for step in steps if step.get('done'))
+    required_steps = [step for step in steps if step.get('required')]
+    required_completed = sum(1 for step in required_steps if step.get('done'))
+    required_total = len(required_steps)
+    percentage = int(round((required_completed / required_total) * 100)) if required_total else 0
+    next_step = next((step for step in steps if not step.get('done')), steps[-1] if steps else {})
+    return {
+        'steps': steps,
+        'completed': completed,
+        'total': len(steps),
+        'percentage': percentage,
+        'required_completed': required_completed,
+        'required_total': required_total,
+        'next_step': next_step,
+        'is_complete': required_total > 0 and required_completed == required_total,
+        'current_term': current_term,
+        'current_year': current_year,
+        'teacher_count': int(teacher_count or 0),
+        'student_count': int(student_count or 0),
+        'class_count': len(class_names or []),
+        'timetable_count': len(timetable_rows or []),
+        'term_event_count': len(term_events or []),
+    }
+
+
+def build_school_setup_wizard_flow(school_id):
+    """Build the ordered first-login wizard flow for school admins."""
+    summary = build_school_setup_wizard_summary(school_id)
+    summary_steps = {str(step.get('key') or '').strip().lower(): step for step in (summary.get('steps') or [])}
+    flow_steps = [
+        {
+            'key': 'welcome',
+            'title': 'Welcome to School Setup',
+            'subtitle': 'This will take less than 5 minutes.',
+            'description': 'We will guide you through the essential school setup steps in a simple order.',
+            'bullets': [
+                'Complete your school profile',
+                'Upload the logo and principal signature',
+                'Configure classes, subjects, teachers, and students',
+                'Finish with timetable and term programs',
+            ],
+            'primary_label': 'Start Setup',
+            'primary_step': 'profile',
+            'secondary_label': 'View Dashboard Later',
+            'secondary_endpoint': 'school_admin_dashboard',
+        },
+        {
+            'key': 'profile',
+            'title': 'Step 1: School Profile',
+            'subtitle': 'Set the identity of your school.',
+            'description': 'Open School Settings and confirm the school name, location, academic year, current term, and access settings.',
+            'bullets': [
+                'School name and location',
+                'Academic year and current term',
+                'Access status and grading defaults',
+            ],
+            'primary_label': 'Open School Settings',
+            'primary_endpoint': 'school_admin_settings',
+            'secondary_label': 'Next: Branding',
+            'secondary_step': 'branding',
+            'required': True,
+        },
+        {
+            'key': 'branding',
+            'title': 'Step 2: Branding',
+            'subtitle': 'Upload the visual identity of the school.',
+            'description': 'Add the school logo and principal signature so dashboards and reports look complete.',
+            'bullets': [
+                'Upload the school logo',
+                'Upload the principal or head teacher signature',
+                'Confirm the image is saved and visible',
+            ],
+            'primary_label': 'Open Branding Settings',
+            'primary_endpoint': 'school_admin_settings',
+            'secondary_label': 'Next: Classes & Subjects',
+            'secondary_step': 'classes',
+            'required': True,
+        },
+        {
+            'key': 'classes',
+            'title': 'Step 3: Classes and Subjects',
+            'subtitle': 'Set the subjects each class will offer.',
+            'description': 'Create or review class subject configurations before you assign teachers.',
+            'bullets': [
+                'Add JSS and SS classes',
+                'Configure core, science, art, and commercial subjects',
+                'Check that SS1, SS2, and SS3 are included where needed',
+            ],
+            'primary_label': 'Open Class Subjects',
+            'primary_endpoint': 'school_admin_class_subjects',
+            'secondary_label': 'Next: Teachers',
+            'secondary_step': 'teachers',
+            'required': True,
+            'summary_key': 'classes',
+        },
+        {
+            'key': 'teachers',
+            'title': 'Step 4: Teachers',
+            'subtitle': 'Make sure your staff list is ready.',
+            'description': 'Add teachers before assigning class or subject responsibilities.',
+            'bullets': [
+                'Register active teachers',
+                'Review teacher names and contacts',
+                'Confirm staff records are not archived',
+            ],
+            'primary_label': 'Manage Teachers',
+            'primary_endpoint': 'school_admin_teachers',
+            'secondary_label': 'Next: Students',
+            'secondary_step': 'students',
+            'required': True,
+            'summary_key': 'teachers',
+        },
+        {
+            'key': 'students',
+            'title': 'Step 5: Students',
+            'subtitle': 'Add the learners who will use the system.',
+            'description': 'Create student records for each class so results and attendance can work.',
+            'bullets': [
+                'Add students class by class',
+                'Use CSV import if you have many records',
+                'Confirm student names and admissions are correct',
+            ],
+            'primary_label': 'Add Students',
+            'primary_endpoint': 'school_admin_add_students_by_class',
+            'secondary_label': 'Next: Assign Teachers',
+            'secondary_step': 'assignments',
+            'required': True,
+            'summary_key': 'students',
+        },
+        {
+            'key': 'assignments',
+            'title': 'Step 6: Assign Teachers',
+            'subtitle': 'Match teachers to the classes and subjects they handle.',
+            'description': 'Assign class teachers and subject teachers for the current term.',
+            'bullets': [
+                'Assign subject teachers',
+                'Assign class teachers',
+                'Check the current subject assignment list',
+            ],
+            'primary_label': 'Assign Teachers',
+            'primary_endpoint': 'school_admin_teacher_assignments',
+            'secondary_label': 'Next: Term Programs',
+            'secondary_step': 'schedule',
+            'required': True,
+            'summary_key': 'assignments',
+        },
+        {
+            'key': 'schedule',
+            'title': 'Step 7: Term Programs and Timetable',
+            'subtitle': 'Finish the calendar and class schedule.',
+            'description': 'Add term events, timetable rows, and school dates so the year is ready to run.',
+            'bullets': [
+                'Set term programs and dates',
+                'Fill the timetable coverage',
+                'Review the school calendar before finishing',
+            ],
+            'primary_label': 'Open Term Programs',
+            'primary_endpoint': 'school_admin_term_programs',
+            'secondary_label': 'Review & Finish',
+            'secondary_step': 'review',
+            'required': False,
+            'summary_key': 'schedule',
+        },
+        {
+            'key': 'review',
+            'title': 'Review and Finish',
+            'subtitle': 'You are ready to complete the setup.',
+            'description': 'Check the progress summary below and mark the setup wizard complete when you are satisfied.',
+            'bullets': [
+                'Review progress',
+                'Open any missing setup page',
+                'Finish the wizard when ready',
+            ],
+            'primary_label': 'Open Dashboard',
+            'primary_endpoint': 'school_admin_dashboard',
+            'secondary_label': 'Mark Setup Complete',
+            'final_step': True,
+            'summary_key': 'review',
+        },
+    ]
+    flow_by_key = {step['key']: step for step in flow_steps}
+    order = [step['key'] for step in flow_steps]
+    for idx, step in enumerate(flow_steps):
+        step['index'] = idx
+        step['is_first'] = idx == 0
+        step['is_last'] = idx == len(flow_steps) - 1
+        step['prev_key'] = order[idx - 1] if idx > 0 else ''
+        step['next_key'] = order[idx + 1] if idx + 1 < len(order) else ''
+        summary_key = str(step.get('summary_key') or step['key']).strip().lower()
+        linked = summary_steps.get(summary_key) or summary_steps.get(step['key'])
+        if step['key'] == 'welcome':
+            step['done'] = False
+        elif step['key'] == 'review':
+            step['done'] = bool(summary.get('is_complete'))
+        else:
+            step['done'] = bool((linked or {}).get('done'))
+        step['required'] = bool(step.get('required', False))
+        step['status_label'] = 'Done' if step['done'] else ('Required' if step['required'] else 'Optional')
+        if step.get('primary_endpoint'):
+            step['primary_url'] = step['primary_endpoint']
+        if step.get('secondary_endpoint'):
+            step['secondary_url'] = step['secondary_endpoint']
+    return {
+        'summary': summary,
+        'steps': flow_steps,
+        'flow_by_key': flow_by_key,
+        'current_step_key': 'welcome',
+    }
+
+
 def build_school_access_state(school):
     """Return effective access state used for login/runtime access checks."""
     school_data = school if isinstance(school, dict) else {}
@@ -13634,6 +14012,103 @@ def _app_meta_set_once_daily(meta_key, value='1'):
         return True
     except Exception:
         return False
+
+
+def _app_meta_get_value(meta_key, default=''):
+    """Read an exact app_meta key value."""
+    key = (meta_key or '').strip()
+    if not key:
+        return default
+    try:
+        with db_connection() as conn:
+            c = conn.cursor()
+            db_execute(c, "SELECT value FROM app_meta WHERE key = ? LIMIT 1", (key,))
+            row = c.fetchone()
+            return (row[0] if row and row[0] is not None else default)
+    except Exception:
+        return default
+
+
+def _app_meta_set_value(meta_key, value='1'):
+    """Upsert an exact app_meta key value."""
+    key = (meta_key or '').strip()
+    if not key:
+        return False
+    try:
+        with db_connection(commit=True) as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """INSERT INTO app_meta (key, value, updated_at)
+                   VALUES (?, ?, CURRENT_TIMESTAMP)
+                   ON CONFLICT(key) DO UPDATE
+                     SET value = excluded.value,
+                         updated_at = CURRENT_TIMESTAMP""",
+                (key, str(value or '1')[:400]),
+            )
+        return True
+    except Exception:
+        return False
+
+
+def has_school_setup_wizard_completed(school_id):
+    sid = _normalize_school_id_text(school_id)
+    if not sid:
+        return False
+    return str(_app_meta_get_value(f'school_setup_wizard_completed:{sid}', '')).strip() == '1'
+
+
+def mark_school_setup_wizard_completed(school_id):
+    sid = _normalize_school_id_text(school_id)
+    if not sid:
+        return False
+    return _app_meta_set_value(f'school_setup_wizard_completed:{sid}', '1')
+
+
+def has_school_setup_wizard_started(school_id):
+    sid = _normalize_school_id_text(school_id)
+    if not sid:
+        return False
+    return str(_app_meta_get_value(f'school_setup_wizard_started:{sid}', '')).strip() == '1'
+
+
+def mark_school_setup_wizard_started(school_id):
+    sid = _normalize_school_id_text(school_id)
+    if not sid:
+        return False
+    return _app_meta_set_value(f'school_setup_wizard_started:{sid}', '1')
+
+
+def get_school_setup_wizard_resume_step(school_id, default='welcome'):
+    sid = _normalize_school_id_text(school_id)
+    if not sid:
+        return default
+    value = str(_app_meta_get_value(f'school_setup_wizard_resume_step:{sid}', '')).strip().lower()
+    return value or default
+
+
+def mark_school_setup_wizard_resume_step(school_id, step_key=''):
+    sid = _normalize_school_id_text(school_id)
+    if not sid:
+        return False
+    return _app_meta_set_value(f'school_setup_wizard_resume_step:{sid}', (step_key or '').strip().lower())
+
+
+def get_school_setup_wizard_entry_step(school_id, started=False):
+    sid = _normalize_school_id_text(school_id)
+    if not sid:
+        return 'welcome'
+    if not started:
+        return 'welcome'
+    flow = build_school_setup_wizard_flow(sid)
+    steps = flow.get('steps') or []
+    for step in steps:
+        key = str(step.get('key') or '').strip().lower()
+        if not key or key == 'welcome':
+            continue
+        if not step.get('done'):
+            return key
+    return 'review' if steps else 'welcome'
 
 
 def run_school_access_automation(max_schools=120):
@@ -13746,6 +14221,7 @@ def _school_row_to_dict(row):
         'theme_primary_color': normalize_hex_color(row['theme_primary_color'] if 'theme_primary_color' in row.keys() else '', '#1E3C72'),
         'theme_secondary_color': normalize_hex_color(row['theme_secondary_color'] if 'theme_secondary_color' in row.keys() else '', '#2A5298'),
         'theme_accent_color': normalize_hex_color(row['theme_accent_color'] if 'theme_accent_color' in row.keys() else '', '#1F7A8C'),
+        'score_entry_mode': normalize_school_score_entry_mode(row['score_entry_mode'] if 'score_entry_mode' in row.keys() else 'teacher_subject'),
         'access_status': normalize_school_access_status(row['access_status'] if 'access_status' in row.keys() else 'trial_free'),
         'trial_start_date': (row['trial_start_date'] if 'trial_start_date' in row.keys() else '') or '',
         'trial_end_date': (row['trial_end_date'] if 'trial_end_date' in row.keys() else '') or '',
@@ -13969,6 +14445,7 @@ def update_school_settings_with_cursor(c, school_id, settings):
     db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS theme_primary_color TEXT DEFAULT '#1E3C72'")
     db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS theme_secondary_color TEXT DEFAULT '#2A5298'")
     db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS theme_accent_color TEXT DEFAULT '#1F7A8C'")
+    db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS score_entry_mode TEXT DEFAULT 'teacher_subject'")
     db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS parent_timetable_show_teacher INTEGER DEFAULT 1")
     db_execute(c, "ALTER TABLE schools ADD COLUMN IF NOT EXISTS leadership_title TEXT DEFAULT 'principal'")
 
@@ -13981,7 +14458,7 @@ def update_school_settings_with_cursor(c, school_id, settings):
                 "grade_a_min = ?, grade_b_min = ?, grade_c_min = ?, grade_d_min = ?, pass_mark = ?, "
                 "show_positions = ?, ss_ranking_mode = ?, class_arm_ranking_mode = ?, "
                 "combine_third_term_results = ?, ss1_stream_mode = ?, ss_arm_mode = ?, parent_timetable_show_teacher = ?, "
-                "theme_primary_color = ?, theme_secondary_color = ?, theme_accent_color = ?, leadership_title = ?, "
+                "theme_primary_color = ?, theme_secondary_color = ?, theme_accent_color = ?, leadership_title = ?, score_entry_mode = ?, "
                 "updated_at = CURRENT_TIMESTAMP "
                 "WHERE school_id = ?"),
                (settings.get('school_name'), settings.get('location', ''), settings.get('school_logo'),
@@ -14003,6 +14480,7 @@ def update_school_settings_with_cursor(c, school_id, settings):
                 normalize_hex_color(settings.get('theme_secondary_color', ''), '#2A5298'),
                 normalize_hex_color(settings.get('theme_accent_color', ''), '#1F7A8C'),
                 normalize_school_leadership_title(settings.get('leadership_title', 'principal')),
+                normalize_school_score_entry_mode(settings.get('score_entry_mode', 'teacher_subject')),
                 school_key))
 
 def update_school_term_year_with_cursor(c, school_id, term, academic_year):
@@ -17698,6 +18176,24 @@ def _complete_authenticated_login(user, user_school_id):
     if role == 'super_admin':
         return redirect(url_for('super_admin_dashboard'))
     if role == 'school_admin':
+        try:
+            if not has_school_setup_wizard_completed(user_school_id):
+                session['show_first_login_tutorial'] = False
+                session.pop('show_first_login_tutorial', None)
+                session.pop('first_login_tutorial_role', None)
+                if has_school_setup_wizard_started(user_school_id):
+                    resume_step = get_school_setup_wizard_resume_step(user_school_id, default='welcome')
+                    if resume_step == 'welcome':
+                        resume_step = get_school_setup_wizard_entry_step(user_school_id, started=True)
+                    return redirect(url_for('school_admin_setup_wizard', step=resume_step))
+                return redirect(url_for('school_admin_setup_wizard', step='welcome'))
+        except Exception as exc:
+            logging.warning(
+                "Setup wizard check failed for school admin username=%s school_id=%s: %s",
+                username,
+                user_school_id,
+                exc,
+            )
         return redirect(url_for('school_admin_dashboard'))
     if role == 'teacher':
         return redirect(url_for('teacher_dashboard'))
@@ -24239,8 +24735,11 @@ def get_teacher_subject_assignment_history(school_id, teacher_id):
 
 def teacher_can_score_subject(school_id, teacher_id, classname, subject_name, term='', academic_year=''):
     """Whether teacher can score one subject in a class/term."""
+    school = get_school(school_id) or {}
     if teacher_has_class_access(school_id, teacher_id, classname, term=term, academic_year=academic_year):
         return True
+    if school_uses_dean_led_score_entry(school):
+        return teacher_has_class_access(school_id, teacher_id, classname, term=term, academic_year=academic_year)
     assigned = get_teacher_subjects_for_class_term(
         school_id, teacher_id, classname, term=term, academic_year=academic_year
     )
@@ -26082,17 +26581,27 @@ def enforce_role_namespace_and_session_binding():
 
     role = _current_role()
 
-    # Block cross-role namespace access early (e.g. teacher opening /school-admin/...).
-    for prefix, allowed_roles in ROLE_ROUTE_NAMESPACE_RULES.items():
-        if not (path == prefix or path.startswith(prefix + '/')):
-            continue
-        if not role:
-            flash('Please login to continue.', 'error')
-            return redirect(url_for('login'))
-        if role not in allowed_roles:
-            flash('Access denied for your role.', 'error')
-            return redirect(url_for('login'))
-        break
+    for exact_path, allowed_roles in ROLE_ROUTE_NAMESPACE_EXCEPTIONS.items():
+        if path == exact_path or path.startswith(exact_path + '/'):
+            if not role:
+                flash('Please login to continue.', 'error')
+                return redirect(url_for('login'))
+            if role not in allowed_roles:
+                flash('Access denied for your role.', 'error')
+                return redirect(url_for('login'))
+            break
+    else:
+        # Block cross-role namespace access early (e.g. teacher opening /school-admin/...).
+        for prefix, allowed_roles in ROLE_ROUTE_NAMESPACE_RULES.items():
+            if not (path == prefix or path.startswith(prefix + '/')):
+                continue
+            if not role:
+                flash('Please login to continue.', 'error')
+                return redirect(url_for('login'))
+            if role not in allowed_roles:
+                flash('Access denied for your role.', 'error')
+                return redirect(url_for('login'))
+            break
 
     if role == 'parent':
         parent_phone = normalize_parent_phone(session.get('parent_phone', ''))
@@ -28602,7 +29111,6 @@ def school_admin_dashboard():
         assignments=assignments,
     )
     missing_score_alerts = []
-    # Rule: show missing score alerts only for subjects that have teacher subject assignments.
     try:
         term_students = load_students(school_id, term_filter=current_term)
     except Exception as exc:
@@ -28623,11 +29131,22 @@ def school_admin_dashboard():
             return True
         return row_year_val == active_year_val
 
-    try:
-        all_term_subject_assignments = get_teacher_subject_assignments(school_id, term=current_term)
-    except Exception as exc:
-        logging.warning("Failed to load subject assignments for missing score alerts: %s", exc)
+    if school_uses_dean_led_score_entry(school):
         all_term_subject_assignments = []
+        for cls, subjects in (class_subject_options or {}).items():
+            for subj in normalize_subjects_list(subjects or []):
+                all_term_subject_assignments.append({
+                    'classname': cls,
+                    'classname_canonical': canonicalize_classname(cls),
+                    'subject': subj,
+                    'academic_year': current_year,
+                })
+    else:
+        try:
+            all_term_subject_assignments = get_teacher_subject_assignments(school_id, term=current_term)
+        except Exception as exc:
+            logging.warning("Failed to load subject assignments for missing score alerts: %s", exc)
+            all_term_subject_assignments = []
 
     assigned_pairs = {}
     for row in (all_term_subject_assignments or []):
@@ -28721,6 +29240,8 @@ def school_admin_dashboard():
         logging.warning("Failed to load school teacher messages for dashboard: %s", exc)
         teacher_message_rows = []
     school_message_total = len(student_message_rows or []) + len(teacher_message_rows or [])
+    setup_wizard_summary = build_school_setup_wizard_summary(school_id)
+    setup_wizard_completed = has_school_setup_wizard_completed(school_id)
     
     return render_template('school/school_admin_dashboard.html', 
                          school=school, 
@@ -28747,9 +29268,126 @@ def school_admin_dashboard():
                          student_message_rows=student_message_rows,
                          teacher_message_rows=teacher_message_rows,
                          school_message_total=school_message_total,
+                         setup_wizard_summary=setup_wizard_summary,
+                         setup_wizard_completed=setup_wizard_completed,
                          publication_statuses=publication_statuses,
                          missing_score_alerts=missing_score_alerts,
                          approval_workflow_enabled=approval_workflow_enabled)
+
+
+@app.route('/school-admin/score-entry-mode', methods=['POST'])
+def school_admin_update_score_entry_mode():
+    if session.get('role') != 'school_admin':
+        return redirect(url_for('login'))
+
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
+
+    mode = normalize_school_score_entry_mode(
+        request.form.get('score_entry_mode', 'teacher_subject'),
+        default='teacher_subject',
+    )
+    if mode not in SCHOOL_SCORE_ENTRY_MODES:
+        flash('Invalid score entry mode selected.', 'error')
+        return redirect(url_for('school_admin_dashboard'))
+
+    current_school = get_school(school_id) or {}
+    current_school['score_entry_mode'] = mode
+    try:
+        with db_connection(commit=True) as conn:
+            c = conn.cursor()
+            update_school_settings_with_cursor(c, school_id, current_school)
+        record_admin_action_audit(
+            school_id,
+            'update_score_entry_mode',
+            target_scope='school_settings',
+            payload={'score_entry_mode': mode},
+        )
+        flash('Score entry mode updated successfully.', 'success')
+    except Exception as exc:
+        logging.exception("Failed to update score entry mode.")
+        flash(f'Could not update score entry mode: {exc}', 'error')
+    return redirect(url_for('school_admin_dashboard'))
+
+
+@app.route('/school-admin/setup-wizard', methods=['GET', 'POST'])
+def school_admin_setup_wizard():
+    if session.get('role') != 'school_admin':
+        return redirect(url_for('login'))
+
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
+
+    school = get_school(school_id) or {}
+    current_term = get_current_term(school)
+    current_year = (school.get('academic_year', '') or '').strip()
+    setup_flow = build_school_setup_wizard_flow(school_id)
+    setup_summary = setup_flow.get('summary') or {}
+    flow_steps = setup_flow.get('steps') or []
+    setup_completed = has_school_setup_wizard_completed(school_id)
+    setup_started = has_school_setup_wizard_started(school_id)
+    requested_step = (request.args.get('step', '') or '').strip().lower()
+    if not requested_step:
+        if setup_started:
+            requested_step = get_school_setup_wizard_resume_step(school_id, default='')
+            if not requested_step or requested_step == 'welcome':
+                requested_step = get_school_setup_wizard_entry_step(school_id, started=True)
+        else:
+            requested_step = 'welcome'
+    step_map = {str(step.get('key') or '').strip().lower(): step for step in flow_steps}
+    current_step = step_map.get(requested_step) or step_map.get('welcome') or (flow_steps[0] if flow_steps else {})
+    current_step_key = current_step.get('key', 'welcome')
+    current_step_index = next((idx + 1 for idx, step in enumerate(flow_steps) if step.get('key') == current_step_key), 1)
+    total_steps = len(flow_steps) or 1
+
+    if request.method == 'POST':
+        action = (request.form.get('action', 'complete') or 'complete').strip().lower()
+        if action == 'start':
+            mark_school_setup_wizard_started(school_id)
+            mark_school_setup_wizard_resume_step(school_id, 'profile')
+            return redirect(url_for('school_admin_setup_wizard', step='profile'))
+        if action == 'continue':
+            next_key = current_step.get('next_key') or 'review'
+            mark_school_setup_wizard_started(school_id)
+            mark_school_setup_wizard_resume_step(school_id, next_key)
+            return redirect(url_for('school_admin_setup_wizard', step=next_key))
+        if action == 'complete':
+            if not setup_summary.get('is_complete'):
+                flash('Please complete the required setup steps before finishing the wizard.', 'error')
+                return redirect(url_for('school_admin_setup_wizard', step=current_step_key))
+            mark_school_setup_wizard_completed(school_id)
+            mark_school_setup_wizard_started(school_id)
+            mark_school_setup_wizard_resume_step(school_id, 'review')
+            if session.get('user_id'):
+                mark_user_first_login_tutorial_seen(session.get('user_id', ''))
+            session.pop('show_first_login_tutorial', None)
+            session.pop('first_login_tutorial_role', None)
+            flash('Setup wizard completed. You can reopen it anytime from the sidebar.', 'success')
+            return redirect(url_for('school_admin_dashboard'))
+        flash('Setup wizard progress saved.', 'success')
+        return redirect(url_for('school_admin_setup_wizard', step=current_step_key))
+
+    return render_template(
+        'school/school_admin_setup_wizard.html',
+        school=school,
+        active_page='setup_wizard',
+        current_term=current_term,
+        current_year=current_year,
+        setup_summary=setup_summary,
+        setup_completed=setup_completed,
+        setup_flow=setup_flow,
+        wizard_step=current_step,
+        wizard_steps=flow_steps,
+        wizard_step_key=current_step_key,
+        wizard_step_index=current_step_index,
+        wizard_total_steps=total_steps,
+        wizard_is_first=(current_step_key == 'welcome'),
+        wizard_is_last=(current_step_key == 'review'),
+    )
 
 
 @app.route('/school-admin/notifications')
@@ -28777,11 +29415,48 @@ def school_admin_notifications():
             return True
         return row_year_val == active_year_val
 
-    try:
-        all_term_subject_assignments = get_teacher_subject_assignments(school_id, term=current_term)
-    except Exception as exc:
-        logging.warning("Failed to load subject assignments for school-admin notifications: %s", exc)
+    if school_uses_dean_led_score_entry(school):
+        try:
+            class_candidates = filter_secondary_classnames(
+                {str(name).strip() for name in get_secondary_school_classnames(school_id) if str(name).strip()}
+                | {str(name).strip() for name in class_options if str(name).strip()}
+            )
+        except Exception:
+            class_candidates = filter_secondary_classnames(
+                [str(name).strip() for name in class_options if str(name).strip()]
+            )
         all_term_subject_assignments = []
+        for cls in class_candidates:
+            config = get_class_subject_config(school_id, cls) or {}
+            subjects = normalize_subjects_list(
+                (config.get('core_subjects') or [])
+                + (config.get('science_subjects') or [])
+                + (config.get('art_subjects') or [])
+                + (config.get('commercial_subjects') or [])
+                + (config.get('optional_subjects') or [])
+            )
+            if not subjects:
+                defaults = _catalog_defaults_for_class(cls)
+                subjects = normalize_subjects_list(
+                    (defaults.get('core') or [])
+                    + (defaults.get('science') or [])
+                    + (defaults.get('art') or [])
+                    + (defaults.get('commercial') or [])
+                    + (defaults.get('optional') or [])
+                )
+            for subj in subjects:
+                all_term_subject_assignments.append({
+                    'classname': cls,
+                    'classname_canonical': canonicalize_classname(cls),
+                    'subject': subj,
+                    'academic_year': current_year,
+                })
+    else:
+        try:
+            all_term_subject_assignments = get_teacher_subject_assignments(school_id, term=current_term)
+        except Exception as exc:
+            logging.warning("Failed to load subject assignments for school-admin notifications: %s", exc)
+            all_term_subject_assignments = []
 
     assigned_pairs = {}
     for row in (all_term_subject_assignments or []):
@@ -29169,14 +29844,37 @@ def school_admin_messages():
             [str(name).strip() for name in class_counts.keys() if str(name).strip()]
         )
 
-    try:
-        subject_assignments = get_teacher_subject_assignments(
-            school_id,
-            academic_year=current_year,
-        )
-    except Exception as exc:
-        logging.warning("Failed to load teacher subject assignments for messages page: %s", exc)
+    if school_uses_dean_led_score_entry(school):
         subject_assignments = []
+        for cls in class_options:
+            config = get_class_subject_config(school_id, cls) or {}
+            subjects = normalize_subjects_list(
+                (config.get('core_subjects') or [])
+                + (config.get('science_subjects') or [])
+                + (config.get('art_subjects') or [])
+                + (config.get('commercial_subjects') or [])
+                + (config.get('optional_subjects') or [])
+            )
+            if not subjects:
+                defaults = _catalog_defaults_for_class(cls)
+                subjects = normalize_subjects_list(
+                    (defaults.get('core') or [])
+                    + (defaults.get('science') or [])
+                    + (defaults.get('art') or [])
+                    + (defaults.get('commercial') or [])
+                    + (defaults.get('optional') or [])
+                )
+            for subject_name in subjects:
+                subject_assignments.append({'subject': subject_name})
+    else:
+        try:
+            subject_assignments = get_teacher_subject_assignments(
+                school_id,
+                academic_year=current_year,
+            )
+        except Exception as exc:
+            logging.warning("Failed to load teacher subject assignments for messages page: %s", exc)
+            subject_assignments = []
     subject_options = sorted(
         {
             normalize_subject_name((row.get('subject') or '').strip())
@@ -31297,6 +31995,10 @@ def school_admin_settings():
         class_arm_ranking_mode = request.form.get('class_arm_ranking_mode', 'separate').strip().lower()
         ss1_stream_mode = request.form.get('ss1_stream_mode', 'separate').strip().lower()
         ss_arm_mode = (request.form.get('ss_arm_mode', current_school.get('ss_arm_mode', 'preserve')) or 'preserve').strip().lower()
+        score_entry_mode = normalize_school_score_entry_mode(
+            request.form.get('score_entry_mode', current_school.get('score_entry_mode', 'teacher_subject')),
+            default=current_school.get('score_entry_mode', 'teacher_subject') or 'teacher_subject',
+        )
         leadership_title = normalize_school_leadership_title(
             request.form.get('leadership_title', current_school.get('leadership_title', 'principal')),
             default=(current_school.get('leadership_title', 'principal') or 'principal'),
@@ -31313,6 +32015,8 @@ def school_admin_settings():
             ss1_stream_mode = 'separate'
         if ss_arm_mode not in {'preserve', 'drop'}:
             ss_arm_mode = 'preserve'
+        if score_entry_mode not in SCHOOL_SCORE_ENTRY_MODES:
+            score_entry_mode = 'teacher_subject'
         if not (0 <= grade_d_min <= grade_c_min <= grade_b_min <= grade_a_min <= 100):
             flash('Invalid grade configuration. Use A >= B >= C >= D within 0-100.', 'error')
             return redirect(url_for('school_admin_settings'))
@@ -31509,6 +32213,7 @@ def school_admin_settings():
             'theme_secondary_color': normalize_hex_color(request.form.get('theme_secondary_color', ''), '#2A5298'),
             'theme_accent_color': normalize_hex_color(request.form.get('theme_accent_color', ''), '#1F7A8C'),
             'leadership_title': leadership_title,
+            'score_entry_mode': score_entry_mode,
         }
         assessment_updates = []
         for level in ('jss', 'ss'):
@@ -31647,6 +32352,7 @@ def school_admin_settings():
                 'changed_term_or_year': bool(changed_term_or_year),
                 'rollover_affected_rows': int(rollover_affected_rows or 0),
                 'leadership_title': leadership_title,
+                'score_entry_mode': score_entry_mode,
                 'max_tests': max_tests,
                 'test_score_max': test_score_max,
             },
@@ -32442,6 +33148,7 @@ def school_admin_timetable():
     school = get_school(school_id) or {}
     current_term = get_current_term(school)
     current_year = (school or {}).get('academic_year', '')
+    dean_led_mode = school_uses_dean_led_score_entry(school)
     assignments = get_class_assignments(school_id)
     classes = filter_secondary_classnames(
         set(get_student_count_by_class(school_id).keys())
@@ -32544,7 +33251,7 @@ def school_admin_timetable():
                     if not classname or not period_label or not subject or day_of_week < 1 or day_of_week > 7:
                         raise ValueError('History entry is incomplete and cannot be restored.')
                     teacher_id = subject_teacher_by_key.get((classname.strip().lower(), subject.strip().lower()), '')
-                    if not teacher_id:
+                    if not teacher_id and not dean_led_mode:
                         raise ValueError(
                             f'No teacher subject assignment found for "{subject}" in class "{classname}" '
                             f'for {current_term} {current_year}.'
@@ -32646,7 +33353,7 @@ def school_admin_timetable():
                             row_errors.append(f'Row {idx}: end_time must be HH:MM.')
                             continue
                         teacher_id = subject_teacher_by_key.get((classname.strip().lower(), subject.strip().lower()), '')
-                        if not teacher_id:
+                        if not teacher_id and not dean_led_mode:
                             row_errors.append(
                                 f'Row {idx}: no teacher subject assignment found for "{subject}" in class "{classname}" ({current_term}, {current_year}).'
                             )
@@ -32725,7 +33432,7 @@ def school_admin_timetable():
                     if end_time and not re.fullmatch(r'\d{2}:\d{2}', end_time):
                         raise ValueError('End time must be HH:MM.')
                     teacher_id = subject_teacher_by_key.get((classname.strip().lower(), subject.strip().lower()), '')
-                    if not teacher_id:
+                    if not teacher_id and not dean_led_mode:
                         raise ValueError(
                             f'No teacher subject assignment found for "{subject}" in class "{classname}" '
                             f'for {current_term} {current_year}. Assign subject teacher first on dashboard.'
@@ -35333,8 +36040,11 @@ def school_admin_assign_subject_teacher():
 
     school_id = session.get('school_id')
     fallback_redirect = safe_referrer_or(url_for('school_admin_dashboard'))
-    teacher_id = request.form.get('teacher_id', '').strip()
     school = get_school(school_id) or {}
+    if school_uses_dean_led_score_entry(school):
+        flash('Subject assignment is disabled for this school because dean-led score entry is active.', 'info')
+        return redirect(fallback_redirect)
+    teacher_id = request.form.get('teacher_id', '').strip()
     term = (request.form.get('term', '') or '').strip() or get_current_term(school)
     assignment_scope = (request.form.get('assignment_scope', 'all_compatible') or 'all_compatible').strip().lower()
     legacy_classname = canonicalize_classname(request.form.get('classname', '').strip())
@@ -36022,6 +36732,10 @@ def school_admin_remove_subject_teacher_assignment():
 
     school_id = session.get('school_id')
     fallback_redirect = safe_referrer_or(url_for('school_admin_dashboard'))
+    school = get_school(school_id) or {}
+    if school_uses_dean_led_score_entry(school):
+        flash('Subject assignment removal is unavailable because this school uses dean-led score entry.', 'info')
+        return redirect(fallback_redirect)
     teacher_id = request.form.get('teacher_id', '').strip()
     classname = request.form.get('classname', '').strip()
     subject = request.form.get('subject', '').strip()
@@ -36099,6 +36813,37 @@ def teacher_dashboard():
         teacher_id=teacher_id,
         term=current_term,
     )
+    if school_uses_dean_led_score_entry(school):
+        synthetic_rows = []
+        for cls in classes:
+            config = get_class_subject_config(school_id, cls) or {}
+            subjects = normalize_subjects_list(
+                (config.get('core_subjects') or [])
+                + (config.get('science_subjects') or [])
+                + (config.get('art_subjects') or [])
+                + (config.get('commercial_subjects') or [])
+                + (config.get('optional_subjects') or [])
+            )
+            if not subjects:
+                defaults = _catalog_defaults_for_class(cls)
+                subjects = normalize_subjects_list(
+                    (defaults.get('core') or [])
+                    + (defaults.get('science') or [])
+                    + (defaults.get('art') or [])
+                    + (defaults.get('commercial') or [])
+                    + (defaults.get('optional') or [])
+                )
+            for subject_name in subjects:
+                synthetic_rows.append({
+                    'teacher_id': teacher_id,
+                    'classname': cls,
+                    'subject': subject_name,
+                    'term': current_term,
+                    'academic_year': current_year,
+                    'teacher_name': teacher_name,
+                })
+        if synthetic_rows:
+            subject_assignment_rows = synthetic_rows
     subject_assignment_by_class = {}
     subject_assignment_set = set()
     for row in subject_assignment_rows:
@@ -38204,7 +38949,9 @@ def school_admin_restore_teacher():
 
 @app.route('/teacher/allocate-stream', methods=['GET', 'POST'])
 def teacher_allocate_stream():
-    if session.get('role') != 'teacher':
+    route_started_at = time.perf_counter()
+    role = (session.get('role') or '').strip().lower()
+    if role not in {'teacher', 'school_admin'}:
         return redirect(url_for('login'))
 
     school_id = _normalize_school_id_text(session.get('school_id'))
@@ -38213,35 +38960,69 @@ def teacher_allocate_stream():
         flash('School session is missing. Please log in again.', 'error')
         return redirect(url_for('login'))
     school = get_school(school_id) or {}
+    dean_led_mode = school_uses_dean_led_score_entry(school)
+    allocation_fallback = url_for('school_admin_view_students') if role == 'school_admin' else url_for('teacher_class_list')
     current_term = get_current_term(school)
     current_year = school.get('academic_year', '')
+    wants_json = (
+        (request.headers.get('X-Requested-With', '') or '').lower() == 'xmlhttprequest'
+        or request.accept_mimetypes.best == 'application/json'
+    )
     student_id = request.args.get('student_id', '').strip() if request.method == 'GET' else request.form.get('student_id', '').strip()
     if not student_id:
-        flash('Student not selected.', 'error')
-        return redirect(url_for('teacher_dashboard'))
+        message = 'Student not selected.'
+        if wants_json:
+            return jsonify({'ok': False, 'message': message, 'redirect_url': allocation_fallback}), 400
+        flash(message, 'error')
+        return redirect(allocation_fallback)
 
     student = load_student(school_id, student_id)
+    student_load_ms = int((time.perf_counter() - route_started_at) * 1000)
     if not student:
-        flash('Student not found.', 'error')
-        return redirect(url_for('teacher_dashboard'))
+        message = 'Student not found.'
+        if wants_json:
+            return jsonify({'ok': False, 'message': message, 'redirect_url': allocation_fallback}), 404
+        flash(message, 'error')
+        return redirect(allocation_fallback)
     classname = student.get('classname', '')
-    if not teacher_has_class_access(school_id, teacher_id, classname, term=current_term, academic_year=current_year):
-        flash('You are not assigned to this class.', 'error')
-        return redirect(url_for('teacher_dashboard'))
+    success_redirect = (
+        url_for('school_admin_view_students', **{'class': classname})
+        if role == 'school_admin'
+        else url_for('teacher_class_list')
+    )
+    if role == 'teacher' and not teacher_has_class_access(school_id, teacher_id, classname, term=current_term, academic_year=current_year):
+        message = 'You are not assigned to this class.'
+        if wants_json:
+            return jsonify({'ok': False, 'message': message, 'redirect_url': allocation_fallback}), 403
+        flash(message, 'error')
+        return redirect(allocation_fallback)
+    if role == 'school_admin' and not dean_led_mode:
+        message = 'School admin stream allocation is available only when dean-led mode is enabled.'
+        if wants_json:
+            return jsonify({'ok': False, 'message': message, 'redirect_url': allocation_fallback}), 403
+        flash(message, 'info')
+        return redirect(allocation_fallback)
     if not class_uses_stream_for_school(school, classname):
-        flash('This class does not use stream allocation.', 'error')
-        return redirect(url_for('teacher_dashboard'))
+        message = 'This class does not use stream allocation.'
+        if wants_json:
+            return jsonify({'ok': False, 'message': message, 'redirect_url': allocation_fallback}), 400
+        flash(message, 'error')
+        return redirect(allocation_fallback)
 
     config = get_class_subject_config(school_id, classname)
     if not config:
-        flash('No class subject configuration found for this class.', 'error')
-        return redirect(url_for('teacher_dashboard'))
+        message = 'No class subject configuration found for this class.'
+        if wants_json:
+            return jsonify({'ok': False, 'message': message, 'redirect_url': allocation_fallback}), 400
+        flash(message, 'error')
+        return redirect(allocation_fallback)
 
     if request.method == 'POST':
         allocation_started_at = time.perf_counter()
         previous_stream = (student.get('stream') or '').strip()
         stream = request.form.get('stream', '').strip()
         selected_optional_subjects = request.form.getlist('optional_subjects')
+        before_subject_build_at = time.perf_counter()
         subjects, final_stream, subject_error = build_subjects_from_config(
             classname=classname,
             stream=stream,
@@ -38249,7 +39030,18 @@ def teacher_allocate_stream():
             selected_optional_subjects=selected_optional_subjects,
             school=school
         )
+        subject_build_ms = int((time.perf_counter() - before_subject_build_at) * 1000)
         if subject_error:
+            logging.warning(
+                "teacher_allocate_stream: subject build failed school_id=%s student_id=%s teacher_id=%s student_load_ms=%s subject_build_ms=%s",
+                school_id,
+                student_id,
+                teacher_id,
+                student_load_ms,
+                subject_build_ms,
+            )
+            if wants_json:
+                return jsonify({'ok': False, 'message': subject_error, 'redirect_url': url_for('teacher_allocate_stream', student_id=student_id)}), 400
             flash(subject_error, 'error')
             return redirect(url_for('teacher_allocate_stream', student_id=student_id))
 
@@ -38265,8 +39057,16 @@ def teacher_allocate_stream():
 
         # Use a focused update for stream allocation to avoid full-row save
         # overhead and reduce the chance of long-running submit requests.
-        with db_connection(commit=True) as conn:
+        conn = None
+        try:
+            before_db_connect_at = time.perf_counter()
+            conn = get_db()
+            db_connect_ms = int((time.perf_counter() - before_db_connect_at) * 1000)
             c = conn.cursor()
+            # Fail fast if the row is locked or the DB is slow.
+            db_execute(c, "SET LOCAL statement_timeout = 8000")
+            db_execute(c, "SET LOCAL lock_timeout = 4000")
+            before_update_at = time.perf_counter()
             db_execute(
                 c,
                 """UPDATE students
@@ -38284,41 +39084,91 @@ def teacher_allocate_stream():
                     student_id,
                 ),
             )
+            update_ms = int((time.perf_counter() - before_update_at) * 1000)
             updated_rows = int(c.rowcount or 0)
+            before_commit_at = time.perf_counter()
+            conn.commit()
+            commit_ms = int((time.perf_counter() - before_commit_at) * 1000)
+        except Exception as exc:
+            if conn is not None:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+            logging.exception(
+                "teacher_allocate_stream: update failed school_id=%s student_id=%s teacher_id=%s student_load_ms=%s subject_build_ms=%s",
+                school_id,
+                student_id,
+                teacher_id,
+                student_load_ms,
+                subject_build_ms,
+            )
+            message = f'Could not save stream allocation. Please retry. ({exc})'
+            if wants_json:
+                return jsonify({'ok': False, 'message': message, 'redirect_url': url_for('teacher_allocate_stream', student_id=student_id)}), 500
+            flash(message, 'error')
+            return redirect(url_for('teacher_allocate_stream', student_id=student_id))
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
         elapsed_ms = int((time.perf_counter() - allocation_started_at) * 1000)
         if updated_rows <= 0:
             logging.warning(
-                "teacher_allocate_stream: no rows updated school_id=%s student_id=%s teacher_id=%s elapsed_ms=%s",
+                "teacher_allocate_stream: no rows updated school_id=%s student_id=%s teacher_id=%s elapsed_ms=%s student_load_ms=%s subject_build_ms=%s db_connect_ms=%s update_ms=%s commit_ms=%s",
                 school_id,
                 student_id,
                 teacher_id,
                 elapsed_ms,
+                student_load_ms,
+                subject_build_ms,
+                db_connect_ms,
+                update_ms,
+                commit_ms,
             )
-            flash('Could not save stream allocation. Student record may have changed. Please retry.', 'error')
+            message = 'Could not save stream allocation. Student record may have changed. Please retry.'
+            if wants_json:
+                return jsonify({'ok': False, 'message': message, 'redirect_url': url_for('teacher_allocate_stream', student_id=student_id)}), 409
+            flash(message, 'error')
             return redirect(url_for('teacher_allocate_stream', student_id=student_id))
         if elapsed_ms > 2000:
             logging.warning(
-                "teacher_allocate_stream: slow submit school_id=%s student_id=%s teacher_id=%s elapsed_ms=%s",
+                "teacher_allocate_stream: slow submit school_id=%s student_id=%s teacher_id=%s elapsed_ms=%s student_load_ms=%s subject_build_ms=%s db_connect_ms=%s update_ms=%s commit_ms=%s",
                 school_id,
                 student_id,
                 teacher_id,
                 elapsed_ms,
+                student_load_ms,
+                subject_build_ms,
+                db_connect_ms,
+                update_ms,
+                commit_ms,
             )
         else:
             logging.info(
-                "teacher_allocate_stream: submit ok school_id=%s student_id=%s teacher_id=%s elapsed_ms=%s",
+                "teacher_allocate_stream: submit ok school_id=%s student_id=%s teacher_id=%s elapsed_ms=%s student_load_ms=%s subject_build_ms=%s db_connect_ms=%s update_ms=%s commit_ms=%s",
                 school_id,
                 student_id,
                 teacher_id,
                 elapsed_ms,
+                student_load_ms,
+                subject_build_ms,
+                db_connect_ms,
+                update_ms,
+                commit_ms,
             )
         if previous_stream in ('', 'N/A'):
-            flash(f'Stream allocated for {student.get("firstname", "")}.', 'success')
+            success_message = f'Stream allocated for {student.get("firstname", "")}.'
         elif previous_stream != final_stream:
-            flash(f'Stream changed from {previous_stream} to {final_stream} for {student.get("firstname", "")}.', 'success')
+            success_message = f'Stream changed from {previous_stream} to {final_stream} for {student.get("firstname", "")}.'
         else:
-            flash(f'Stream details updated for {student.get("firstname", "")}.', 'success')
-        return redirect(url_for('teacher_dashboard'))
+            success_message = f'Stream details updated for {student.get("firstname", "")}.'
+        if wants_json:
+            return jsonify({'ok': True, 'message': success_message, 'redirect_url': success_redirect}), 200
+        flash(success_message, 'success')
+        return redirect(success_redirect)
 
     selected_optional_subjects = set(
         s for s in (student.get('subjects') or [])
@@ -38332,9 +39182,10 @@ def teacher_allocate_stream():
     )
 
 @app.route('/teacher/enter-scores', methods=['GET', 'POST'])
-@require_roles('teacher')
+@require_roles('teacher', 'school_admin')
 def teacher_enter_scores():
-    if session.get('role') != 'teacher':
+    role = (session.get('role') or '').strip().lower()
+    if role not in {'teacher', 'school_admin'}:
         return redirect(url_for('login'))
     
     school_id = _normalize_school_id_text(session.get('school_id'))
@@ -38345,25 +39196,40 @@ def teacher_enter_scores():
     school = get_school(school_id)
     current_term = get_current_term(school)
     current_year = (school or {}).get('academic_year', '')
+    dean_led_mode = school_uses_dean_led_score_entry(school)
+    score_entry_fallback = url_for('school_admin_dashboard') if role == 'school_admin' else url_for('teacher_dashboard')
+    if role == 'school_admin' and not dean_led_mode:
+        flash('School admin score entry is available only when dean-led mode is enabled.', 'info')
+        return redirect(url_for('school_admin_dashboard'))
     student_id = request.args.get('student_id')
     requested_subject = normalize_subject_name((request.args.get('subject', '') or '').strip())
     
     if not student_id:
         flash('No student selected.', 'error')
-        return redirect(url_for('teacher_dashboard'))
+        return redirect(score_entry_fallback)
     
     student = load_student(school_id, student_id)
     if not student:
         flash('Student not found.', 'error')
-        return redirect(url_for('teacher_dashboard'))
+        return redirect(score_entry_fallback)
     class_name = student.get('classname', '')
-    class_access = teacher_has_class_access(school_id, teacher_id, class_name, term=current_term, academic_year=current_year)
-    subject_access = bool(get_teacher_subjects_for_class_term(
+    class_access = True if role == 'school_admin' else teacher_has_class_access(
+        school_id,
+        teacher_id,
+        class_name,
+        term=current_term,
+        academic_year=current_year,
+    )
+    subject_access = True if role == 'school_admin' else (False if dean_led_mode else bool(get_teacher_subjects_for_class_term(
         school_id, teacher_id, class_name, term=current_term, academic_year=current_year
-    ))
-    if not class_access and not subject_access:
+    )))
+    if dean_led_mode:
+        if role == 'teacher' and not class_access:
+            flash('You are not assigned to this student class.', 'error')
+            return redirect(score_entry_fallback)
+    elif not class_access and not subject_access:
         flash('You are not assigned to this student class/subjects.', 'error')
-        return redirect(url_for('teacher_dashboard'))
+        return redirect(score_entry_fallback)
     if class_uses_stream_for_school(school, student.get('classname', '')) and student.get('stream') in ('', 'N/A', None):
         flash('Allocate stream for this SS student before entering scores.', 'error')
         return redirect(url_for('teacher_allocate_stream', student_id=student_id))
@@ -38372,7 +39238,7 @@ def teacher_enter_scores():
     synced, sync_error = sync_student_subjects_to_class_config(student, school_id, school=school)
     if sync_error:
         flash(sync_error, 'error')
-        return redirect(url_for('teacher_dashboard'))
+        return redirect(score_entry_fallback)
     if synced:
         save_student(school_id, student_id, student)
 
@@ -38398,7 +39264,7 @@ def teacher_enter_scores():
     assigned_subjects_set = {s.lower() for s in assigned_subjects}
     can_edit_teacher_comment = bool(class_access)
     locked_subjects_for_class = []
-    if class_access:
+    if class_access and not dean_led_mode and role != 'school_admin':
         class_subject_assignments = get_teacher_subject_assignments(
             school_id,
             classname=class_name,
@@ -38453,13 +39319,15 @@ def teacher_enter_scores():
         editable_subjects = [s for s in all_subjects if s.lower() not in locked_subjects_set]
     else:
         editable_subjects = [s for s in all_subjects if s.lower() in assigned_subjects_set]
+    if dean_led_mode and class_access:
+        editable_subjects = list(all_subjects)
     if requested_subject:
         if requested_subject not in all_subjects:
             flash(f'Subject "{requested_subject}" is not offered by this student.', 'error')
-            return redirect(url_for('teacher_dashboard'))
-        if not class_access and requested_subject.lower() not in assigned_subjects_set:
+            return redirect(score_entry_fallback)
+        if role != 'school_admin' and not dean_led_mode and not class_access and requested_subject.lower() not in assigned_subjects_set:
             flash(f'You are not assigned to score {requested_subject}.', 'error')
-            return redirect(url_for('teacher_dashboard'))
+            return redirect(score_entry_fallback)
         if class_access and requested_subject.lower() in locked_subjects_set:
             editable_subjects = []
             flash(
@@ -38472,9 +39340,9 @@ def teacher_enter_scores():
     else:
         # Subject-only teachers should only see their assigned subject rows.
         subjects = list(all_subjects) if class_access else list(editable_subjects)
-    if not editable_subjects and not class_access:
+    if not editable_subjects and not class_access and role != 'school_admin':
         flash('No class-term subject assignment found for this student. Contact school admin.', 'error')
-        return redirect(url_for('teacher_dashboard'))
+        return redirect(score_entry_fallback)
     subject_key_map = build_subject_key_map(subjects)
     subject_last_edits = get_latest_score_audit_map_for_student(
         school_id=school_id,
@@ -38490,10 +39358,10 @@ def teacher_enter_scores():
     if request.method == 'POST':
         if is_locked:
             flash(f'Scores for {student.get("classname", "")} ({current_term}) are already published and locked.', 'error')
-            return redirect(url_for('teacher_dashboard'))
-        if class_access and not editable_subjects:
+            return redirect(score_entry_fallback)
+        if class_access and not editable_subjects and role != 'school_admin':
             flash('Score editing is locked for this student until subject teachers submit their assigned subjects.', 'error')
-            return redirect(url_for('teacher_dashboard'))
+            return redirect(score_entry_fallback)
         redirect_kwargs = {'student_id': student_id}
         if requested_subject:
             redirect_kwargs['subject'] = requested_subject
@@ -41816,7 +42684,7 @@ def teacher_student_result():
     published_terms = get_published_terms_for_student(school_id, sid)
     if not published_terms:
         flash('No published result available yet for this student.', 'error')
-        return redirect(url_for('view_students'))
+        return redirect(url_for('teacher_view_students'))
 
     if requested_term:
         target_entry = resolve_requested_published_term(
@@ -41838,7 +42706,7 @@ def teacher_student_result():
     snapshot = load_published_student_result(school_id, sid, target_term, target_year)
     if not snapshot:
         flash('Published result snapshot not found.', 'error')
-        return redirect(url_for('view_students'))
+        return redirect(url_for('teacher_view_students'))
 
     snapshot_class = (snapshot.get('classname', '') or '').strip()
     if not teacher_has_class_access(
@@ -41849,7 +42717,7 @@ def teacher_student_result():
         academic_year=target_year,
     ):
         flash('You can only view published results for classes assigned to you.', 'error')
-        return redirect(url_for('view_students'))
+        return redirect(url_for('teacher_view_students'))
 
     exam_config = get_assessment_config_for_class(school_id, snapshot_class)
     class_results = load_published_class_results(
@@ -42471,7 +43339,7 @@ def school_admin_unpublish_results():
     client_ip = get_client_ip()
     lock_endpoint = 'school_admin_unpublish'
 
-    fallback = url_for('view_students')
+    fallback = url_for('school_admin_view_students')
     if sid:
         fallback = url_for('school_admin_student_result', student_id=sid, term=term_token)
 
@@ -42830,6 +43698,8 @@ def change_password():
     flash('Password change is not available on this page.', 'error')
     return redirect(url_for('menu'))
 
+@app.route('/school-admin/view-students', endpoint='school_admin_view_students')
+@app.route('/teacher/view-students', endpoint='teacher_view_students')
 @app.route('/view_students')
 @require_roles('teacher', 'school_admin')
 def view_students():
@@ -42838,11 +43708,15 @@ def view_students():
     role = (session.get('role') or '').strip().lower()
     if role not in {'teacher', 'school_admin'}:
         return redirect(url_for('menu'))
+    canonical_endpoint = 'school_admin_view_students' if role == 'school_admin' else 'teacher_view_students'
+    if (request.endpoint or '').strip() == 'view_students':
+        return redirect(url_for(canonical_endpoint, **request.args.to_dict(flat=True)))
     
     school_id = session.get('school_id')
     if not school_id:
         return redirect(url_for('login'))
     school = get_school(school_id) or {}
+    dean_led_mode = school_uses_dean_led_score_entry(school)
     grade_cfg = get_grade_config(school_id)
     current_term = get_current_term(school)
 
@@ -42860,6 +43734,7 @@ def view_students():
     page = max(1, page)
     if not selected_term and role == 'teacher':
         selected_term = current_term
+    view_students_endpoint = canonical_endpoint
 
     if session.get('role') == 'teacher':
         teacher_id = session.get('user_id')
@@ -42928,6 +43803,8 @@ def view_students():
         else:
             is_class_owner = False
             subject_actions = []
+            if role == 'school_admin' and dean_led_mode:
+                is_class_owner = True
         scores = student_data.get('scores', {}) if isinstance(student_data.get('scores', {}), dict) else {}
         average_marks = compute_average_marks_from_scores(scores, subjects=student_data.get('subjects', []))
         grade = grade_from_score(average_marks, grade_cfg)
@@ -42982,7 +43859,8 @@ def view_students():
         teacher_result_classes_lower=teacher_result_classes_lower,
         page=page,
         total_pages=total_pages,
-        per_page=per_page
+        per_page=per_page,
+        view_students_endpoint=view_students_endpoint
     )
 
 @app.route('/assistant/guide', methods=['POST'])

@@ -1,6 +1,6 @@
 {
-  "name": "School Result Management",
-  "short_name": "SchoolResult",
+  "name": "OSARtech SchoolOS",
+  "short_name": "SchoolOS",
   "id": "/",
   "start_url": "/",
   "scope": "/",
@@ -8,7 +8,7 @@
   "display_override": ["standalone", "window-controls-overlay"],
   "background_color": "#f9f9f9",
   "theme_color": "#1e3c72",
-  "description": "School result management system for multi-school use.",
+  "description": "OSARtech SchoolOS is a complete school operating system for multi-school use.",
   "categories": ["education", "productivity"],
   "shortcuts": [
     {
@@ -29,23 +29,23 @@
   ],
   "icons": [
     {
-      "src": "/static/img/pwa-192.png?v=20260409a",
+      "src": "/static/img/pwa-192.png?v=20260411b",
       "sizes": "192x192",
       "type": "image/png"
     },
     {
-      "src": "/static/img/pwa-512.png?v=20260409a",
+      "src": "/static/img/pwa-512.png?v=20260411b",
       "sizes": "512x512",
       "type": "image/png"
     },
     {
-      "src": "/static/img/pwa-512-maskable.png?v=20260409a",
+      "src": "/static/img/pwa-512-maskable.png?v=20260411b",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
     },
     {
-      "src": "/static/img/osartech-logo.png?v=20260322a",
+      "src": "/static/img/osartech-logo.png?v=20260411b",
       "sizes": "any",
       "type": "image/png"
     }

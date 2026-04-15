@@ -1,10 +1,10 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>School Admin Dashboard - Student Score Management System</title>
-    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico', v='20260411b') }}">
     <link
       rel="stylesheet"
       href="{{ url_for('static', filename='css/style.css', v='20260228b') }}"
@@ -15,7 +15,7 @@
     />
     <link
       rel="stylesheet"
-      href="{{ url_for('static', filename='css/dashboard-enhanced.css', v='20260322a') }}"
+      href="{{ url_for('static', filename='css/dashboard-enhanced.css', v='20260411b') }}"
     />
     <link
       href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
@@ -218,6 +218,16 @@
               <strong class="op-on">schedule on track</strong>.
               {% endif %}
             </p>
+            {% if not setup_wizard_completed %}
+            <div class="flash warning" style="margin-top:14px;">
+              First-time setup is still open. Use the guided wizard to complete branding, subjects, teachers, students, and timetable setup.
+            </div>
+            <div class="quick-actions" style="margin-top:12px;">
+              <a href="{{ url_for('school_admin_setup_wizard') }}" class="quick-link">
+                <i class="fas fa-wand-magic-sparkles"></i> Open Setup Wizard
+              </a>
+            </div>
+            {% endif %}
           </div>
 
           <div class="card">
@@ -233,6 +243,26 @@
               <a href="{{ url_for('school_admin_analytics') }}" class="quick-link"><i class="fas fa-chart-line"></i> Analytics</a>
               <a href="{{ url_for('school_admin_security') }}" class="quick-link"><i class="fas fa-shield-alt"></i> Security Logs</a>
             </div>
+          </div>
+
+          <div class="card">
+            <div class="section-title-bar">
+              <h2><i class="fas fa-pen-to-square"></i> Score Entry Mode</h2>
+              <p>Choose the school-wide score workflow.</p>
+            </div>
+            <form method="POST" action="{{ url_for('school_admin_update_score_entry_mode') }}" class="form-group" style="max-width: 520px;">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+              <label for="dashboard_score_entry_mode">Current Mode</label>
+              <select id="dashboard_score_entry_mode" name="score_entry_mode">
+                <option value="teacher_subject" {% if not school or school.score_entry_mode != 'dean_led' %}selected{% endif %}>Teacher subject assignment</option>
+                <option value="dean_led" {% if school and school.score_entry_mode == 'dean_led' %}selected{% endif %}>Dean-led class score entry</option>
+              </select>
+              <p class="note mt-10">
+                Teacher subject assignment keeps strict subject ownership.
+                Dean-led class score entry lets class-assigned staff enter all subjects for a student/class.
+              </p>
+              <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Save Mode</button>
+            </form>
           </div>
 
           <div class="card">
@@ -360,10 +390,15 @@
           <li>{{ step }}</li>
           {% endfor %}
         </ol>
-        <form method="post" action="{{ url_for('complete_first_login_tutorial') }}">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <button type="submit" class="btn btn-primary"><i class="fas fa-check"></i> Got It, Continue</button>
-        </form>
+        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:0;">
+          <form method="post" action="{{ url_for('complete_first_login_tutorial') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-primary"><i class="fas fa-check"></i> Got It, Continue</button>
+          </form>
+          <a href="{{ url_for('school_admin_setup_wizard') }}" class="btn btn-secondary">
+            <i class="fas fa-wand-magic-sparkles"></i> Open Setup Wizard
+          </a>
+        </div>
       </div>
     </div>
     {% endif %}
@@ -455,9 +490,11 @@
         draw();
       })();
     </script>
-    <script src="{{ url_for('static', filename='js/dashboard-enhanced.js', v='20260322a') }}"></script>
+    <script src="{{ url_for('static', filename='js/dashboard-enhanced.js', v='20260411b') }}"></script>
       {% include "shared/_loading_overlay.html" %}
 </body>
 </html>
+
+
 
 

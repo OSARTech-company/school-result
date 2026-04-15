@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Assign Teachers - School Admin</title>
-    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico', v='20260411b') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}" />
     <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260307f') }}" />
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" />
@@ -130,7 +130,12 @@
           <div class="grid-two">
             <div class="card">
               <h2><i class="fas fa-user-check"></i> Assign Teacher to Class</h2>
-              <p class="note-line">This assigns class owner for {{ current_term }} {{ current_year }}.</p>
+              <p class="note-line">
+                This assigns class owner for {{ current_term }} {{ current_year }}.
+                {% if school and school.score_entry_mode == 'dean_led' %}
+                Subject assignment is disabled for this school mode.
+                {% endif %}
+              </p>
               <form action="{{ url_for('school_admin_assign_teacher') }}" method="POST">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
                 <input type="hidden" name="return_to" value="school_admin_teacher_assignments" />
@@ -163,6 +168,7 @@
               </form>
             </div>
 
+            {% if not school or school.score_entry_mode != 'dean_led' %}
             <div class="card">
               <h2><i class="fas fa-list-check"></i> Assign Subject Teacher</h2>
               <p class="note-line">Choose a teacher, choose a subject, then mark the classes that offer that subject for {{ current_term }} {{ current_year }}.</p>
@@ -215,6 +221,7 @@
                 <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Assign Subject Teacher</button>
               </form>
             </div>
+            {% endif %}
           </div>
 
           <div class="card">
@@ -268,6 +275,7 @@
             {% endfor %}
           </datalist>
 
+          {% if not school or school.score_entry_mode != 'dean_led' %}
           <div class="card">
             <h2><i class="fas fa-table-list"></i> Current Subject Assigned</h2>
             {% if subject_assignments %}
@@ -315,6 +323,7 @@
             <p>No subject assignments for current term/year.</p>
             {% endif %}
           </div>
+          {% endif %}
         </div>
       </div>
     </div>
@@ -478,3 +487,4 @@
       {% include "shared/_loading_overlay.html" %}
 </body>
 </html>
+

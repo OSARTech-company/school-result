@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Student CBT Login</title>
-    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <title>OSARtech SchoolOS CBT Login</title>
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico', v='20260411b') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260309a') }}">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
@@ -92,8 +92,8 @@
     {% include "shared/_loading_overlay.html" %}
     <div class="box">
         <div class="brand">
-            <img src="{{ url_for('static', filename='img/osartech-logo.png', v='20260322a') }}" alt="Osartech">
-            <span>OSARTECH CBT</span>
+            <img src="{{ url_for('static', filename='img/osartech-logo.png', v='20260411b') }}" alt="Osartech">
+            <span>OSARtech SchoolOS CBT</span>
         </div>
         <h1><i class="fas fa-laptop-code"></i> Student CBT Login</h1>
         <p class="muted">Sign in with your student ID and password to access CBT exams only.</p>
@@ -130,3 +130,5 @@
     </div>
 </body>
 </html>
+
+

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Academic Report Card - {{ student.first_name }} ({{ student.student_id }})</title>
-    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico', v='20260411b') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -1090,7 +1090,7 @@
             <i class="fas fa-lock-open"></i>
             Unpublish Result
         </button>
-        <a href="{{ url_for('view_students') }}" class="btn btn-back">
+        <a href="{{ url_for('school_admin_view_students' if session.get('role') == 'school_admin' else 'teacher_view_students') }}" class="btn btn-back">
             <i class="fas fa-arrow-left"></i>
             Back to Students
         </a>
@@ -1280,4 +1280,5 @@
     {% include "shared/_loading_overlay.html" %}
 </body>
 </html>
+
 

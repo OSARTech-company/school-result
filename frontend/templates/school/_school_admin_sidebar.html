@@ -55,7 +55,7 @@
       }
     </style>
     <div class="side-brand">
-        <img src="{{ url_for('static', filename='img/osartech-logo.png', v='20260322a') }}" alt="Osartech Logo" class="brand-logo">
+        <img src="{{ url_for('static', filename='img/osartech-logo.png', v='20260411b') }}" alt="Osartech Logo" class="brand-logo">
         <div class="school-brand-meta">
             <div class="school-brand-title">School Admin</div>
             <div class="school-brand-org">OSARTECH</div>
@@ -80,7 +80,7 @@
                 <span>Student</span><i class="fas fa-chevron-down"></i>
             </summary>
             <div class="side-group-links">
-                <a href="{{ url_for('view_students') }}" class="side-link{% if active_page == 'view_students' %} active{% endif %}">
+                <a href="{{ url_for('school_admin_view_students') }}" class="side-link{% if active_page == 'view_students' %} active{% endif %}">
                     <i class="fas fa-users"></i>
                     <span>View Students</span>
                 </a>
@@ -116,10 +116,12 @@
                     <i class="fas fa-chalkboard-teacher"></i>
                     <span>Teacher List</span>
                 </a>
+                {% if not school or school.score_entry_mode != 'dean_led' %}
                 <a href="{{ url_for('school_admin_teacher_assignments') }}" class="side-link{% if active_page == 'teacher_assignments' %} active{% endif %}">
                     <i class="fas fa-diagram-project"></i>
                     <span>Assign Teacher</span>
                 </a>
+                {% endif %}
                 <a href="{{ url_for('school_admin_teacher_workload') }}" class="side-link{% if active_page == 'teacher_workload' %} active{% endif %}">
                     <i class="fas fa-user-gear"></i>
                     <span>Teacher Workload</span>
@@ -132,6 +134,12 @@
                 <span>Academics</span><i class="fas fa-chevron-down"></i>
             </summary>
             <div class="side-group-links">
+                {% if school and school.score_entry_mode == 'dean_led' %}
+                <a href="{{ url_for('school_admin_view_students') }}" class="side-link{% if active_page == 'view_students' %} active{% endif %}">
+                    <i class="fas fa-pen-to-square"></i>
+                    <span>Enter Scores</span>
+                </a>
+                {% endif %}
                 <a href="{{ url_for('school_admin_publish_results') }}" class="side-link{% if active_page == 'publish_results' %} active{% endif %}">
                     <i class="fas fa-cloud-upload-alt"></i>
                     <span>Publish Results</span>
@@ -237,6 +245,12 @@
                 <span>System</span><i class="fas fa-chevron-down"></i>
             </summary>
             <div class="side-group-links">
+                {% if not school_setup_wizard or not school_setup_wizard.completed %}
+                <a href="{{ url_for('school_admin_setup_wizard') }}" class="side-link{% if active_page == 'setup_wizard' %} active{% endif %}">
+                    <i class="fas fa-wand-magic-sparkles"></i>
+                    <span>Setup Wizard</span>
+                </a>
+                {% endif %}
                 <a href="{{ url_for('school_admin_settings') }}" class="side-link{% if active_page == 'settings' %} active{% endif %}">
                     <i class="fas fa-cogs"></i>
                     <span>School Settings</span>
@@ -301,3 +315,4 @@
     </div>
 </div>
 {% include 'shared/_ai_assistant_widget.html' %}
+
