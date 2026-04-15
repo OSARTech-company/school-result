@@ -232,7 +232,11 @@
                     </table>
                 </div>
                 <p class="hint">Totals and grade are generated automatically per subject using the configured grading rules.</p>
+                {% if school and school.score_entry_mode == 'dean_led' %}
+                <p class="hint">Simple Mode is active, so class-assigned staff can edit all subjects offered by this student.</p>
+                {% else %}
                 <p class="hint">Only your assigned subject(s) are editable on this page; other subjects are read-only.</p>
+                {% endif %}
                 {% if locked_subjects_for_class %}
                 <p class="hint" style="color:#b36b00;">
                     Locked subject(s) pending subject-teacher submission: {{ locked_subjects_for_class|join(', ') }}.

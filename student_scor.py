@@ -20659,6 +20659,7 @@ def build_subject_positions_for_student(school_id, student, school):
 
     classname = student.get('classname', '')
     term = student.get('term', '')
+    academic_year = (student.get('academic_year') or '').strip()
     student_id = student.get('student_id', '')
     subjects = student.get('subjects', []) if isinstance(student.get('subjects', []), list) else []
     if not classname or not term or not student_id or not subjects:
@@ -20674,12 +20675,17 @@ def build_subject_positions_for_student(school_id, student, school):
     for subject in subjects:
         ranked = []
         for sid, pdata in peer_items:
+            peer_year = (pdata.get('academic_year') or '').strip()
+            if academic_year and peer_year and peer_year != academic_year:
+                continue
             pscores = pdata.get('scores', {}) if isinstance(pdata.get('scores', {}), dict) else {}
             subj_score = pscores.get(subject, {}) if isinstance(pscores.get(subject, {}), dict) else {}
             mark = subject_overall_mark(subj_score)
             ranked.append((sid, float(mark)))
         ranked.sort(key=lambda x: x[1], reverse=True)
         size = len(ranked)
+        highest = ranked[0][1] if ranked else None
+        lowest = ranked[-1][1] if ranked else None
         pos = None
         prev_score = None
         current_pos = 0
@@ -20691,7 +20697,12 @@ def build_subject_positions_for_student(school_id, student, school):
                 break
             prev_score = score
         if pos is not None:
-            subject_positions[subject] = {'pos': pos, 'size': size}
+            subject_positions[subject] = {
+                'pos': pos,
+                'size': size,
+                'highest': highest,
+                'lowest': lowest,
+            }
     return subject_positions
 
 def build_positions_from_published_results(school, classname, term, class_results, student_id, student_stream, subjects):
@@ -37261,31 +37272,32 @@ def teacher_dashboard():
             'is_submitted': bool(submitted_at),
         })
     locked_subjects_by_class = {}
-    for cls in classes:
-        cls_rows = get_teacher_subject_assignments(
-            school_id,
-            classname=cls,
-            term=current_term,
-            academic_year=current_year,
-        )
-        if not cls_rows:
-            continue
-        submitted_teacher_ids = get_subject_submission_teacher_ids_for_class(
-            school_id,
-            cls,
-            current_term,
-            current_year,
-        )
-        locked = set()
-        for row in cls_rows:
-            assigned_teacher = (row.get('teacher_id') or '').strip()
-            subject_name = normalize_subject_name(row.get('subject', ''))
-            if not subject_name:
+    if not school_uses_dean_led_score_entry(school):
+        for cls in classes:
+            cls_rows = get_teacher_subject_assignments(
+                school_id,
+                classname=cls,
+                term=current_term,
+                academic_year=current_year,
+            )
+            if not cls_rows:
                 continue
-            if assigned_teacher and assigned_teacher != teacher_id and assigned_teacher not in submitted_teacher_ids:
-                locked.add(subject_name)
-        if locked:
-            locked_subjects_by_class[cls] = sorted(locked, key=lambda x: str(x).lower())
+            submitted_teacher_ids = get_subject_submission_teacher_ids_for_class(
+                school_id,
+                cls,
+                current_term,
+                current_year,
+            )
+            locked = set()
+            for row in cls_rows:
+                assigned_teacher = (row.get('teacher_id') or '').strip()
+                subject_name = normalize_subject_name(row.get('subject', ''))
+                if not subject_name:
+                    continue
+                if assigned_teacher and assigned_teacher != teacher_id and assigned_teacher not in submitted_teacher_ids:
+                    locked.add(subject_name)
+            if locked:
+                locked_subjects_by_class[cls] = sorted(locked, key=lambda x: str(x).lower())
     teacher_messages = get_teacher_messages_for_teacher(
         school_id=school_id,
         teacher_id=teacher_id,
