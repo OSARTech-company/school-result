@@ -13470,7 +13470,7 @@ def school_uses_dean_led_score_entry(school_or_value):
 
 
 def get_school_score_entry_mode_label(school_or_value):
-    return 'Dean-led score entry' if school_uses_dean_led_score_entry(school_or_value) else 'Teacher subject assignment'
+    return 'Simple Mode' if school_uses_dean_led_score_entry(school_or_value) else 'Advanced Mode'
 
 
 def get_school_leadership_label(value, default='Principal'):

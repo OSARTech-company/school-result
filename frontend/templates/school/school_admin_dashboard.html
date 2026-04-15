@@ -254,12 +254,12 @@
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
               <label for="dashboard_score_entry_mode">Current Mode</label>
               <select id="dashboard_score_entry_mode" name="score_entry_mode">
-                <option value="teacher_subject" {% if not school or school.score_entry_mode != 'dean_led' %}selected{% endif %}>Teacher subject assignment</option>
-                <option value="dean_led" {% if school and school.score_entry_mode == 'dean_led' %}selected{% endif %}>Dean-led class score entry</option>
+                <option value="teacher_subject" {% if not school or school.score_entry_mode != 'dean_led' %}selected{% endif %}>Advanced Mode</option>
+                <option value="dean_led" {% if school and school.score_entry_mode == 'dean_led' %}selected{% endif %}>Simple Mode</option>
               </select>
               <p class="note mt-10">
-                Teacher subject assignment keeps strict subject ownership.
-                Dean-led class score entry lets class-assigned staff enter all subjects for a student/class.
+                Advanced Mode keeps strict subject ownership.
+                Simple Mode lets class-assigned staff enter all subjects for a student/class.
               </p>
               <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Save Mode</button>
             </form>
