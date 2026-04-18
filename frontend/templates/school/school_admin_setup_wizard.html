@@ -175,11 +175,20 @@
                     <p>Use the button below to complete this step in the main app, then come back here and continue.</p>
                   </div>
                   {% endif %}
+                  {% if wizard_step.support_endpoint %}
+                  <div class="wizard-info-box">
+                    <h4>Related action</h4>
+                    <p>This step also needs a quick dashboard action before the setup will show as complete.</p>
+                  </div>
+                  {% endif %}
                 </div>
 
                 <div class="wizard-actions">
                   {% if wizard_step.primary_endpoint %}
                   <a href="{{ url_for(wizard_step.primary_endpoint) }}" class="btn btn-primary"><i class="fas fa-arrow-right"></i> {{ wizard_step.primary_label }}</a>
+                  {% endif %}
+                  {% if wizard_step.support_endpoint %}
+                  <a href="{{ url_for(wizard_step.support_endpoint) }}" class="btn btn-secondary"><i class="fas fa-signature"></i> {{ wizard_step.support_label }}</a>
                   {% endif %}
                   {% if wizard_step.prev_key %}
                   <a href="{{ url_for('school_admin_setup_wizard', step=wizard_step.prev_key) }}" class="btn btn-secondary"><i class="fas fa-arrow-left"></i> Previous</a>

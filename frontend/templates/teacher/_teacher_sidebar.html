@@ -36,7 +36,7 @@
                     <i class="fas fa-users"></i>
                     <span>View Students</span>
                 </a>
-                {% if teacher_has_class_assignment_nav %}
+                {% if teacher_has_class_assignment_nav and (not school or school.score_entry_mode != 'dean_led') %}
                 {% set behaviour_class = classname if classname is defined and classname else (selected_class if selected_class is defined and selected_class else (classes[0] if classes is defined and classes else '')) %}
                 <a href="{{ url_for('teacher_behaviour_assessment', classname=behaviour_class) if behaviour_class else url_for('teacher_dashboard') }}" class="side-link{% if active_page == 'behaviour' %} active{% endif %}">
                     <i class="fas fa-user-check"></i>
@@ -105,10 +105,12 @@
                     <i class="fas fa-comments"></i>
                     <span>Subject Comments</span>
                 </a>
+                {% if not school or school.score_entry_mode != 'dean_led' %}
                 <a href="{{ url_for('teacher_subject_handover') }}" class="side-link{% if active_page == 'subject_handover' %} active{% endif %}">
                     <i class="fas fa-clipboard-check"></i>
                     <span>Subject Handover</span>
                 </a>
+                {% endif %}
                 <a href="{{ url_for('teacher_upload_csv') }}" class="side-link{% if active_page == 'upload_csv' %} active{% endif %}">
                     <i class="fas fa-file-csv"></i>
                     <span>Upload CSV</span>

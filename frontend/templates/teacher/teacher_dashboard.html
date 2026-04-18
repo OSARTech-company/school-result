@@ -118,6 +118,12 @@
             margin-top: 8px;
         }
         .arm-toggle select { border-radius: 8px; padding: 4px 8px; }
+        .manual-attendance-grid { display: grid; gap: 16px; }
+        .manual-attendance-card { border: 1px solid #dbe4ef; border-radius: 12px; padding: 14px; background: #f8fbff; }
+        .manual-attendance-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+        .manual-attendance-form table { min-width: 640px; }
+        .manual-attendance-form input[type="number"] { width: 110px; }
+        .manual-attendance-note { margin: 0 0 10px; color: #475569; }
     </style>
 </head>
 <body style="--brand: {{ school.theme_primary_color if school and school.theme_primary_color else '#0F4C81' }}; --brand-2: {{ school.theme_secondary_color if school and school.theme_secondary_color else '#1F7A8C' }}; --accent: {{ school.theme_accent_color if school and school.theme_accent_color else '#1F7A8C' }};">
@@ -160,6 +166,7 @@
                         <strong>Phone:</strong> {{ teacher_phone or 'Not set' }} |
                         <strong>Assigned Classes:</strong> {{ classes|join(', ') if classes else 'None' }} |
                         <strong>{% if school and school.score_entry_mode == 'dean_led' %}Class Subjects{% else %}Subject Assignments{% endif %}:</strong> {{ subject_assignment_count or 0 }} |
+                        <strong>Mode:</strong> {{ 'Simple Mode' if school and school.score_entry_mode == 'dean_led' else 'Advanced Mode' }} |
                         <strong>Last Login:</strong> {{ last_login_at }}
                     </p>
                     {% if school_access_state %}
@@ -227,6 +234,17 @@
                         <h3>{{ subject_assignment_subject_count or 0 }}</h3>
                         <p>{% if school and school.score_entry_mode == 'dean_led' %}Class Subjects{% else %}Assigned Subjects{% endif %}</p>
                     </div>
+                </div>
+
+                <div class="card">
+                    <h2><i class="fas fa-sliders"></i> Score Workflow Mode</h2>
+                    {% if school and school.score_entry_mode == 'dean_led' %}
+                    <p class="success-note">Simple Mode is active for your school.</p>
+                    <p class="note">As a class-assigned teacher, you can work with all subjects offered by students in your assigned classes from the Score Entry area.</p>
+                    {% else %}
+                    <p class="note"><strong>Advanced Mode</strong> is active for your school.</p>
+                    <p class="note">You can work only with the subjects assigned to you, and handoff to class teacher remains part of the workflow.</p>
+                    {% endif %}
                 </div>
 
                 <div class="card" id="assignment-overview-card">
@@ -418,11 +436,12 @@
                     {% if school and school.score_entry_mode == 'dean_led' %}
                     <p class="workflow-step">1. Open Score Entry from the class list.</p>
                     <p class="workflow-step">2. Enter scores for all subjects offered by the student.</p>
-                    <p class="workflow-step">3. Review and save before class result approval.</p>
+                    <p class="workflow-step">3. If daily attendance was not marked, open Submission and enter Days Open plus Days Present.</p>
+                    <p class="workflow-step">4. Review and save before class result approval.</p>
                     {% else %}
                     <p class="workflow-step">1. Enter your assigned subject scores for students.</p>
-                    <p class="workflow-step">2. If you are class teacher, wait until all class subjects are complete.</p>
-                    <p class="workflow-step">3. Class teacher submits class result to school admin for approval.</p>
+                    <p class="workflow-step">2. Submit completed subjects to the class teacher when your handoff is ready.</p>
+                    <p class="workflow-step">3. Class teacher waits for all subject handoffs, then submits the class result to school admin.</p>
                     {% endif %}
                 </div>
                 <div class="card">
@@ -654,10 +673,72 @@
                     </div>
                 </div>
                 {% endif %}
-                {% if subject_submit_rows %}
+                {% set has_manual_attendance = [] %}
+                {% for classname in classes %}
+                {% set s = class_publish_status.get(classname, {}) %}
+                {% if s.attendance_manual_allowed %}
+                {% set _ = has_manual_attendance.append(1) %}
+                {% endif %}
+                {% endfor %}
+                {% if has_manual_attendance %}
+                <div class="card">
+                    <h2><i class="fas fa-calendar-check"></i> Manual Attendance Entry</h2>
+                    <p class="note">If daily attendance was not marked for your class, enter Days Open and Days Present here to calculate Days Absent.</p>
+                    <div class="manual-attendance-grid">
+                        {% for classname in classes %}
+                            {% set s = class_publish_status.get(classname, {}) %}
+                            {% if s.attendance_manual_allowed %}
+                            <div class="manual-attendance-card">
+                                <div class="manual-attendance-head">
+                                    <div>
+                                        <strong>{{ classname }}</strong>
+                                        <p class="manual-attendance-note">Instructional days for this term: {{ s.attendance_days_open or 0 }}.</p>
+                                    </div>
+                                    {% if s.attendance_ready %}
+                                    <span class="chip chip-success">Attendance complete</span>
+                                    {% else %}
+                                    <span class="chip chip-warning">Pending attendance</span>
+                                    {% endif %}
+                                </div>
+                                <form method="POST" action="{{ url_for('teacher_manual_attendance_summary') }}" class="manual-attendance-form">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                                    <input type="hidden" name="classname" value="{{ classname }}" />
+                                    <div style="overflow-x:auto;">
+                                        <table>
+                                            <thead>
+                                                <tr>
+                                                    <th>Student</th>
+                                                    <th>Days Open</th>
+                                                    <th>Days Present</th>
+                                                    <th>Days Absent</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {% for row in s.attendance_manual_rows or [] %}
+                                                <tr>
+                                                    <td>{{ row.student_name }}<br><small>{{ row.student_id }}</small></td>
+                                                    <td><input type="number" min="1" name="days_open_{{ row.student_id }}" value="{{ row.days_open or s.attendance_days_open or '' }}" data-manual-open></td>
+                                                    <td><input type="number" min="0" name="days_present_{{ row.student_id }}" value="{{ row.days_present if row.days_present != '' else '' }}" data-manual-present></td>
+                                                    <td><input type="number" value="{{ row.days_absent if row.days_absent != '' else '' }}" data-manual-absent readonly></td>
+                                                </tr>
+                                                {% endfor %}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    <div style="margin-top:10px;">
+                                        <button type="submit" class="btn btn-primary btn-sm">Save Attendance</button>
+                                    </div>
+                                </form>
+                            </div>
+                            {% endif %}
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+                {% if subject_submit_rows and (not school or school.score_entry_mode != 'dean_led') %}
                 <div class="card">
                     <h2><i class="fas fa-share-square"></i> Submit Subject Scores To Class Teacher</h2>
-                    <p class="note">Use one button per class after all your assigned subject scores are complete.</p>
+                    <p class="note">Submission is now tracked per subject. Use one button per class after all your assigned subject scores for that class are complete.</p>
                     <table>
                         <thead>
                             <tr>
@@ -672,7 +753,19 @@
                             {% for row in subject_submit_rows %}
                             <tr class="student-row">
                                 <td>{{ row.classname }}</td>
-                                <td>{{ row.subjects|join(', ') }}</td>
+                                <td>
+                                    <div>{{ row.subjects|join(', ') }}</div>
+                                    {% if row.submitted_subjects %}
+                                    <div class="note" style="margin-top:6px;">
+                                        Submitted: {{ row.submitted_subjects|join(', ') }}
+                                    </div>
+                                    {% endif %}
+                                    {% if row.pending_submit_subjects and not row.is_submitted %}
+                                    <div class="note" style="margin-top:4px;">
+                                        Waiting: {{ row.pending_submit_subjects|join(', ') }}
+                                    </div>
+                                    {% endif %}
+                                </td>
                                 <td>{{ row.pending_entries }}</td>
                                 <td>
                                     {% if row.is_submitted %}
@@ -702,6 +795,63 @@
 
                 {% if active_tab == 'submission' %}
                 <div class="card">
+                    <h2><i class="fas fa-calendar-check"></i> Manual Attendance Fallback</h2>
+                    <p class="note">If you did not mark daily attendance at all for a class, enter each student's <strong>Days Open</strong> and <strong>Days Present</strong> here. The system calculates <strong>Days Absent</strong> automatically and uses it on the result sheet.</p>
+                    <div class="manual-attendance-grid">
+                        {% for classname in classes %}
+                            {% set s = class_publish_status.get(classname, {}) %}
+                            {% if s.attendance_manual_allowed %}
+                            <div class="manual-attendance-card">
+                                <div class="manual-attendance-head">
+                                    <div>
+                                        <strong>{{ classname }}</strong>
+                                        <p class="manual-attendance-note">Instructional days for this term: {{ s.attendance_days_open or 0 }}.</p>
+                                    </div>
+                                    {% if s.attendance_ready %}
+                                    <span class="chip chip-success">Manual attendance complete</span>
+                                    {% else %}
+                                    <span class="chip chip-warning">Pending manual attendance ({{ s.attendance_missing_count or 0 }})</span>
+                                    {% endif %}
+                                </div>
+                                {% if s.attendance_message %}
+                                <p class="note">{{ s.attendance_message }}</p>
+                                {% endif %}
+                                <form method="POST" action="{{ url_for('teacher_manual_attendance_summary') }}" class="manual-attendance-form">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
+                                    <input type="hidden" name="classname" value="{{ classname }}" />
+                                    <div style="overflow-x:auto;">
+                                        <table>
+                                            <thead>
+                                                <tr>
+                                                    <th>Student</th>
+                                                    <th>Days Open</th>
+                                                    <th>Days Present</th>
+                                                    <th>Days Absent</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {% for row in s.attendance_manual_rows or [] %}
+                                                <tr>
+                                                    <td>{{ row.student_name }}<br><small>{{ row.student_id }}</small></td>
+                                                    <td><input type="number" min="1" name="days_open_{{ row.student_id }}" value="{{ row.days_open or s.attendance_days_open or '' }}" data-manual-open></td>
+                                                    <td><input type="number" min="0" name="days_present_{{ row.student_id }}" value="{{ row.days_present if row.days_present != '' else '' }}" data-manual-present></td>
+                                                    <td><input type="number" value="{{ row.days_absent if row.days_absent != '' else '' }}" data-manual-absent readonly></td>
+                                                </tr>
+                                                {% endfor %}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    <div style="margin-top:10px;">
+                                        <button type="submit" class="btn btn-primary btn-sm">Save Manual Attendance</button>
+                                    </div>
+                                </form>
+                            </div>
+                            {% endif %}
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <div class="card">
                     <h2><i class="fas fa-ranking-star"></i> Submit Results For Approval</h2>
                     <p class="note">Only your assigned class(es) appear here. Subject-only teachers cannot submit class results.</p>
                     <table>
@@ -730,6 +880,8 @@
                                             <span class="chip chip-pending">Pending admin review</span>
                                         {% elif s.approval_status == 'rejected' %}
                                             <span class="chip chip-danger">Rejected{% if s.review_note %}: {{ s.review_note }}{% endif %}</span>
+                                        {% elif not s.attendance_ready %}
+                                            <span class="chip chip-warning">Attendance pending</span>
                                         {% elif not s.behaviour_ready %}
                                             <span class="chip chip-warning">Behaviour pending ({{ s.behaviour_missing_count or 0 }})</span>
                                         {% elif s.ready %}
@@ -739,7 +891,11 @@
                                         {% endif %}
                                     </td>
                                     <td>
+                                        {% if school and school.score_entry_mode == 'dean_led' %}
+                                        <a href="{{ url_for('teacher_dashboard', tab='score') }}" class="btn btn-primary btn-xs">Open Shared Draft</a>
+                                        {% else %}
                                         <a href="{{ url_for('teacher_behaviour_assessment', classname=classname) }}" class="btn btn-primary btn-xs">Behaviour</a>
+                                        {% endif %}
                                         <form method="POST" action="{{ url_for('teacher_publish_results') }}" class="inline-form">
                                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                             <input type="hidden" name="classname" value="{{ classname }}"/>
@@ -834,6 +990,29 @@
     {% endif %}
     <script src="{{ url_for('static', filename='js/dashboard-menu.js', v='20260306e') }}"></script>
     <script src="{{ url_for('static', filename='js/dashboard-enhanced.js', v='20260411b') }}"></script>
+    <script>
+        document.querySelectorAll('.manual-attendance-form').forEach(function (form) {
+            var recalc = function (row) {
+                var openInput = row.querySelector('[data-manual-open]');
+                var presentInput = row.querySelector('[data-manual-present]');
+                var absentInput = row.querySelector('[data-manual-absent]');
+                if (!openInput || !presentInput || !absentInput) return;
+                var daysOpen = parseInt(openInput.value || '0', 10);
+                var daysPresent = parseInt(presentInput.value || '0', 10);
+                if (Number.isNaN(daysOpen) || daysOpen < 0) daysOpen = 0;
+                if (Number.isNaN(daysPresent) || daysPresent < 0) daysPresent = 0;
+                if (daysPresent > daysOpen) daysPresent = daysOpen;
+                absentInput.value = String(Math.max(0, daysOpen - daysPresent));
+            };
+            form.querySelectorAll('tbody tr').forEach(function (row) {
+                row.querySelectorAll('[data-manual-open], [data-manual-present]').forEach(function (input) {
+                    input.addEventListener('input', function () { recalc(row); });
+                    input.addEventListener('change', function () { recalc(row); });
+                });
+                recalc(row);
+            });
+        });
+    </script>
     {% include "shared/_loading_overlay.html" %}
 </body>
 </html>

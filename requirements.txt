@@ -10,3 +10,4 @@ python-dotenv==1.2.1
 SQLAlchemy==2.0.43
 WTForms==3.2.1
 eventlet==0.33.3
+qrcode==8.2

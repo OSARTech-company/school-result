@@ -116,12 +116,16 @@
                     <i class="fas fa-chalkboard-teacher"></i>
                     <span>Teacher List</span>
                 </a>
-                {% if not school or school.score_entry_mode != 'dean_led' %}
-                <a href="{{ url_for('school_admin_teacher_assignments') }}" class="side-link{% if active_page == 'teacher_assignments' %} active{% endif %}">
+                <a
+                    href="{{ url_for('school_admin_teacher_assignments') }}"
+                    id="sidebar-teacher-assignments-link"
+                    data-score-entry-visible="advanced"
+                    class="side-link{% if active_page == 'teacher_assignments' %} active{% endif %}"
+                    {% if school and school.score_entry_mode == 'dean_led' %}hidden{% endif %}
+                >
                     <i class="fas fa-diagram-project"></i>
                     <span>Assign Teacher</span>
                 </a>
-                {% endif %}
                 <a href="{{ url_for('school_admin_teacher_workload') }}" class="side-link{% if active_page == 'teacher_workload' %} active{% endif %}">
                     <i class="fas fa-user-gear"></i>
                     <span>Teacher Workload</span>
@@ -134,12 +138,16 @@
                 <span>Academics</span><i class="fas fa-chevron-down"></i>
             </summary>
             <div class="side-group-links">
-                {% if school and school.score_entry_mode == 'dean_led' %}
-                <a href="{{ url_for('school_admin_view_students') }}" class="side-link{% if active_page == 'view_students' %} active{% endif %}">
+                <a
+                    href="{{ url_for('school_admin_score_entry') }}"
+                    id="sidebar-school-admin-score-entry-link"
+                    data-score-entry-visible="simple"
+                    class="side-link{% if active_page == 'score_entry' %} active{% endif %}"
+                    {% if not school or school.score_entry_mode != 'dean_led' %}hidden{% endif %}
+                >
                     <i class="fas fa-pen-to-square"></i>
                     <span>Enter Scores</span>
                 </a>
-                {% endif %}
                 <a href="{{ url_for('school_admin_publish_results') }}" class="side-link{% if active_page == 'publish_results' %} active{% endif %}">
                     <i class="fas fa-cloud-upload-alt"></i>
                     <span>Publish Results</span>
@@ -169,6 +177,30 @@
                 <a href="{{ url_for('school_admin_promote') }}" class="side-link{% if active_page == 'promote' %} active{% endif %}">
                     <i class="fas fa-arrow-up"></i>
                     <span>Promote Students</span>
+                </a>
+            </div>
+        </details>
+
+        <details class="side-group">
+            <summary class="side-group-toggle">
+                <span>Settings</span><i class="fas fa-chevron-down"></i>
+            </summary>
+            <div class="side-group-links">
+                <a href="{{ url_for('school_admin_settings_profile') }}" class="side-link{% if active_page == 'settings' and (active_settings_section|default('profile')) == 'profile' %} active{% endif %}">
+                    <i class="fas fa-school"></i>
+                    <span>School Profile</span>
+                </a>
+                <a href="{{ url_for('school_admin_settings_academic') }}" class="side-link{% if active_page == 'settings' and active_settings_section == 'academic' %} active{% endif %}">
+                    <i class="fas fa-graduation-cap"></i>
+                    <span>Academic Settings</span>
+                </a>
+                <a href="{{ url_for('school_admin_settings_results') }}" class="side-link{% if active_page == 'settings' and active_settings_section == 'results' %} active{% endif %}">
+                    <i class="fas fa-square-poll-vertical"></i>
+                    <span>Result Settings</span>
+                </a>
+                <a href="{{ url_for('school_admin_settings_branding') }}" class="side-link{% if active_page == 'settings' and active_settings_section == 'branding' %} active{% endif %}">
+                    <i class="fas fa-palette"></i>
+                    <span>Branding</span>
                 </a>
             </div>
         </details>
@@ -251,10 +283,6 @@
                     <span>Setup Wizard</span>
                 </a>
                 {% endif %}
-                <a href="{{ url_for('school_admin_settings') }}" class="side-link{% if active_page == 'settings' %} active{% endif %}">
-                    <i class="fas fa-cogs"></i>
-                    <span>School Settings</span>
-                </a>
                 <a href="{{ url_for('school_admin_bulk_tools') }}" class="side-link{% if active_page == 'bulk' %} active{% endif %}">
                     <i class="fas fa-database"></i>
                     <span>Bulk/Backup</span>

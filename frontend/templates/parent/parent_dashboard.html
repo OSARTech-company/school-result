@@ -11,6 +11,108 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" integrity="sha384-3B6NwesSXE7YJlcLI9RpRqGf2p/EgVH8BgoKTaUrmKNDkHPStTQ3EyoYjCGXaOTS" crossorigin="anonymous" referrerpolicy="no-referrer">
     <style>
         .container { max-width: 1100px; }
+        .parent-shell { display: grid; gap: 18px; }
+        .page-hero {
+            position: relative;
+            overflow: hidden;
+            border-radius: 22px;
+            padding: 26px;
+            background:
+                radial-gradient(circle at top right, rgba(255,255,255,0.18), transparent 32%),
+                linear-gradient(135deg, #0f4c81 0%, #1f7a8c 58%, #2d8a7d 100%);
+            color: #fff;
+            box-shadow: 0 20px 40px rgba(15, 76, 129, 0.22);
+        }
+        .page-hero::after {
+            content: "";
+            position: absolute;
+            inset: auto -60px -80px auto;
+            width: 220px;
+            height: 220px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.08);
+        }
+        .hero-grid {
+            position: relative;
+            z-index: 1;
+            display: grid;
+            grid-template-columns: minmax(0, 1.55fr) minmax(220px, 0.8fr);
+            gap: 18px;
+            align-items: end;
+        }
+        .hero-topline {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.14);
+            font-size: 0.82rem;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            font-weight: 700;
+        }
+        .hero-title { margin: 14px 0 0; font-size: clamp(1.8rem, 3.8vw, 2.6rem); line-height: 1.08; }
+        .hero-text { margin: 12px 0 0; color: rgba(255,255,255,0.88); line-height: 1.6; max-width: 700px; }
+        .hero-meta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+        .hero-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.14);
+            color: #fff;
+            font-weight: 600;
+        }
+        .summary-card {
+            border-radius: 18px;
+            padding: 16px;
+            background: rgba(255,255,255,0.13);
+            border: 1px solid rgba(255,255,255,0.16);
+            backdrop-filter: blur(6px);
+        }
+        .summary-card .label {
+            display: block;
+            font-size: 0.75rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: rgba(255,255,255,0.72);
+            margin-bottom: 6px;
+        }
+        .summary-card .value { font-size: 1.8rem; font-weight: 800; line-height: 1.1; }
+        .summary-card .meta { margin-top: 6px; color: rgba(255,255,255,0.84); }
+        .stat-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 14px;
+        }
+        .stat-card {
+            border: 1px solid #dbe7f3;
+            border-radius: 18px;
+            padding: 18px;
+            background: linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
+            box-shadow: 0 10px 22px rgba(15, 23, 42, 0.05);
+        }
+        .stat-card .label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 0.76rem;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: #6b7280;
+        }
+        .stat-card .value {
+            font-size: 1.7rem;
+            font-weight: 800;
+            color: #14365e;
+            line-height: 1.1;
+        }
+        .stat-card .meta {
+            margin-top: 6px;
+            color: #5d6d82;
+            font-size: 0.92rem;
+        }
         .parent-notif-actions { margin-top: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
         .parent-empty-state {
             text-align: center;
@@ -61,6 +163,61 @@
             font-weight: 700;
         }
         .parent-quick-link:hover { background: #edf5ff; }
+        .feature-card {
+            border-radius: 18px;
+            border: 1px solid #dbe4ef;
+            background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+            box-shadow: 0 10px 20px rgba(15, 23, 42, 0.04);
+        }
+        .child-card {
+            border-radius: 22px;
+            border: 1px solid #dbe7f3;
+            background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+            box-shadow: 0 14px 30px rgba(15, 23, 42, 0.06);
+        }
+        .child-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 14px;
+            flex-wrap: wrap;
+            margin-bottom: 12px;
+        }
+        .child-meta-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+            margin-top: 14px;
+        }
+        .child-meta-item {
+            padding: 12px 14px;
+            border-radius: 14px;
+            background: #eef6ff;
+            border: 1px solid #dbe7f3;
+        }
+        .child-meta-item .label {
+            display: block;
+            margin-bottom: 4px;
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #66758a;
+        }
+        .child-meta-item .value {
+            color: #14365e;
+            font-weight: 700;
+        }
+        .child-action-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+            margin-top: 16px;
+        }
+        .child-action-grid .btn {
+            width: 100%;
+            justify-content: center;
+            margin: 0;
+        }
         .welcome-modal-overlay {
             position: fixed;
             inset: 0;
@@ -79,6 +236,15 @@
         }
         .welcome-modal-card h3 { margin: 0 0 10px; color: #0f172a; }
         .welcome-modal-card ol { margin: 8px 0 14px 18px; color: #334155; }
+        @media (max-width: 900px) {
+            .hero-grid { grid-template-columns: 1fr; }
+            .stat-grid,
+            .child-meta-grid { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 640px) {
+            .page-hero { padding: 22px 18px; border-radius: 18px; }
+            .hero-chip { width: 100%; justify-content: center; }
+        }
     </style>
 </head>
 <body style="--accent: {{ parent_theme_accent if parent_theme_accent else '#1F7A8C' }};" data-parent-account="{{ parent_phone|default('parent', true)|e }}" data-unread-parent-messages="{{ unread_parent_messages|default(0, true)|int }}">
@@ -115,9 +281,53 @@
                     {% endif %}
                 {% endwith %}
 
+                <div class="parent-shell">
+                <section class="page-hero">
+                    <div class="hero-grid">
+                        <div>
+                            <span class="hero-topline"><i class="fas fa-users"></i> Parent Dashboard</span>
+                            <h2 class="hero-title">Follow your child’s progress with clearer updates and faster tools.</h2>
+                            <p class="hero-text">This dashboard brings results, school notifications, timetable access, attendance links, and dispute follow-up into one parent-friendly space.</p>
+                            <div class="hero-meta">
+                                <span class="hero-chip"><i class="fas fa-phone"></i> {{ parent_phone }}</span>
+                                <span class="hero-chip"><i class="fas fa-user-graduate"></i> {{ children|length if children else 0 }} Linked Student{{ '' if (children|length if children else 0) == 1 else 's' }}</span>
+                                <span class="hero-chip"><i class="fas fa-bell"></i> {{ unread_parent_messages or 0 }} Unread Messages</span>
+                            </div>
+                        </div>
+                        <div class="summary-card">
+                            <span class="label">Family Snapshot</span>
+                            <div class="value">{{ children|length if children else 0 }}</div>
+                            <div class="meta">Student records currently linked to this parent account</div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="stat-grid">
+                    <div class="stat-card">
+                        <span class="label">Linked Students</span>
+                        <div class="value">{{ children|length if children else 0 }}</div>
+                        <div class="meta">Student profiles available in this account</div>
+                    </div>
+                    <div class="stat-card">
+                        <span class="label">Unread Messages</span>
+                        <div class="value">{{ unread_parent_messages or 0 }}</div>
+                        <div class="meta">School notifications that still need review</div>
+                    </div>
+                    <div class="stat-card">
+                        <span class="label">Visible Programs</span>
+                        <div class="value">{{ parent_term_events|length if parent_term_events else 0 }}</div>
+                        <div class="meta">School events currently shared with parents</div>
+                    </div>
+                    <div class="stat-card">
+                        <span class="label">Ready Results</span>
+                        <div class="value">{{ children|selectattr('has_result')|list|length if children else 0 }}</div>
+                        <div class="meta">Linked students with published results</div>
+                    </div>
+                </section>
+
                 <div class="layout-main">
                 <div class="layout-side">
-                <div class="card" id="parent-messages-card">
+                <div class="card feature-card" id="parent-messages-card">
                     <h3 class="no-margin"><i class="fas fa-bell"></i> School Notifications</h3>
                     <p class="muted mt-10">Open your dedicated messages page to keep this dashboard light.</p>
                     <p class="muted">Unread notifications: <strong>{{ unread_parent_messages or 0 }}</strong></p>
@@ -133,7 +343,7 @@
                 </div>
 
                 {% set first_child_key = children[0].key if children else '' %}
-                <div class="card" id="parent-tools-card">
+                <div class="card feature-card" id="parent-tools-card">
                     <h3 class="no-margin"><i class="fas fa-compass"></i> Parent Tools</h3>
                     <p class="muted mt-10">Quick links to the most used parent pages.</p>
                     <div class="parent-quick-actions mt-10">
@@ -144,7 +354,7 @@
                     </div>
                 </div>
 
-                <div class="card" id="parent-password-card">
+                <div class="card feature-card" id="parent-password-card">
                     <h3 class="no-margin">Change Parent Password</h3>
                     <p class="muted">For security, change the password after login.</p>
                     <form method="post" action="{{ url_for('parent_change_password') }}">
@@ -170,7 +380,7 @@
                 </div>
                 </div>
                 <div class="layout-primary">
-                <div class="card">
+                <div class="card feature-card">
                     <h3 class="no-margin"><i class="fas fa-calendar-alt"></i> School Programs (Visible to Parents)</h3>
                     {% if parent_term_events %}
                     <table class="mt-10">
@@ -201,11 +411,26 @@
                 {% if children %}
                 <div class="grid">
                     {% for child in children %}
-                    <div class="card">
-                        <h3 class="no-margin">{{ child.firstname }}</h3>
-                        <div class="muted"><strong>ID:</strong> {{ child.student_id }}</div>
-                        <div class="muted"><strong>School:</strong> {{ child.school_name }}</div>
-                        <div class="muted"><strong>Class:</strong> {{ child.classname }}{% if child.stream %} ({{ child.stream }}){% endif %}</div>
+                    <div class="card child-card">
+                        <div class="child-head">
+                            <div>
+                                <h3 class="no-margin">{{ child.firstname }}</h3>
+                                <div class="muted mt-10">{{ child.school_name }}</div>
+                            </div>
+                            <span class="chip {% if child.has_result %}chip-success{% else %}chip-warning{% endif %}">
+                                {% if child.has_result %}Result Available{% else %}Awaiting Result{% endif %}
+                            </span>
+                        </div>
+                        <div class="child-meta-grid">
+                            <div class="child-meta-item">
+                                <span class="label">Student ID</span>
+                                <span class="value">{{ child.student_id }}</span>
+                            </div>
+                            <div class="child-meta-item">
+                                <span class="label">Class</span>
+                                <span class="value">{{ child.classname }}{% if child.stream %} ({{ child.stream }}){% endif %}</span>
+                            </div>
+                        </div>
                         {% if child.has_result %}
                         <div class="muted mt-10">
                             <strong>Latest:</strong> {{ child.latest_term }}{% if child.latest_year %} ({{ child.latest_year }}){% endif %}
@@ -225,12 +450,12 @@
                         {% else %}
                         <div class="muted mt-10">No published result yet.</div>
                         {% endif %}
-                        <div class="mt-12">
+                        <div class="child-action-grid">
                             <a class="btn" href="{{ url_for('parent_view_result', student_key=child.key) }}">View Results</a>
-                            <a class="btn ml-10" href="{{ url_for('parent_compare_results', student_key=child.key) }}">Compare Terms</a>
-                            <a class="btn ml-10" href="{{ url_for('parent_period_attendance', student_key=child.key) }}">Attendance</a>
-                            <a class="btn ml-10" href="{{ url_for('parent_timetable', student_key=child.key) }}">Timetable</a>
-                            <a class="btn ml-10" href="{{ url_for('parent_submit_dispute', student_key=child.key) }}">Report Dispute</a>
+                            <a class="btn" href="{{ url_for('parent_compare_results', student_key=child.key) }}">Compare Terms</a>
+                            <a class="btn" href="{{ url_for('parent_period_attendance', student_key=child.key) }}">Attendance</a>
+                            <a class="btn" href="{{ url_for('parent_timetable', student_key=child.key) }}">Timetable</a>
+                            <a class="btn" href="{{ url_for('parent_submit_dispute', student_key=child.key) }}">Report Dispute</a>
                         </div>
                     </div>
                     {% endfor %}
@@ -255,6 +480,7 @@
                     </div>
                 </div>
                 {% endif %}
+                </div>
                 </div>
                 </div>
             </div>

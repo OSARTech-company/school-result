@@ -8,6 +8,31 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260308b') }}">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .super-admin-inline-form {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            align-items: flex-end;
+        }
+        .super-admin-inline-field {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            min-width: 180px;
+            flex: 1 1 180px;
+        }
+        .super-admin-inline-field label {
+            font-size: 0.76rem;
+            font-weight: 800;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: #516173;
+        }
+        .super-admin-inline-form-compact .super-admin-inline-field {
+            min-width: 220px;
+        }
+    </style>
 </head>
 <body>
     {% include "shared/_loading_overlay.html" %}
@@ -160,70 +185,166 @@
                                 <form action="{{ url_for('super_admin_update_school') }}" method="POST" class="inline-form super-admin-inline-form">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                     <input type="hidden" name="school_id" value="{{ school.school_id }}"/>
-                                    <input type="text" name="school_name" value="{{ school.school_name }}" placeholder="School name" required>
-                                    <input type="text" name="location" value="{{ school.location or '' }}" placeholder="Location">
-                                    <input type="text" name="phone" value="{{ school.phone or '' }}" placeholder="Phone">
-                                    <input type="email" name="school_email" value="{{ school.email or '' }}" placeholder="Contact email">
-                                    <input type="text" name="principal_name" value="{{ school.principal_name or '' }}" placeholder="Principal name">
-                                    <input type="text" name="motto" value="{{ school.motto or '' }}" placeholder="Motto">
-                                    <select name="class_arm_ranking_mode" title="Class arm ranking mode">
-                                        <option value="separate" {% if school.class_arm_ranking_mode != 'together' %}selected{% endif %}>Arms Separate</option>
-                                        <option value="together" {% if school.class_arm_ranking_mode == 'together' %}selected{% endif %}>Arms Together</option>
-                                    </select>
+                                    <div class="super-admin-inline-field">
+                                        <label>School Name</label>
+                                        <input type="text" name="school_name" value="{{ school.school_name }}" placeholder="School name" required>
+                                    </div>
+                                    <div class="super-admin-inline-field">
+                                        <label>Location</label>
+                                        <input type="text" name="location" value="{{ school.location or '' }}" placeholder="Location">
+                                    </div>
+                                    <div class="super-admin-inline-field">
+                                        <label>Phone</label>
+                                        <input type="text" name="phone" value="{{ school.phone or '' }}" placeholder="Phone">
+                                    </div>
+                                    <div class="super-admin-inline-field">
+                                        <label>Contact Email</label>
+                                        <input type="email" name="school_email" value="{{ school.email or '' }}" placeholder="Contact email">
+                                    </div>
+                                    <div class="super-admin-inline-field">
+                                        <label>Principal Name</label>
+                                        <input type="text" name="principal_name" value="{{ school.principal_name or '' }}" placeholder="Principal name">
+                                    </div>
+                                    <div class="super-admin-inline-field">
+                                        <label>Motto</label>
+                                        <input type="text" name="motto" value="{{ school.motto or '' }}" placeholder="Motto">
+                                    </div>
+                                    <div class="super-admin-inline-field">
+                                        <label>Arm Ranking</label>
+                                        <select name="class_arm_ranking_mode" title="Class arm ranking mode">
+                                            <option value="separate" {% if school.class_arm_ranking_mode != 'together' %}selected{% endif %}>Arms Separate</option>
+                                            <option value="together" {% if school.class_arm_ranking_mode == 'together' %}selected{% endif %}>Arms Together</option>
+                                        </select>
+                                    </div>
                                     <button type="submit" class="btn btn-primary"><i class="fas fa-pen"></i> Update School</button>
                                 </form>
                                 <form action="{{ url_for('super_admin_update_school_admin') }}" method="POST" class="inline-form super-admin-inline-form super-admin-inline-form-compact">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                     <input type="hidden" name="school_id" value="{{ school.school_id }}"/>
-                                    <input type="email" name="admin_username" value="{{ school.admin_username or '' }}" placeholder="School admin email" required>
-                                    <input type="password" name="admin_password" placeholder="New password (optional)" autocomplete="new-password" minlength="12" title="Use at least 12 characters. Include uppercase, lowercase, number, and symbol.">
+                                    <div class="super-admin-inline-field">
+                                        <label>Admin Email</label>
+                                        <input type="email" name="admin_username" value="{{ school.admin_username or '' }}" placeholder="School admin email" required>
+                                    </div>
+                                    <div class="super-admin-inline-field">
+                                        <label>New Password</label>
+                                        <input type="password" name="admin_password" placeholder="New password (optional)" autocomplete="new-password" minlength="12" title="Use at least 12 characters. Include uppercase, lowercase, number, and symbol.">
+                                    </div>
                                     <button type="submit" class="btn btn-primary"><i class="fas fa-user-edit"></i> Update Admin</button>
                                 </form>
                                 <form action="{{ url_for('super_admin_update_school_access') }}" method="POST" class="inline-form super-admin-inline-form">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                     <input type="hidden" name="school_id" value="{{ school.school_id }}"/>
-                                    <select name="access_status" title="Access status">
-                                        <option value="trial_free" {% if school.access_status == 'trial_free' %}selected{% endif %}>Trial Free</option>
-                                        <option value="active_paid" {% if school.access_status == 'active_paid' %}selected{% endif %}>Active Paid</option>
-                                        <option value="pending_payment" {% if school.access_status == 'pending_payment' %}selected{% endif %}>Pending Payment</option>
-                                        <option value="suspended" {% if school.access_status == 'suspended' %}selected{% endif %}>Suspended</option>
-                                    </select>
-                                    <select name="cbt_enabled" title="CBT access">
-                                        <option value="1" {% if school.cbt_enabled %}selected{% endif %}>CBT Enabled</option>
-                                        <option value="0" {% if not school.cbt_enabled %}selected{% endif %}>CBT Disabled</option>
-                                    </select>
-                                    <input type="date" name="trial_start_date" value="{{ school.trial_start_date or '' }}" title="Trial start date">
-                                    <input type="date" name="trial_end_date" value="{{ school.trial_end_date or '' }}" title="Trial end date">
-                                    <input type="text" name="subscription_plan" value="{{ school.subscription_plan or '' }}" placeholder="Plan">
-                                    <input type="date" name="subscription_start_date" value="{{ school.subscription_start_date or '' }}" title="Subscription start date">
-                                    <input type="date" name="subscription_end_date" value="{{ school.subscription_end_date or '' }}" title="Subscription end date">
-                                    <input type="date" name="payment_due_date" value="{{ school.payment_due_date or '' }}" title="Payment due date">
-                                    <input type="number" name="payment_grace_days" value="{{ school.payment_grace_days or 14 }}" min="0" max="365" title="Payment grace days">
-                                    <input type="text" name="payment_reference" value="{{ school.payment_reference or '' }}" placeholder="Payment ref">
-                                    <input type="number" name="plan_max_students" value="{{ school.plan_max_students or 0 }}" min="0" placeholder="Max students">
-                                    <input type="number" name="plan_max_teachers" value="{{ school.plan_max_teachers or 0 }}" min="0" placeholder="Max teachers">
-                                    <input type="number" name="plan_storage_quota_mb" value="{{ school.plan_storage_quota_mb or 0 }}" min="0" placeholder="Storage MB">
-                                    <input type="text" name="plan_features_json" value="{{ school.plan_features_json or '{}' }}" placeholder="Plan features JSON">
-                                    <input type="text" name="access_note" value="{{ school.access_note or '' }}" placeholder="Access note">
+                                    <div class="super-admin-inline-field">
+                                        <label>Access Status</label>
+                                        <select name="access_status" title="Access status">
+                                            <option value="trial_free" {% if school.access_status == 'trial_free' %}selected{% endif %}>Trial Free</option>
+                                            <option value="active_paid" {% if school.access_status == 'active_paid' %}selected{% endif %}>Active Paid</option>
+                                            <option value="pending_payment" {% if school.access_status == 'pending_payment' %}selected{% endif %}>Pending Payment</option>
+                                            <option value="suspended" {% if school.access_status == 'suspended' %}selected{% endif %}>Suspended</option>
+                                        </select>
+                                    </div>
+                                    <div class="super-admin-inline-field">
+                                        <label>CBT Access</label>
+                                        <select name="cbt_enabled" title="CBT access">
+                                            <option value="1" {% if school.cbt_enabled %}selected{% endif %}>CBT Enabled</option>
+                                            <option value="0" {% if not school.cbt_enabled %}selected{% endif %}>CBT Disabled</option>
+                                        </select>
+                                    </div>
+                                    <div class="super-admin-inline-field">
+                                        <label>Trial Start</label>
+                                        <input type="date" name="trial_start_date" value="{{ school.trial_start_date or '' }}" title="Trial start date">
+                                    </div>
+                                    <div class="super-admin-inline-field">
+                                        <label>Trial End</label>
+                                        <input type="date" name="trial_end_date" value="{{ school.trial_end_date or '' }}" title="Trial end date">
+                                    </div>
+                                    <div class="super-admin-inline-field">
+                                        <label>Plan</label>
+                                        <input type="text" name="subscription_plan" value="{{ school.subscription_plan or '' }}" placeholder="Plan">
+                                    </div>
+                                    <div class="super-admin-inline-field">
+                                        <label>Subscription Start</label>
+                                        <input type="date" name="subscription_start_date" value="{{ school.subscription_start_date or '' }}" title="Subscription start date">
+                                    </div>
+                                    <div class="super-admin-inline-field">
+                                        <label>Subscription End</label>
+                                        <input type="date" name="subscription_end_date" value="{{ school.subscription_end_date or '' }}" title="Subscription end date">
+                                    </div>
+                                    <div class="super-admin-inline-field">
+                                        <label>Payment Due</label>
+                                        <input type="date" name="payment_due_date" value="{{ school.payment_due_date or '' }}" title="Payment due date">
+                                    </div>
+                                    <div class="super-admin-inline-field">
+                                        <label>Grace Days</label>
+                                        <input type="number" name="payment_grace_days" value="{{ school.payment_grace_days or 14 }}" min="0" max="365" title="Payment grace days">
+                                    </div>
+                                    <div class="super-admin-inline-field">
+                                        <label>Payment Ref</label>
+                                        <input type="text" name="payment_reference" value="{{ school.payment_reference or '' }}" placeholder="Payment ref">
+                                    </div>
+                                    <div class="super-admin-inline-field">
+                                        <label>Max Students</label>
+                                        <input type="number" name="plan_max_students" value="{{ school.plan_max_students or 0 }}" min="0" placeholder="Max students">
+                                    </div>
+                                    <div class="super-admin-inline-field">
+                                        <label>Max Teachers</label>
+                                        <input type="number" name="plan_max_teachers" value="{{ school.plan_max_teachers or 0 }}" min="0" placeholder="Max teachers">
+                                    </div>
+                                    <div class="super-admin-inline-field">
+                                        <label>Storage MB</label>
+                                        <input type="number" name="plan_storage_quota_mb" value="{{ school.plan_storage_quota_mb or 0 }}" min="0" placeholder="Storage MB">
+                                    </div>
+                                    <div class="super-admin-inline-field">
+                                        <label>Plan Features JSON</label>
+                                        <input type="text" name="plan_features_json" value="{{ school.plan_features_json or '{}' }}" placeholder="Plan features JSON">
+                                    </div>
+                                    <div class="super-admin-inline-field">
+                                        <label>Access Note</label>
+                                        <input type="text" name="access_note" value="{{ school.access_note or '' }}" placeholder="Access note">
+                                    </div>
                                     <button type="submit" class="btn btn-primary"><i class="fas fa-key"></i> Update Access</button>
                                 </form>
                                 <form action="{{ url_for('super_admin_school_billing') }}" method="POST" class="inline-form super-admin-inline-form">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                     <input type="hidden" name="school_id" value="{{ school.school_id }}"/>
-                                    <input type="text" name="invoice_ref" placeholder="Invoice ref">
-                                    <input type="text" name="plan_name" value="{{ school.subscription_plan or '' }}" placeholder="Plan name">
-                                    <input type="number" step="0.01" min="0" name="amount_due" placeholder="Amount due">
-                                    <input type="number" step="0.01" min="0" name="amount_paid" placeholder="Amount paid">
-                                    <input type="date" name="due_date" value="{{ school.payment_due_date or '' }}" title="Due date">
-                                    <input type="date" name="paid_at" title="Paid date">
-                                    <select name="billing_status" title="Billing status">
-                                        <option value="pending">Pending</option>
-                                        <option value="part_paid">Part Paid</option>
-                                        <option value="paid">Paid</option>
-                                        <option value="overdue">Overdue</option>
-                                        <option value="waived">Waived</option>
-                                    </select>
-                                    <input type="text" name="billing_note" placeholder="Billing note">
+                                    <div class="super-admin-inline-field">
+                                        <label>Invoice Ref</label>
+                                        <input type="text" name="invoice_ref" placeholder="Invoice ref">
+                                    </div>
+                                    <div class="super-admin-inline-field">
+                                        <label>Plan Name</label>
+                                        <input type="text" name="plan_name" value="{{ school.subscription_plan or '' }}" placeholder="Plan name">
+                                    </div>
+                                    <div class="super-admin-inline-field">
+                                        <label>Amount Due</label>
+                                        <input type="number" step="0.01" min="0" name="amount_due" placeholder="Amount due">
+                                    </div>
+                                    <div class="super-admin-inline-field">
+                                        <label>Amount Paid</label>
+                                        <input type="number" step="0.01" min="0" name="amount_paid" placeholder="Amount paid">
+                                    </div>
+                                    <div class="super-admin-inline-field">
+                                        <label>Due Date</label>
+                                        <input type="date" name="due_date" value="{{ school.payment_due_date or '' }}" title="Due date">
+                                    </div>
+                                    <div class="super-admin-inline-field">
+                                        <label>Paid Date</label>
+                                        <input type="date" name="paid_at" title="Paid date">
+                                    </div>
+                                    <div class="super-admin-inline-field">
+                                        <label>Billing Status</label>
+                                        <select name="billing_status" title="Billing status">
+                                            <option value="pending">Pending</option>
+                                            <option value="part_paid">Part Paid</option>
+                                            <option value="paid">Paid</option>
+                                            <option value="overdue">Overdue</option>
+                                            <option value="waived">Waived</option>
+                                        </select>
+                                    </div>
+                                    <div class="super-admin-inline-field">
+                                        <label>Billing Note</label>
+                                        <input type="text" name="billing_note" placeholder="Billing note">
+                                    </div>
                                     <button type="submit" class="btn btn-primary"><i class="fas fa-receipt"></i> Add Billing</button>
                                 </form>
                             </div>

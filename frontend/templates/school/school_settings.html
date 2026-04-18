@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>School Settings - Student Score Management System</title>
+    <title>{{ settings_section_title or 'School Settings' }} - Student Score Management System</title>
     <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico', v='20260411b') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css', v='20260228b') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260307f') }}">
@@ -24,17 +24,33 @@
         .table-wrap table { width: 100%; border-collapse: collapse; min-width: 760px; }
         .table-wrap th, .table-wrap td { padding: 10px; border-bottom: 1px solid var(--line); text-align: left; }
         .table-wrap th { background: #eff5fb; }
+        .page-lead { margin: 6px 0 0; color: #d9e7ff; font-size: 0.98rem; }
+        .settings-nav { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 18px 0 22px; }
+        .settings-nav a { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; text-decoration: none; color: #1e3653; background: #fff; font-weight: 700; display: flex; align-items: center; gap: 10px; }
+        .settings-nav a.active { background: linear-gradient(135deg, #1e3c72, #2a5298); color: #fff; border-color: transparent; box-shadow: 0 12px 24px rgba(30, 60, 114, 0.18); }
+        .settings-nav a small { display: block; font-weight: 500; opacity: 0.8; }
+        .card-intro { margin: -4px 0 18px; color: #5a6c7d; }
+        .settings-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+        @media (max-width: 640px) {
+            .settings-nav { grid-template-columns: 1fr; }
+            .settings-actions { flex-direction: column; }
+            .settings-actions .btn { width: 100%; margin-left: 0 !important; }
+        }
     </style>
 </head>
 <body>
     {% include "shared/_loading_overlay.html" %}
     <div class="app-shell topbar-layout">
     {% set active_page = 'settings' %}
+    {% set active_settings_section = settings_section or 'profile' %}
     {% include 'school/_school_admin_sidebar.html' %}
     <div class="main-content">
     <div class="container">
         <div class="header">
-            <h1><i class="fas fa-cogs"></i> School Settings</h1>
+            <div>
+                <h1><i class="fas fa-cogs"></i> {{ settings_section_title or 'School Settings' }}</h1>
+                <p class="page-lead">Manage one settings area at a time so the school admin panel stays easier to use.</p>
+            </div>
             <a href="{{ url_for('school_admin_dashboard') }}" class="back"><i class="fas fa-arrow-left"></i> Back</a>
         </div>
         
@@ -46,20 +62,46 @@
             {% endif %}
         {% endwith %}
         {% include 'shared/_school_setup_banner.html' %}
-        
-        <div class="card">
+
+        <div class="settings-nav">
+            <a href="{{ url_for('school_admin_settings_profile') }}"{% if (settings_section or 'profile') == 'profile' %} class="active"{% endif %}>
+                <i class="fas fa-school"></i>
+                <span>School Profile<small>Name, logo and leadership details</small></span>
+            </a>
+            <a href="{{ url_for('school_admin_settings_academic') }}"{% if settings_section == 'academic' %} class="active"{% endif %}>
+                <i class="fas fa-graduation-cap"></i>
+                <span>Academic Settings<small>Term, year and calendar controls</small></span>
+            </a>
+            <a href="{{ url_for('school_admin_settings_results') }}"{% if settings_section == 'results' %} class="active"{% endif %}>
+                <i class="fas fa-square-poll-vertical"></i>
+                <span>Result Settings<small>Scoring, grades and ranking rules</small></span>
+            </a>
+            <a href="{{ url_for('school_admin_settings_branding') }}"{% if settings_section == 'branding' %} class="active"{% endif %}>
+                <i class="fas fa-palette"></i>
+                <span>Branding<small>Portal and report color identity</small></span>
+            </a>
+        </div>
+
+        {% if (settings_section or 'profile') == 'profile' %}
+        <div class="card" id="school-profile">
             <h2><i class="fas fa-school"></i> School Information</h2>
-            <form method="POST" enctype="multipart/form-data">
+            <p class="card-intro">Update the school identity details that appear across the admin portal and report sheet.</p>
+            <form method="POST" action="{{ url_for('school_admin_settings', section='profile') }}" enctype="multipart/form-data">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                 <input type="hidden" name="settings_version" value="{{ settings_version or '' }}"/>
+                <input type="hidden" name="settings_section" value="profile"/>
                 <div class="form-group">
                     <label for="school_name">School Name:</label>
-                    <input type="text" id="school_name" name="school_name" value="{{ school.school_name if school else '' }}" required>
+                    <input type="text" id="school_name" name="school_name" value="{{ settings_form.school_name if settings_form else '' }}" required>
+                </div>
+                <div class="form-group">
+                    <label for="location">School Location:</label>
+                    <input type="text" id="location" name="location" value="{{ settings_form.location if settings_form else '' }}" placeholder="School address or main location">
                 </div>
 
                 <div class="form-group">
                     <label for="leadership_title">School Leadership Title:</label>
-                    {% set leadership_title_value = (school.leadership_title if school and school.leadership_title else 'principal') %}
+                    {% set leadership_title_value = (settings_form.leadership_title if settings_form and settings_form.leadership_title else 'principal') %}
                     <select id="leadership_title" name="leadership_title">
                         <option value="principal" {% if leadership_title_value != 'head_teacher' %}selected{% endif %}>Principal</option>
                         <option value="head_teacher" {% if leadership_title_value == 'head_teacher' %}selected{% endif %}>Head Teacher</option>
@@ -76,32 +118,63 @@
                     <input type="file" id="school_logo_file" name="school_logo_file" accept=".png,.jpg,.jpeg,.webp,image/*">
                     <small style="color:#5a6c7d; display:block; margin-top:6px;">If both URL and file are provided, uploaded file is used.</small>
                 </div>
+                <div class="settings-actions">
+                    <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Save School Profile</button>
+                    <a href="{{ url_for('school_admin_dashboard') }}" class="btn btn-secondary">Cancel</a>
+                </div>
+            </form>
+        </div>
+        {% elif settings_section == 'branding' %}
+        <div class="card" id="branding">
+            <h2><i class="fas fa-palette"></i> Branding</h2>
+            <p class="card-intro">Set the colors that shape the look of the portal, dashboards, and report card experience.</p>
+            <div class="note" style="margin-bottom:16px;">
+                School leadership signature is still managed from the dashboard signature card.
+                <a href="{{ url_for('school_admin_dashboard') }}">Open dashboard</a>
+            </div>
+            <form method="POST" action="{{ url_for('school_admin_settings', section='branding') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <input type="hidden" name="settings_version" value="{{ settings_version or '' }}"/>
+                <input type="hidden" name="settings_section" value="branding"/>
 
                 <div class="section-title"><i class="fas fa-palette"></i> Theme Colors</div>
                 <div class="form-group">
                     <label for="theme_primary_color">Primary Color:</label>
-                    <input type="color" id="theme_primary_color" name="theme_primary_color" value="{{ school.theme_primary_color if school and school.theme_primary_color else '#1E3C72' }}">
+                    <input type="color" id="theme_primary_color" name="theme_primary_color" value="{{ settings_form.theme_primary_color if settings_form and settings_form.theme_primary_color else '#1E3C72' }}">
                 </div>
                 <div class="form-group">
                     <label for="theme_secondary_color">Secondary Color:</label>
-                    <input type="color" id="theme_secondary_color" name="theme_secondary_color" value="{{ school.theme_secondary_color if school and school.theme_secondary_color else '#2A5298' }}">
+                    <input type="color" id="theme_secondary_color" name="theme_secondary_color" value="{{ settings_form.theme_secondary_color if settings_form and settings_form.theme_secondary_color else '#2A5298' }}">
                 </div>
                 <div class="form-group">
                     <label for="theme_accent_color">Accent Color:</label>
-                    <input type="color" id="theme_accent_color" name="theme_accent_color" value="{{ school.theme_accent_color if school and school.theme_accent_color else '#1F7A8C' }}">
+                    <input type="color" id="theme_accent_color" name="theme_accent_color" value="{{ settings_form.theme_accent_color if settings_form and settings_form.theme_accent_color else '#1F7A8C' }}">
                 </div>
-                
+                <div class="settings-actions">
+                    <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Save Branding</button>
+                    <a href="{{ url_for('school_admin_dashboard') }}" class="btn btn-secondary">Cancel</a>
+                </div>
+            </form>
+        </div>
+        {% elif settings_section == 'academic' %}
+        <div class="card" id="academic-settings">
+            <h2><i class="fas fa-graduation-cap"></i> Academic Settings</h2>
+            <p class="card-intro">Control the current term, academic year, working score availability, and the live term calendar.</p>
+            <form method="POST" action="{{ url_for('school_admin_settings', section='academic') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <input type="hidden" name="settings_version" value="{{ settings_version or '' }}"/>
+                <input type="hidden" name="settings_section" value="academic"/>
                 <div class="form-group">
                     <label for="academic_year">Academic Year:</label>
-                    <input type="text" id="academic_year" name="academic_year" value="{{ school.academic_year if school else '' }}" placeholder="e.g., 2025-2026">
+                    <input type="text" id="academic_year" name="academic_year" value="{{ settings_form.academic_year if settings_form else '' }}" placeholder="e.g., 2025-2026">
                 </div>
                 
                 <div class="form-group">
                     <label for="current_term">Current Term:</label>
                     <select id="current_term" name="current_term">
-                        <option value="First Term" {% if school and school.current_term == 'First Term' %}selected{% endif %}>First Term</option>
-                        <option value="Second Term" {% if school and school.current_term == 'Second Term' %}selected{% endif %}>Second Term</option>
-                        <option value="Third Term" {% if school and school.current_term == 'Third Term' %}selected{% endif %}>Third Term</option>
+                        <option value="First Term" {% if settings_form and settings_form.current_term == 'First Term' %}selected{% endif %}>First Term</option>
+                        <option value="Second Term" {% if settings_form and settings_form.current_term == 'Second Term' %}selected{% endif %}>Second Term</option>
+                        <option value="Third Term" {% if settings_form and settings_form.current_term == 'Third Term' %}selected{% endif %}>Third Term</option>
                     </select>
                 </div>
                 <div class="form-group">
@@ -118,11 +191,11 @@
                 <div class="form-group">
                     <label>Calendar Term Scope</label>
                     <div class="note">
-                        Using current term/year: <strong id="calendar_scope_term_label">{{ school.current_term if school else 'First Term' }}</strong>
-                        (<span id="calendar_scope_year_label">{{ school.academic_year if school else '' }}</span>)
+                        Using current term/year: <strong id="calendar_scope_term_label">{{ settings_form.current_term if settings_form else 'First Term' }}</strong>
+                        (<span id="calendar_scope_year_label">{{ settings_form.academic_year if settings_form else '' }}</span>)
                     </div>
-                    <input type="hidden" id="calendar_academic_year" name="calendar_academic_year" value="{{ school.academic_year if school else '' }}">
-                    <input type="hidden" id="calendar_term" name="calendar_term" value="{{ school.current_term if school else 'First Term' }}">
+                    <input type="hidden" id="calendar_academic_year" name="calendar_academic_year" value="{{ selected_calendar_year if selected_calendar_year is defined else (settings_form.academic_year if settings_form else '') }}">
+                    <input type="hidden" id="calendar_term" name="calendar_term" value="{{ selected_calendar_term if selected_calendar_term is defined else (settings_form.current_term if settings_form else 'First Term') }}">
                 </div>
                 <div class="form-group">
                     <label for="term_open_date">Term Open Date:</label>
@@ -153,28 +226,42 @@
                 
                 <div class="form-group">
                     <div class="checkbox-group">
-                        <input type="checkbox" id="test_enabled" name="test_enabled" {% if school %}{% if school.test_enabled %}checked{% endif %}{% else %}checked{% endif %}>
+                        <input type="hidden" name="test_enabled" value="0">
+                        <input type="checkbox" id="test_enabled" name="test_enabled" value="1" {% if not settings_form or settings_form.test_enabled %}checked{% endif %}>
                         <label for="test_enabled">Enable Test Score Entry</label>
                     </div>
                 </div>
                 
                 <div class="form-group">
                     <div class="checkbox-group">
-                        <input type="checkbox" id="exam_enabled" name="exam_enabled" {% if school %}{% if school.exam_enabled %}checked{% endif %}{% else %}checked{% endif %}>
+                        <input type="hidden" name="exam_enabled" value="0">
+                        <input type="checkbox" id="exam_enabled" name="exam_enabled" value="1" {% if not settings_form or settings_form.exam_enabled %}checked{% endif %}>
                         <label for="exam_enabled">Enable Exam Score Entry</label>
                     </div>
                 </div>
-                
+                <div class="settings-actions">
+                    <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Save Academic Settings</button>
+                    <a href="{{ url_for('school_admin_dashboard') }}" class="btn btn-secondary">Cancel</a>
+                </div>
+            </form>
+        </div>
+        {% elif settings_section == 'results' %}
+        <div class="card" id="result-settings">
+            <h2><i class="fas fa-square-poll-vertical"></i> Result Settings</h2>
+            <p class="card-intro">Configure assessment structure, grade bands, ranking rules, and how results are shown to families.</p>
+            <form method="POST" action="{{ url_for('school_admin_settings', section='results') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
+                <input type="hidden" name="settings_version" value="{{ settings_version or '' }}"/>
+                <input type="hidden" name="settings_section" value="results"/>
                 <div class="section-title"><i class="fas fa-calculator"></i> Score Configuration</div>
-                
                 <div class="form-group">
                     <label for="max_tests">Maximum Number of Tests (1-10):</label>
-                    <input type="number" id="max_tests" name="max_tests" value="{{ school.max_tests if school else 3 }}" min="1" max="10">
+                    <input type="number" id="max_tests" name="max_tests" value="{{ settings_form.max_tests if settings_form else 3 }}" min="1" max="10">
                 </div>
                 
                 <div class="form-group">
                     <label for="test_score_max">Max Total Test Score (All Tests Combined):</label>
-                    <input type="number" id="test_score_max" name="test_score_max" value="{{ school.test_score_max if school else 30 }}" min="0" max="100">
+                    <input type="number" id="test_score_max" name="test_score_max" value="{{ settings_form.test_score_max if settings_form else 30 }}" min="0" max="100">
                 </div>
                 
                 <div class="section-title"><i class="fas fa-file-alt"></i> Exam Structure</div>
@@ -204,39 +291,39 @@
                 </div>
                 {% endfor %}
 
-                <input type="hidden" name="exam_objective_max" value="{{ school.exam_objective_max if school else 30 }}">
-                <input type="hidden" name="exam_theory_max" value="{{ school.exam_theory_max if school else 40 }}">
+                <input type="hidden" name="exam_objective_max" value="{{ settings_form.exam_objective_max if settings_form else 30 }}">
+                <input type="hidden" name="exam_theory_max" value="{{ settings_form.exam_theory_max if settings_form else 40 }}">
 
                 <div class="section-title"><i class="fas fa-award"></i> Grade Configuration</div>
                 <div class="form-group">
                     <label for="grade_a_min">A minimum score</label>
-                    <input type="number" id="grade_a_min" name="grade_a_min" value="{{ school.grade_a_min if school else 70 }}" min="0" max="100">
+                    <input type="number" id="grade_a_min" name="grade_a_min" value="{{ settings_form.grade_a_min if settings_form else 70 }}" min="0" max="100">
                 </div>
                 <div class="form-group">
                     <label for="grade_b_min">B minimum score</label>
-                    <input type="number" id="grade_b_min" name="grade_b_min" value="{{ school.grade_b_min if school else 60 }}" min="0" max="100">
+                    <input type="number" id="grade_b_min" name="grade_b_min" value="{{ settings_form.grade_b_min if settings_form else 60 }}" min="0" max="100">
                 </div>
                 <div class="form-group">
                     <label for="grade_c_min">C minimum score</label>
-                    <input type="number" id="grade_c_min" name="grade_c_min" value="{{ school.grade_c_min if school else 50 }}" min="0" max="100">
+                    <input type="number" id="grade_c_min" name="grade_c_min" value="{{ settings_form.grade_c_min if settings_form else 50 }}" min="0" max="100">
                 </div>
                 <div class="form-group">
                     <label for="grade_d_min">D minimum score</label>
-                    <input type="number" id="grade_d_min" name="grade_d_min" value="{{ school.grade_d_min if school else 40 }}" min="0" max="100">
+                    <input type="number" id="grade_d_min" name="grade_d_min" value="{{ settings_form.grade_d_min if settings_form else 40 }}" min="0" max="100">
                 </div>
                 <div class="form-group">
                     <label for="pass_mark">Pass mark</label>
-                    <input type="number" id="pass_mark" name="pass_mark" value="{{ school.pass_mark if school else 50 }}" min="0" max="100">
+                    <input type="number" id="pass_mark" name="pass_mark" value="{{ settings_form.pass_mark if settings_form else 50 }}" min="0" max="100">
                 </div>
 
                 <div class="section-title"><i class="fas fa-ranking-star"></i> Ranking Configuration</div>
                 <div class="form-group">
                     <label for="ss_ranking_mode">SS Class Ranking Mode</label>
                     <select id="ss_ranking_mode" name="ss_ranking_mode">
-                        <option value="together" {% if not school or school.ss_ranking_mode == 'together' %}selected{% endif %}>
+                        <option value="together" {% if not settings_form or settings_form.ss_ranking_mode == 'together' %}selected{% endif %}>
                             Rank Science, Art, and Commercial together
                         </option>
-                        <option value="separate" {% if school and school.ss_ranking_mode == 'separate' %}selected{% endif %}>
+                        <option value="separate" {% if settings_form and settings_form.ss_ranking_mode == 'separate' %}selected{% endif %}>
                             Rank Science, Art, and Commercial separately
                         </option>
                     </select>
@@ -244,10 +331,10 @@
                 <div class="form-group">
                     <label for="ss1_stream_mode">SS1 Stream Mode</label>
                     <select id="ss1_stream_mode" name="ss1_stream_mode">
-                        <option value="separate" {% if not school or school.ss1_stream_mode != 'combined' %}selected{% endif %}>
+                        <option value="separate" {% if not settings_form or settings_form.ss1_stream_mode != 'combined' %}selected{% endif %}>
                             SS1 Separate (Science, Art, Commercial + Optional)
                         </option>
-                        <option value="combined" {% if school and school.ss1_stream_mode == 'combined' %}selected{% endif %}>
+                        <option value="combined" {% if settings_form and settings_form.ss1_stream_mode == 'combined' %}selected{% endif %}>
                             SS1 Combined (no stream, no optional)
                         </option>
                     </select>
@@ -255,10 +342,10 @@
                 <div class="form-group">
                     <label for="ss_arm_mode">Senior Secondary Arm Mode</label>
                     <select id="ss_arm_mode" name="ss_arm_mode">
-                        <option value="preserve" {% if not school or school.ss_arm_mode != 'drop' %}selected{% endif %}>
+                        <option value="preserve" {% if not settings_form or settings_form.ss_arm_mode != 'drop' %}selected{% endif %}>
                             Keep class arms when promoting into SS (e.g., SS1A)
                         </option>
-                        <option value="drop" {% if school and school.ss_arm_mode == 'drop' %}selected{% endif %}>
+                        <option value="drop" {% if settings_form and settings_form.ss_arm_mode == 'drop' %}selected{% endif %}>
                             Drop class arms in SS and use stream only (SS1 + Science/Art/Commercial)
                         </option>
                     </select>
@@ -266,10 +353,10 @@
                 <div class="form-group">
                     <label for="class_arm_ranking_mode">Class Arm Ranking Mode (e.g., JSS1A/JSS1S)</label>
                     <select id="class_arm_ranking_mode" name="class_arm_ranking_mode">
-                        <option value="separate" {% if not school or school.class_arm_ranking_mode != 'together' %}selected{% endif %}>
+                        <option value="separate" {% if not settings_form or settings_form.class_arm_ranking_mode != 'together' %}selected{% endif %}>
                             Rank each arm separately (JSS1A separate from JSS1S)
                         </option>
-                        <option value="together" {% if school and school.class_arm_ranking_mode == 'together' %}selected{% endif %}>
+                        <option value="together" {% if settings_form and settings_form.class_arm_ranking_mode == 'together' %}selected{% endif %}>
                             Rank all arms together (merge by base class like JSS1)
                         </option>
                     </select>
@@ -277,10 +364,10 @@
                 <div class="form-group">
                     <label for="show_positions">Show Positions In Result</label>
                     <select id="show_positions" name="show_positions">
-                        <option value="1" {% if not school or school.show_positions %}selected{% endif %}>
+                        <option value="1" {% if not settings_form or settings_form.show_positions %}selected{% endif %}>
                             Yes - show class and subject positions (e.g., 1st of 10)
                         </option>
-                        <option value="0" {% if school and not school.show_positions %}selected{% endif %}>
+                        <option value="0" {% if settings_form and not settings_form.show_positions %}selected{% endif %}>
                             No - hide all positions in result
                         </option>
                     </select>
@@ -289,10 +376,10 @@
                 <div class="form-group">
                     <label for="combine_third_term_results">Third Term Result Behaviour</label>
                     <select id="combine_third_term_results" name="combine_third_term_results">
-                        <option value="0" {% if not school or not school.combine_third_term_results %}selected{% endif %}>
+                        <option value="0" {% if not settings_form or not settings_form.combine_third_term_results %}selected{% endif %}>
                             Standard - show only third term scores
                         </option>
-                        <option value="1" {% if school and school.combine_third_term_results %}selected{% endif %}>
+                        <option value="1" {% if settings_form and settings_form.combine_third_term_results %}selected{% endif %}>
                             Combined - aggregate first, second and third term scores when viewing Third Term
                         </option>
                     </select>
@@ -301,20 +388,24 @@
                 <div class="form-group">
                     <label for="parent_timetable_show_teacher">Parent Timetable Teacher Names</label>
                     <select id="parent_timetable_show_teacher" name="parent_timetable_show_teacher">
-                        <option value="1" {% if not school or school.parent_timetable_show_teacher %}selected{% endif %}>
+                        <option value="1" {% if not settings_form or settings_form.parent_timetable_show_teacher %}selected{% endif %}>
                             Show teacher names to parents
                         </option>
-                        <option value="0" {% if school and not school.parent_timetable_show_teacher %}selected{% endif %}>
+                        <option value="0" {% if settings_form and not settings_form.parent_timetable_show_teacher %}selected{% endif %}>
                             Hide teacher names from parents
                         </option>
                     </select>
                 </div>
-                 
-                <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Save Settings</button>
-                <a href="{{ url_for('school_admin_dashboard') }}" class="btn btn-secondary" style="margin-left: 10px;">Cancel</a>
+
+                <div class="settings-actions">
+                    <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Save Result Settings</button>
+                    <a href="{{ url_for('school_admin_dashboard') }}" class="btn btn-secondary">Cancel</a>
+                </div>
             </form>
         </div>
+        {% endif %}
 
+        {% if settings_section == 'academic' %}
         <div class="card" id="term-calendar-view">
             <h2><i class="fas fa-eye"></i> View Other Term Calendars (Read-only)</h2>
             {% if calendar_rows %}
@@ -396,7 +487,7 @@
                                 <a
                                     class="btn btn-secondary"
                                     style="padding:6px 10px; font-size:0.88rem;"
-                                    href="{{ url_for('school_admin_settings', calendar_term=row.term, calendar_year=row.academic_year) }}"
+                                    href="{{ url_for('school_admin_settings_academic') }}?calendar_term={{ row.term|urlencode }}&calendar_year={{ row.academic_year|urlencode }}"
                                 >
                                     Edit
                                 </a>
@@ -404,7 +495,7 @@
                                 <a
                                     class="btn btn-secondary"
                                     style="padding:6px 10px; font-size:0.88rem;"
-                                    href="{{ url_for('school_admin_settings', calendar_term=row.term, calendar_year=row.academic_year) }}#term-calendar-view"
+                                    href="{{ url_for('school_admin_settings_academic') }}?calendar_term={{ row.term|urlencode }}&calendar_year={{ row.academic_year|urlencode }}#term-calendar-view"
                                 >
                                     View
                                 </a>
@@ -419,6 +510,7 @@
             <p>No term calendar saved yet.</p>
             {% endif %}
         </div>
+        {% endif %}
     </div>
     </div>
     </div>
@@ -465,9 +557,12 @@
         }
 
         function calcDaysOpenPreview() {
-            const openVal = document.getElementById('term_open_date').value;
-            const closeVal = document.getElementById('term_close_date').value;
+            const openField = document.getElementById('term_open_date');
+            const closeField = document.getElementById('term_close_date');
             const out = document.getElementById('days_open_preview');
+            if (!openField || !closeField || !out) return;
+            const openVal = openField.value;
+            const closeVal = closeField.value;
             const openDt = parseDateLocal(openVal);
             const closeDt = parseDateLocal(closeVal);
             if (!openDt || !closeDt || closeDt < openDt) {
@@ -518,6 +613,7 @@
 
         function refreshExamMode(level) {
             const modeEl = document.getElementById(`exam_mode_${level}`);
+            if (!modeEl) return;
             const separateEls = document.querySelectorAll(`.mode-separate.mode-${level}`);
             const combinedEls = document.querySelectorAll(`.mode-combined.mode-${level}`);
             const isCombined = modeEl.value === 'combined';
@@ -527,8 +623,10 @@
 
         ['jss', 'ss'].forEach(level => {
             const modeEl = document.getElementById(`exam_mode_${level}`);
-            modeEl.addEventListener('change', () => refreshExamMode(level));
-            refreshExamMode(level);
+            if (modeEl) {
+                modeEl.addEventListener('change', () => refreshExamMode(level));
+                refreshExamMode(level);
+            }
         });
 
         ['term_open_date', 'term_close_date'].forEach(id => {
@@ -575,8 +673,8 @@
         const params = new URLSearchParams(window.location.search);
         const qsYear = (params.get('calendar_year') || '').trim();
         const qsTerm = (params.get('calendar_term') || '').trim();
-        const currentYear = '{{ school.academic_year if school else "" }}';
-        const currentTerm = '{{ school.current_term if school else "" }}';
+        const currentYear = '{{ settings_form.academic_year if settings_form else "" }}';
+        const currentTerm = '{{ settings_form.current_term if settings_form else "" }}';
         const qsIsCurrent = qsYear && qsTerm && qsYear === currentYear && qsTerm === currentTerm;
         if (qsIsCurrent && calendarYearEl) {
             calendarYearEl.value = qsYear;

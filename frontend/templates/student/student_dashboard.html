@@ -10,13 +10,198 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-enhanced.css', v='20260411b') }}">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
-        .container { max-width: 960px; }
+        .container { max-width: 1120px; }
+        .dashboard-shell { display: grid; gap: 18px; }
+        .dashboard-hero {
+            position: relative;
+            overflow: hidden;
+            border-radius: 22px;
+            padding: 28px;
+            background:
+                radial-gradient(circle at top right, rgba(255,255,255,0.18), transparent 32%),
+                linear-gradient(135deg, var(--brand) 0%, var(--brand-2) 58%, var(--accent) 100%);
+            color: #fff;
+            box-shadow: 0 20px 40px rgba(15, 76, 129, 0.22);
+        }
+        .dashboard-hero::after {
+            content: "";
+            position: absolute;
+            inset: auto -70px -90px auto;
+            width: 240px;
+            height: 240px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.08);
+        }
+        .hero-topline {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.14);
+            font-size: 0.82rem;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            font-weight: 700;
+        }
+        .hero-grid {
+            position: relative;
+            z-index: 1;
+            display: grid;
+            grid-template-columns: minmax(0, 1.7fr) minmax(250px, 0.9fr);
+            gap: 18px;
+            align-items: end;
+            margin-top: 16px;
+        }
+        .hero-title {
+            margin: 0;
+            font-size: clamp(1.9rem, 4vw, 2.8rem);
+            line-height: 1.08;
+        }
+        .hero-subtitle {
+            margin: 12px 0 0;
+            max-width: 700px;
+            color: rgba(255,255,255,0.88);
+            line-height: 1.6;
+        }
+        .hero-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 18px;
+        }
+        .hero-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.14);
+            color: #fff;
+            font-weight: 600;
+        }
+        .hero-summary {
+            display: grid;
+            gap: 12px;
+        }
+        .hero-summary-card {
+            border-radius: 18px;
+            padding: 16px;
+            background: rgba(255,255,255,0.13);
+            border: 1px solid rgba(255,255,255,0.16);
+            backdrop-filter: blur(6px);
+        }
+        .hero-summary-card .label {
+            display: block;
+            font-size: 0.75rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: rgba(255,255,255,0.72);
+            margin-bottom: 6px;
+        }
+        .hero-summary-card .value {
+            font-size: 1.8rem;
+            font-weight: 800;
+            line-height: 1.1;
+        }
+        .hero-summary-card .meta {
+            margin-top: 6px;
+            color: rgba(255,255,255,0.84);
+            font-size: 0.92rem;
+        }
+        .dashboard-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+            gap: 14px;
+        }
+        .metric-card {
+            border-radius: 18px;
+            padding: 18px;
+            background: linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
+            border: 1px solid #dbe7f3;
+            box-shadow: 0 10px 22px rgba(15, 23, 42, 0.05);
+        }
+        .metric-card .label {
+            display: block;
+            color: #64748b;
+            font-size: 0.78rem;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            margin-bottom: 8px;
+        }
+        .metric-card .value {
+            font-size: 1.65rem;
+            font-weight: 800;
+            color: #0f172a;
+            line-height: 1.1;
+        }
+        .metric-card .sub {
+            margin-top: 6px;
+            color: #5b6475;
+            font-size: 0.92rem;
+        }
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 74px;
+            padding: 7px 12px;
+            border-radius: 999px;
+            font-weight: 800;
+            font-size: 0.86rem;
+        }
+        .status-pill.is-pass,
+        .status-pill.is-good { background: #dcfce7; color: #166534; }
+        .status-pill.is-fail,
+        .status-pill.is-risk { background: #fee2e2; color: #b91c1c; }
+        .status-pill.is-warn { background: #fef3c7; color: #b45309; }
+        .result-actions {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+            margin: 16px 0 20px;
+        }
+        .result-actions .btn {
+            width: 100%;
+            margin: 0 !important;
+            text-align: center;
+        }
+        .subject-table-wrap {
+            overflow-x: auto;
+            border: 1px solid #dbe7f3;
+            border-radius: 16px;
+        }
+        .subject-table-wrap table {
+            width: 100%;
+            min-width: 620px;
+            border-collapse: collapse;
+            margin: 0;
+        }
+        .subject-table-wrap thead th {
+            background: #eff6ff;
+            color: #1e3a5f;
+            font-size: 0.82rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+        .subject-table-wrap th,
+        .subject-table-wrap td {
+            padding: 12px 14px;
+            border-bottom: 1px solid #e5edf6;
+        }
+        .subject-table-wrap tbody tr:nth-child(even) {
+            background: #fbfdff;
+        }
+        .subject-name {
+            font-weight: 700;
+            color: #16324f;
+        }
         .grade-a { color: #27ae60; }
         .grade-b { color: #3498db; }
         .grade-c { color: #f39c12; }
         .grade-d { color: #e67e22; }
         .grade-f { color: #e74c3c; }
-        .insight-card { border: 1px solid #dee2e6; border-radius: 10px; padding: 18px; background: #f8f9fa; margin-top: 16px; }
+        .insight-card { border: 1px solid #dee2e6; border-radius: 18px; padding: 22px; background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%); margin-top: 16px; }
         .ring-wrap { display: flex; justify-content: center; }
         .avg-ring {
             --pct: 0;
@@ -94,6 +279,16 @@
         }
         .welcome-modal-card h3 { margin: 0 0 10px; color: #0f172a; }
         .welcome-modal-card ol { margin: 8px 0 14px 18px; color: #334155; }
+        @media (max-width: 900px) {
+            .hero-grid { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 640px) {
+            .dashboard-hero { padding: 22px 18px; border-radius: 18px; }
+            .hero-meta { gap: 8px; }
+            .hero-chip { width: 100%; justify-content: center; }
+            .metric-card { padding: 16px; }
+            .under-graph { height: 200px; }
+        }
     </style>
 </head>
 <body style="--brand: {{ school.theme_primary_color if school and school.theme_primary_color else '#0F4C81' }}; --brand-2: {{ school.theme_secondary_color if school and school.theme_secondary_color else '#1F7A8C' }}; --accent: {{ school.theme_accent_color if school and school.theme_accent_color else '#1F7A8C' }};" data-student-account="{{ student.student_id|default('student', true)|e }}" data-unread-student-messages="{{ unread_student_messages|default(0, true)|int }}">
@@ -162,7 +357,7 @@
         <div class="main-content">
             <div class="container">
                 <div class="header">
-                    <h1><i class="fas fa-user-graduate"></i> Osartech</h1>
+                    <h1><i class="fas fa-user-graduate"></i> {{ school.school_name if school and school.school_name else 'Student Portal' }}</h1>
                     {% if school_access_state %}
                     {% set access_status = (school_access_state.effective_status or '') %}
                     {% set access_class = 'is-active' if access_status in ['trial_free', 'active_paid'] else ('is-warning' if access_status == 'pending_payment' else 'is-blocked') %}
@@ -187,11 +382,84 @@
                 {% endwith %}
         
                 {% if student %}
-                <div class="student-info">
-                    <h2>Welcome, {{ student.firstname }}!</h2>
-                    <p><strong>Student ID:</strong> {{ student.student_id }}</p>
-                    <p><strong>Class:</strong> {{ student.classname }} | <strong>Term:</strong> {{ student.term }} | <strong>Stream:</strong> {{ student.stream }}</p>
-                </div>
+                {% set status_text = (student.Status or '')|string %}
+                {% set grade_text = (student.Grade or '')|string %}
+                {% set average_value = student.average_marks|default(0, true)|float %}
+                {% set subject_count = student.number_of_subject|default(0, true)|int %}
+                {% if status_text|lower in ['pass', 'excellent', 'good'] %}
+                    {% set status_class = 'is-pass' %}
+                {% elif status_text|lower in ['fail', 'failed'] %}
+                    {% set status_class = 'is-fail' %}
+                {% elif status_text %}
+                    {% set status_class = 'is-warn' %}
+                {% else %}
+                    {% set status_class = 'is-good' %}
+                {% endif %}
+                <div class="dashboard-shell">
+                <section class="dashboard-hero">
+                    <span class="hero-topline"><i class="fas fa-sparkles"></i> Student Dashboard</span>
+                    <div class="hero-grid">
+                        <div>
+                            <h2 class="hero-title">{{ student.firstname }}, keep your eyes on the next step.</h2>
+                            <p class="hero-subtitle">Your dashboard brings together the latest published academic snapshot, important school messages, and parent access setup in one clear place.</p>
+                            <div class="hero-meta">
+                                <span class="hero-chip"><i class="fas fa-id-card"></i> {{ student.student_id }}</span>
+                                <span class="hero-chip"><i class="fas fa-users"></i> {{ student.classname or 'Class not set' }}</span>
+                                <span class="hero-chip"><i class="fas fa-calendar-alt"></i> {{ student.term or '-' }}</span>
+                                {% if student.stream %}
+                                <span class="hero-chip"><i class="fas fa-layer-group"></i> {{ student.stream }}</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="hero-summary">
+                            <div class="hero-summary-card">
+                                <span class="label">Published Average</span>
+                                <div class="value">{{ '%.1f'|format(average_value) }}%</div>
+                                <div class="meta">Latest published performance snapshot</div>
+                            </div>
+                            <div class="hero-summary-card">
+                                <span class="label">Current Standing</span>
+                                <div class="value">{{ grade_text or '-' }}</div>
+                                <div class="meta">
+                                    {% if status_text %}
+                                    <span class="status-pill {{ status_class }}">{{ status_text }}</span>
+                                    {% else %}
+                                    Awaiting published status
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="dashboard-stats">
+                    <div class="metric-card">
+                        <span class="label">Subjects</span>
+                        <div class="value">{{ subject_count }}</div>
+                        <div class="sub">Published subjects in this result view</div>
+                    </div>
+                    <div class="metric-card">
+                        <span class="label">Grade</span>
+                        <div class="value">{{ grade_text or '-' }}</div>
+                        <div class="sub">Overall academic grade</div>
+                    </div>
+                    <div class="metric-card">
+                        <span class="label">Status</span>
+                        <div class="value">
+                            {% if status_text %}
+                            <span class="status-pill {{ status_class }}">{{ status_text }}</span>
+                            {% else %}
+                            -
+                            {% endif %}
+                        </div>
+                        <div class="sub">Result decision from published snapshot</div>
+                    </div>
+                    <div class="metric-card">
+                        <span class="label">Messages</span>
+                        <div class="value">{{ unread_student_messages or 0 }}</div>
+                        <div class="sub">Unread school notifications</div>
+                    </div>
+                </section>
                 {% if dashboard_notice %}
                 <div class="flash error">{{ dashboard_notice }}</div>
                 {% endif %}
@@ -276,10 +544,12 @@
                 <div class="card">
                     <h2><i class="fas fa-chart-bar"></i> Your Results</h2>
                     
-                    <a href="{{ url_for('student_view_result') }}" class="btn btn-primary"><i class="fas fa-eye"></i> View Full Result</a>
-                    <a href="{{ url_for('student_view_result', term='First Term') }}" class="btn btn-primary ml-10">First Term</a>
-                    <a href="{{ url_for('student_view_result', term='Second Term') }}" class="btn btn-primary ml-10">Second Term</a>
-                    <a href="{{ url_for('student_view_result', term='Third Term') }}" class="btn btn-primary ml-10">Third Term</a>
+                    <div class="result-actions">
+                        <a href="{{ url_for('student_view_result') }}" class="btn btn-primary"><i class="fas fa-eye"></i> Full Result</a>
+                        <a href="{{ url_for('student_view_result', term='First Term') }}" class="btn btn-secondary">First Term</a>
+                        <a href="{{ url_for('student_view_result', term='Second Term') }}" class="btn btn-secondary">Second Term</a>
+                        <a href="{{ url_for('student_view_result', term='Third Term') }}" class="btn btn-secondary">Third Term</a>
+                    </div>
 
                     {% if student.scores %}
                     {% set totals = [] %}
@@ -324,6 +594,7 @@
                 {% if student.scores %}
                 <div class="card">
                     <h2><i class="fas fa-list"></i> Subject Scores</h2>
+                    <div class="subject-table-wrap">
                     <table>
                         <thead>
                             <tr>
@@ -337,7 +608,7 @@
                         <tbody>
                             {% for subject, scores in student.scores.items() %}
                             <tr>
-                                <td>{{ subject }}</td>
+                                <td class="subject-name">{{ subject }}</td>
                                 <td class="text-center">{{ scores.get('total_test', 0) }}</td>
                                 <td class="text-center">{{ scores.get('total_exam', 0) }}</td>
                                 <td class="text-center"><strong>{{ scores.get('overall_mark', 0) }}</strong></td>
@@ -348,6 +619,7 @@
                             {% endfor %}
                         </tbody>
                     </table>
+                    </div>
                 </div>
                 {% else %}
                 <div class="card">
@@ -355,6 +627,7 @@
                 </div>
                 {% endif %}
 
+                </div>
                 </div>
                 </div>
                 {% else %}

@@ -41,21 +41,37 @@
         .portal-shell {
             display: grid;
             grid-template-columns: minmax(260px, 0.88fr) minmax(340px, 1.12fr);
-            border-radius: 16px;
+            border-radius: 28px;
             overflow: hidden;
             border: 1px solid var(--portal-line);
             background: var(--portal-card);
-            box-shadow: 0 18px 34px rgba(15, 23, 42, 0.1);
+            box-shadow: 0 24px 50px rgba(15, 23, 42, 0.13);
         }
         .portal-info {
-            padding: clamp(20px, 3vw, 30px);
-            background: linear-gradient(165deg, #0f4c81 0%, #1f7a8c 100%);
+            position: relative;
+            overflow: hidden;
+            padding: clamp(24px, 3vw, 34px);
+            background:
+                radial-gradient(circle at top right, rgba(255,255,255,0.18), transparent 34%),
+                linear-gradient(165deg, #0f4c81 0%, #1f7a8c 100%);
             color: #eff6ff;
             display: grid;
             align-content: center;
-            gap: 12px;
+            gap: 14px;
+        }
+        .portal-info::after {
+            content: "";
+            position: absolute;
+            right: -70px;
+            bottom: -90px;
+            width: 240px;
+            height: 240px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.08);
         }
         .portal-brand {
+            position: relative;
+            z-index: 1;
             display: inline-flex;
             align-items: center;
             gap: 10px;
@@ -64,25 +80,49 @@
             font-size: 1.05rem;
         }
         .portal-brand .logo {
-            width: 42px;
-            height: 42px;
+            width: 48px;
+            height: 48px;
             object-fit: contain;
-            border-radius: 9px;
+            border-radius: 14px;
             background: #fff;
             border: 1px solid rgba(255, 255, 255, 0.55);
-            padding: 5px;
+            padding: 6px;
         }
         .portal-info h1 {
+            position: relative;
+            z-index: 1;
             margin: 6px 0 0;
             line-height: 1.2;
-            font-size: clamp(1.3rem, 2.1vw, 1.7rem);
+            font-size: clamp(1.55rem, 2.4vw, 2rem);
         }
         .portal-info p {
+            position: relative;
+            z-index: 1;
             margin: 0;
             color: rgba(239, 246, 255, 0.88);
             font-size: 0.95rem;
         }
+        .portal-pill-row {
+            position: relative;
+            z-index: 1;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .portal-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.14);
+            color: #fff;
+            font-weight: 700;
+            font-size: 0.86rem;
+        }
         .portal-info ul {
+            position: relative;
+            z-index: 1;
             margin: 4px 0 0;
             padding-left: 18px;
             display: grid;
@@ -91,11 +131,11 @@
         }
         .card {
             background: #fff;
-            padding: clamp(18px, 3vw, 30px);
+            padding: clamp(22px, 3vw, 34px);
         }
         .portal-title {
             margin: 0 0 10px;
-            font-size: clamp(1.25rem, 2.6vw, 1.55rem);
+            font-size: clamp(1.35rem, 2.6vw, 1.7rem);
             line-height: 1.25;
             color: var(--portal-text);
         }
@@ -104,10 +144,20 @@
             color: var(--portal-muted);
             font-size: 0.95rem;
         }
+        .portal-note-card {
+            margin: 0 0 18px;
+            padding: 14px 16px;
+            border-radius: 16px;
+            border: 1px solid #dbe7f3;
+            background: linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
+        }
+        .portal-note-card strong {
+            color: var(--portal-brand);
+        }
         .flash {
             padding: 12px;
             margin-bottom: 12px;
-            border-radius: 8px;
+            border-radius: 14px;
             word-break: break-word;
         }
         .flash.success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
@@ -200,6 +250,11 @@
                 </div>
                 <h1>Parent Access Portal</h1>
                 <p>Secure sign-in for parents to monitor student progress and school updates.</p>
+                <div class="portal-pill-row">
+                    <span class="portal-pill"><i class="fas fa-chart-line"></i> Results</span>
+                    <span class="portal-pill"><i class="fas fa-bell"></i> Alerts</span>
+                    <span class="portal-pill"><i class="fas fa-calendar-week"></i> Timetable</span>
+                </div>
                 <ul>
                     <li>View results per child</li>
                     <li>Check timetable and attendance</li>
@@ -209,6 +264,9 @@
             <section class="card">
                 <h2 class="portal-title"><i class="fas fa-users"></i> Parent Portal Login</h2>
                 <p class="portal-subtitle">Login with parent phone and password. If multiple children are linked, you can access each child separately from your dashboard.</p>
+                <div class="portal-note-card">
+                    <strong>Use the parent phone number</strong> already linked to your child's school record. After login, you can open each child's results, timetable, attendance, and school messages from one dashboard.
+                </div>
                 <form method="post" action="{{ url_for('parent_portal') }}">
                     <div class="form-grid">
                         <label for="parent_phone">Parent Phone</label>

@@ -36,6 +36,7 @@ import urllib.parse
 import base64
 import threading
 import socket
+import sys
 from collections import deque, Counter
 import traceback
 
@@ -55,6 +56,10 @@ try:
     from PIL import Image
 except Exception:
     Image = None
+try:
+    import qrcode
+except Exception:
+    qrcode = None
 from services import parent_queries as parent_queries_service
 
 if load_dotenv:
@@ -351,6 +356,7 @@ _SCHEMA_DDL_ALLOWED = False
 _BACKGROUND_WORKER_THREAD = None
 _BACKGROUND_WORKER_STOP = threading.Event()
 _BACKGROUND_WORKER_STARTED = False
+_BACKGROUND_WORKER_SHUTTING_DOWN = False
 _LAST_AUTO_BACKUP_SWEEP_AT = None
 _LAST_ACCESS_AUTOMATION_SWEEP_AT = None
 
@@ -524,6 +530,8 @@ def inject_school_setup_wizard_context():
         endpoint = (request.endpoint or '').strip().lower() if has_request_context() else ''
         page_key_map = {
             'school_admin_settings': 'profile',
+            'school_admin_settings_profile': 'profile',
+            'school_admin_settings_branding': 'branding',
             'school_admin_class_subjects': 'classes',
             'school_admin_teachers': 'teachers',
             'school_admin_add_students_by_class': 'students',
@@ -5067,6 +5075,28 @@ def parse_result_verification_token(token):
     except Exception:
         return None
 
+def build_verification_qr_data_uri(value):
+    payload = (value or '').strip()
+    if not payload or qrcode is None:
+        return ''
+    try:
+        qr = qrcode.QRCode(
+            version=None,
+            error_correction=qrcode.constants.ERROR_CORRECT_M,
+            box_size=6,
+            border=2,
+        )
+        qr.add_data(payload)
+        qr.make(fit=True)
+        image = qr.make_image(fill_color="black", back_color="white")
+        buffer = BytesIO()
+        image.save(buffer, format='PNG')
+        encoded = base64.b64encode(buffer.getvalue()).decode('ascii')
+        return f'data:image/png;base64,{encoded}'
+    except Exception:
+        logging.exception("Could not generate verification QR code.")
+        return ''
+
 def build_result_verification_context(school_id, student_id, term, academic_year='', classname=''):
     token = build_result_verification_token(
         school_id=school_id,
@@ -5076,8 +5106,7 @@ def build_result_verification_context(school_id, student_id, term, academic_year
         classname=classname,
     )
     verification_url = url_for('verify_result_qr', token=token, _external=True)
-    # Do not send student-linked verification URLs to third-party QR providers.
-    qr_image_url = ''
+    qr_image_url = build_verification_qr_data_uri(verification_url)
     return {
         'verification_token': token,
         'verification_url': verification_url,
@@ -6174,6 +6203,7 @@ def init_db():
     safe_exec_ignore("ALTER TABLE students ADD COLUMN parent_phone_2 TEXT DEFAULT ''")
     safe_exec_ignore("ALTER TABLE students ADD COLUMN parent_password_hash_2 TEXT DEFAULT ''")
     safe_exec_ignore("ALTER TABLE students ADD COLUMN parent_gender_2 TEXT DEFAULT ''")
+    safe_exec_ignore("ALTER TABLE students ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
     safe_exec_ignore("ALTER TABLE students ADD COLUMN is_archived INTEGER DEFAULT 0")
     safe_exec_ignore("ALTER TABLE students ADD COLUMN archived_at TIMESTAMP")
     
@@ -8568,6 +8598,7 @@ def _rename_teacher_identifier_across_tables(school_id, old_teacher_id, new_teac
             ("UPDATE teacher_subject_assignments SET teacher_id = ? WHERE school_id = ? AND LOWER(teacher_id) = LOWER(?)", (new_id, sid, old_id)),
             ("UPDATE result_publications SET teacher_id = ? WHERE school_id = ? AND LOWER(teacher_id) = LOWER(?)", (new_id, sid, old_id)),
             ("UPDATE subject_score_submissions SET teacher_id = ? WHERE school_id = ? AND LOWER(teacher_id) = LOWER(?)", (new_id, sid, old_id)),
+            ("UPDATE subject_score_submission_items SET teacher_id = ? WHERE school_id = ? AND LOWER(teacher_id) = LOWER(?)", (new_id, sid, old_id)),
             ("UPDATE teacher_message_reads SET teacher_id = ? WHERE school_id = ? AND LOWER(teacher_id) = LOWER(?)", (new_id, sid, old_id)),
             ("UPDATE class_timetables SET teacher_id = ? WHERE school_id = ? AND LOWER(teacher_id) = LOWER(?)", (new_id, sid, old_id)),
             ("UPDATE teacher_messages SET created_by = ? WHERE school_id = ? AND LOWER(created_by) = LOWER(?)", (new_id, sid, old_id)),
@@ -11059,10 +11090,6 @@ def _apply_cbt_attempt_to_score_sheet(school_id, test_row, student_id, attempt_r
         subject_scores['overall_mark'] = 100.0
     subject_scores['total_score'] = subject_scores['overall_mark']
     subject_scores['grade'] = grade_from_score(subject_scores['overall_mark'], grade_cfg)
-    if not (subject_scores.get('subject_teacher_comment') or '').strip():
-        title = (test_row.get('title') or '').strip()
-        kind = assessment_type.title()
-        subject_scores['subject_teacher_comment'] = f'CBT {kind} synced: {title}'[:300]
     subject_scores['entry_confirmed'] = 1
     subject_scores['entry_confirmed_v2'] = 1
 
@@ -13646,17 +13673,17 @@ def build_school_setup_wizard_summary(school_id):
             'description': 'Set the school name, location, academic year, and current term.',
             'done': all(profile_rows.get(label, False) for label in ('school name set', 'location set', 'academic year set', 'current term set')),
             'required': True,
-            'action_endpoint': 'school_admin_settings',
+            'action_endpoint': 'school_admin_settings_profile',
             'action_label': 'Open School Settings',
         },
         {
             'key': 'branding',
-            'title': 'Upload Branding',
-            'description': 'Add the school logo and principal signature so dashboards and reports look complete.',
+            'title': 'Finish School Identity',
+            'description': 'Review branding colors here and upload the leadership signature from the dashboard so reports look complete.',
             'done': bool((school.get('school_logo') or '').strip()) and bool((school.get('principal_signature_image') or '').strip()),
             'required': True,
-            'action_endpoint': 'school_admin_settings',
-            'action_label': 'Upload Logo / Signature',
+            'action_endpoint': 'school_admin_settings_branding',
+            'action_label': 'Open Branding',
         },
         {
             'key': 'classes',
@@ -13746,7 +13773,7 @@ def build_school_setup_wizard_flow(school_id):
             'description': 'We will guide you through the essential school setup steps in a simple order.',
             'bullets': [
                 'Complete your school profile',
-                'Upload the logo and principal signature',
+                'Set school identity, colors, and signature',
                 'Configure classes, subjects, teachers, and students',
                 'Finish with timetable and term programs',
             ],
@@ -13766,7 +13793,7 @@ def build_school_setup_wizard_flow(school_id):
                 'Access status and grading defaults',
             ],
             'primary_label': 'Open School Settings',
-            'primary_endpoint': 'school_admin_settings',
+            'primary_endpoint': 'school_admin_settings_profile',
             'secondary_label': 'Next: Branding',
             'secondary_step': 'branding',
             'required': True,
@@ -13774,15 +13801,17 @@ def build_school_setup_wizard_flow(school_id):
         {
             'key': 'branding',
             'title': 'Step 2: Branding',
-            'subtitle': 'Upload the visual identity of the school.',
-            'description': 'Add the school logo and principal signature so dashboards and reports look complete.',
+            'subtitle': 'Refine the school look and finish the sign-off setup.',
+            'description': 'Review school colors in Branding, then upload the principal or head teacher signature from the dashboard signature card.',
             'bullets': [
-                'Upload the school logo',
+                'Review the school colors',
+                'Open the dashboard signature card',
                 'Upload the principal or head teacher signature',
-                'Confirm the image is saved and visible',
             ],
             'primary_label': 'Open Branding Settings',
-            'primary_endpoint': 'school_admin_settings',
+            'primary_endpoint': 'school_admin_settings_branding',
+            'support_label': 'Open Dashboard Signature Card',
+            'support_endpoint': 'school_admin_dashboard',
             'secondary_label': 'Next: Classes & Subjects',
             'secondary_step': 'classes',
             'required': True,
@@ -15320,9 +15349,110 @@ def ensure_student_attendance_schema():
         logging.warning("Failed to ensure attendance schema: %s", exc)
         return False
 
+def ensure_result_attendance_manual_schema():
+    global _RESULT_ATTENDANCE_MANUAL_SCHEMA_READY
+    if _RESULT_ATTENDANCE_MANUAL_SCHEMA_READY is True:
+        return True
+    try:
+        with db_connection(commit=True) as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """CREATE TABLE IF NOT EXISTS result_attendance_manual (
+                       id SERIAL PRIMARY KEY,
+                       school_id TEXT NOT NULL,
+                       student_id TEXT NOT NULL,
+                       classname TEXT NOT NULL,
+                       term TEXT NOT NULL,
+                       academic_year TEXT DEFAULT '',
+                       days_open INTEGER NOT NULL DEFAULT 0,
+                       days_present INTEGER NOT NULL DEFAULT 0,
+                       updated_by TEXT DEFAULT '',
+                       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                       UNIQUE(school_id, student_id, term, academic_year)
+                   )""",
+            )
+            db_execute(
+                c,
+                'CREATE INDEX IF NOT EXISTS idx_result_attendance_manual_lookup '
+                'ON result_attendance_manual(school_id, classname, term, academic_year)'
+            )
+        _RESULT_ATTENDANCE_MANUAL_SCHEMA_READY = True
+        return True
+    except Exception as exc:
+        logging.warning("Failed to ensure manual result attendance schema: %s", exc)
+        _RESULT_ATTENDANCE_MANUAL_SCHEMA_READY = False
+        return False
+
+def get_manual_result_attendance_map(school_id, classname, term, academic_year=''):
+    if not ensure_result_attendance_manual_schema():
+        return {}
+    with db_connection() as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """SELECT student_id, days_open, days_present, updated_at
+               FROM result_attendance_manual
+               WHERE school_id = ?
+                 AND LOWER(classname) = LOWER(?)
+                 AND term = ?
+                 AND COALESCE(academic_year, '') = COALESCE(?, '')""",
+            (school_id, classname, term, academic_year or ''),
+        )
+        rows = c.fetchall() or []
+    out = {}
+    for row in rows:
+        sid = str(row[0] or '').strip()
+        if not sid:
+            continue
+        try:
+            days_open = int(row[1] or 0)
+        except Exception:
+            days_open = 0
+        try:
+            days_present = int(row[2] or 0)
+        except Exception:
+            days_present = 0
+        if days_open < 0:
+            days_open = 0
+        if days_present < 0:
+            days_present = 0
+        if days_present > days_open:
+            days_present = days_open
+        out[sid] = {
+            'days_open': days_open,
+            'days_present': days_present,
+            'days_absent': max(0, days_open - days_present),
+            'updated_at': row[3] or '',
+        }
+    return out
+
+def class_has_attendance_marks(school_id, classname, term, academic_year=''):
+    if not ensure_student_attendance_schema():
+        return False
+    with db_connection() as conn:
+        c = conn.cursor()
+        db_execute(
+            c,
+            """SELECT 1
+               FROM student_attendance
+               WHERE school_id = ?
+                 AND LOWER(classname) = LOWER(?)
+                 AND term = ?
+                 AND COALESCE(academic_year, '') = COALESCE(?, '')
+               LIMIT 1""",
+            (school_id, classname, term, academic_year or ''),
+        )
+        return bool(c.fetchone())
+
+def get_student_manual_result_attendance(school_id, student_id, classname, term, academic_year=''):
+    return get_manual_result_attendance_map(school_id, classname, term, academic_year).get(str(student_id or '').strip(), {})
+
 _SCHOOL_ACCESS_SCHEMA_READY = None
 _EXTENDED_FEATURES_SCHEMA_READY = None
 _LOGIN_SECURITY_SCHEMA_READY = None
+_RESULT_ATTENDANCE_MANUAL_SCHEMA_READY = None
 
 def ensure_extended_features_schema():
     """Best-effort schema guard for optional advanced modules."""
@@ -15345,6 +15475,7 @@ def ensure_extended_features_schema():
             db_execute(c, "ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_phone_2 TEXT DEFAULT ''")
             db_execute(c, "ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_password_hash_2 TEXT DEFAULT ''")
             db_execute(c, "ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_gender_2 TEXT DEFAULT ''")
+            db_execute(c, "ALTER TABLE students ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
             db_execute(
                 c,
                 """CREATE TABLE IF NOT EXISTS login_audit_logs (
@@ -17080,6 +17211,8 @@ def _background_worker_loop():
             failure_streak = 0
         except Exception as exc:
             failure_streak += 1
+            if _BACKGROUND_WORKER_STOP.is_set() or _BACKGROUND_WORKER_SHUTTING_DOWN or sys.is_finalizing():
+                break
             logging.warning("Background worker tick failed: %s", exc)
         backoff_multiplier = min(8, 2 ** max(0, failure_streak - 1))
         wait_seconds = int(BACKGROUND_WORKER_INTERVAL_SECONDS * backoff_multiplier)
@@ -17110,8 +17243,13 @@ def start_background_worker():
     _BACKGROUND_WORKER_THREAD.start()
 
 def stop_background_worker():
+    global _BACKGROUND_WORKER_SHUTTING_DOWN, _BACKGROUND_WORKER_THREAD
     try:
+        _BACKGROUND_WORKER_SHUTTING_DOWN = True
         _BACKGROUND_WORKER_STOP.set()
+        worker = _BACKGROUND_WORKER_THREAD
+        if worker and worker.is_alive() and worker is not threading.current_thread():
+            worker.join(timeout=min(5, max(1, BACKGROUND_WORKER_INTERVAL_SECONDS + 1)))
     except Exception as exc:
         _log_suppressed_exception('stop_background_worker', exc)
 
@@ -18401,6 +18539,7 @@ def get_class_attendance_publish_readiness(school_id, classname, term, academic_
             'missing_rows': [],
             'message': 'Attendance schema is unavailable. Run migration and retry.',
         }
+    manual_map = get_manual_result_attendance_map(school_id, classname, term, academic_year)
     with db_connection() as conn:
         c = conn.cursor()
         db_execute(
@@ -18422,17 +18561,65 @@ def get_class_attendance_publish_readiness(school_id, classname, term, academic_
             marked_date_sets.setdefault(sid, set()).add(day)
         db_execute(
             c,
-            """SELECT student_id, created_at
-               FROM students
-               WHERE school_id = ?
-                 AND LOWER(classname) = LOWER(?)
-                 AND term = ?""",
-            (school_id, classname, term),
+            """SELECT 1
+               FROM information_schema.columns
+               WHERE table_schema = 'public'
+                 AND table_name = 'students'
+                 AND column_name = 'created_at'
+               LIMIT 1"""
         )
-        created_at_by_student = {
-            str(row[0] or '').strip(): _coerce_to_date(row[1])
-            for row in (c.fetchall() or [])
-            if str(row[0] or '').strip()
+        has_student_created_at = bool(c.fetchone())
+        if has_student_created_at:
+            db_execute(
+                c,
+                """SELECT student_id, created_at
+                   FROM students
+                   WHERE school_id = ?
+                     AND LOWER(classname) = LOWER(?)
+                     AND term = ?""",
+                (school_id, classname, term),
+            )
+            created_at_by_student = {
+                str(row[0] or '').strip(): _coerce_to_date(row[1])
+                for row in (c.fetchall() or [])
+                if str(row[0] or '').strip()
+            }
+        else:
+            created_at_by_student = {}
+
+    has_attendance_marks = any(bool(v) for v in marked_date_sets.values())
+    if not has_attendance_marks:
+        missing_rows = []
+        for sid, student in student_items:
+            manual_row = manual_map.get(str(sid or '').strip(), {})
+            try:
+                manual_days_open = int(manual_row.get('days_open', 0) or 0)
+            except Exception:
+                manual_days_open = 0
+            try:
+                manual_days_present = int(manual_row.get('days_present', 0) or 0)
+            except Exception:
+                manual_days_present = 0
+            if manual_days_open <= 0 or manual_days_present < 0 or manual_days_present > manual_days_open:
+                missing_rows.append({
+                    'student_id': sid,
+                    'student_name': (student or {}).get('firstname', sid) or sid,
+                    'marked_days': manual_days_present,
+                    'expected_days': manual_days_open or days_open,
+                    'missing_days': max(0, manual_days_open - manual_days_present) if manual_days_open > 0 else days_open,
+                })
+        ready = len(missing_rows) == 0 and len(manual_map) >= len(student_items)
+        return {
+            'ready': ready,
+            'days_open': days_open,
+            'missing_rows': missing_rows,
+            'message': '' if ready else (
+                f'No daily attendance has been marked for {classname}. '
+                'Enter Days Open and Days Present for each student in the Teacher Dashboard before submitting.'
+            ),
+            'mode': 'manual',
+            'manual_allowed': True,
+            'manual_map': manual_map,
         }
 
     term_open_date = instructional.get('open_date')
@@ -18464,6 +18651,9 @@ def get_class_attendance_publish_readiness(school_id, classname, term, academic_
         'days_open': days_open,
         'missing_rows': missing_rows,
         'message': '',
+        'mode': 'marked',
+        'manual_allowed': False,
+        'manual_map': manual_map,
     }
 
 def get_student_absent_days(school_id, student_id, classname, term='', academic_year=''):
@@ -18496,16 +18686,42 @@ def build_result_term_attendance_data(school_id, student_id, classname, term, ac
         days_open = int(calendar_row.get('days_open', 0) or 0)
     except Exception:
         days_open = 0
-    days_absent = get_student_absent_days(
-        school_id=school_id,
-        student_id=student_id,
-        classname=classname,
-        term=term,
-        academic_year=academic_year,
-    )
-    if days_open > 0 and days_absent > days_open:
-        days_absent = days_open
-    days_present = max(0, days_open - max(days_absent, 0))
+    manual_row = {}
+    if not class_has_attendance_marks(school_id, classname, term, academic_year):
+        manual_row = get_student_manual_result_attendance(
+            school_id=school_id,
+            student_id=student_id,
+            classname=classname,
+            term=term,
+            academic_year=academic_year,
+        )
+    if manual_row:
+        try:
+            days_open = int(manual_row.get('days_open', days_open) or 0)
+        except Exception:
+            days_open = 0
+        try:
+            days_present = int(manual_row.get('days_present', 0) or 0)
+        except Exception:
+            days_present = 0
+        if days_open < 0:
+            days_open = 0
+        if days_present < 0:
+            days_present = 0
+        if days_present > days_open:
+            days_present = days_open
+        days_absent = max(0, days_open - days_present)
+    else:
+        days_absent = get_student_absent_days(
+            school_id=school_id,
+            student_id=student_id,
+            classname=classname,
+            term=term,
+            academic_year=academic_year,
+        )
+        if days_open > 0 and days_absent > days_open:
+            days_absent = days_open
+        days_present = max(0, days_open - max(days_absent, 0))
     next_term_begin = resolve_next_term_begin_date(
         school_id=school_id,
         academic_year=academic_year,
@@ -18703,6 +18919,16 @@ def subject_overall_mark(subject_scores):
         return _coerce_number(explicit, 0.0)
 
     return float(total_test or 0) + float(total_exam or 0)
+
+def compute_total_score_from_scores(scores_map):
+    """Safely sum total marks across all subjects for report display."""
+    if not isinstance(scores_map, dict):
+        return 0.0
+    total_score = 0.0
+    for block in scores_map.values():
+        if isinstance(block, dict):
+            total_score += float(subject_overall_mark(block) or 0.0)
+    return round(total_score, 2)
 
 
 def _combine_student_snapshots(snapshots, school_id):
@@ -19143,6 +19369,20 @@ def is_score_complete_for_subject(subject_scores, school):
     if school.get('exam_enabled', 1) and not _is_finite_number_like(subject_scores.get('total_exam')):
         return False
     return True
+
+
+def parse_score_entry_number(raw_value, label='Score'):
+    """Normalize manual score-entry values, treating '-' or blank as zero."""
+    text = '' if raw_value is None else str(raw_value).strip()
+    if text in {'', '-', '–', '—'}:
+        return 0.0
+    try:
+        value = float(text)
+    except (TypeError, ValueError):
+        raise ValueError(f'Invalid {label}.')
+    if not math.isfinite(value):
+        raise ValueError(f'Invalid {label}.')
+    return value
 
 
 def is_score_entry_confirmed(subject_scores, school=None):
@@ -24142,7 +24382,7 @@ def ensure_subject_score_submission_schema():
         return False
 
 def get_subject_score_submission_map(school_id, teacher_id, term, academic_year):
-    """Return class -> submitted_at for one teacher and term/year."""
+    """Return legacy class -> submitted_at map for one teacher and term/year."""
     if not ensure_subject_score_submission_schema():
         return {}
     with db_connection() as conn:
@@ -24163,59 +24403,219 @@ def get_subject_score_submission_map(school_id, teacher_id, term, academic_year)
                 out[cls] = row[1] or ''
     return out
 
-def get_subject_submission_teacher_ids_for_class(school_id, classname, term, academic_year):
-    """Return teacher IDs that have submitted subject scores for one class/term/year."""
-    if not ensure_subject_score_submission_schema():
-        return set()
-    with db_connection() as conn:
-        c = conn.cursor()
-        class_key = canonicalize_classname(classname)
-        db_execute(
-            c,
-            """SELECT DISTINCT teacher_id
-               FROM subject_score_submissions
-               WHERE school_id = ?
-                 AND REGEXP_REPLACE(UPPER(COALESCE(classname, '')), '[^A-Z0-9]+', '', 'g') = ?
-                 AND LOWER(TRIM(COALESCE(term, ''))) = LOWER(TRIM(?))
-                 AND academic_year = ?""",
-            (school_id, class_key, term, academic_year),
-        )
-        rows = c.fetchall() or []
-    return {(row[0] or '').strip() for row in rows if row and (row[0] or '').strip()}
 
-def mark_subject_score_submitted(school_id, teacher_id, classname, term, academic_year):
-    """Mark one class as submitted by a subject teacher."""
-    if not ensure_subject_score_submission_schema():
+def ensure_subject_score_submission_item_schema():
+    """Track subject handoff at teacher + class + subject granularity."""
+    try:
+        with db_connection(commit=True) as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """CREATE TABLE IF NOT EXISTS subject_score_submission_items (
+                       id SERIAL PRIMARY KEY,
+                       school_id TEXT NOT NULL,
+                       teacher_id TEXT NOT NULL,
+                       classname TEXT NOT NULL,
+                       subject TEXT NOT NULL,
+                       term TEXT NOT NULL,
+                       academic_year TEXT NOT NULL,
+                       submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                       UNIQUE(school_id, teacher_id, classname, subject, term, academic_year)
+                   )""",
+            )
+            db_execute(
+                c,
+                'CREATE INDEX IF NOT EXISTS idx_subject_score_submission_items_lookup ON subject_score_submission_items(school_id, teacher_id, classname, subject, term, academic_year)',
+            )
+        return True
+    except Exception:
+        return False
+
+
+def get_subject_score_submission_subject_map(school_id, teacher_id, term, academic_year):
+    """Return class -> normalized subject -> submitted_at for one teacher and term/year."""
+    out = {}
+    if ensure_subject_score_submission_item_schema():
+        with db_connection() as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """SELECT classname, subject, submitted_at
+                   FROM subject_score_submission_items
+                   WHERE school_id = ? AND teacher_id = ?
+                     AND LOWER(TRIM(COALESCE(term, ''))) = LOWER(TRIM(?))
+                     AND academic_year = ?""",
+                (school_id, teacher_id, term, academic_year or ''),
+            )
+            for row in c.fetchall() or []:
+                cls = canonicalize_classname((row[0] or '').strip())
+                subject_key = normalize_subject_name(row[1] or '').lower()
+                if not cls or not subject_key:
+                    continue
+                out.setdefault(cls, {})[subject_key] = row[2] or ''
+
+    legacy_map = get_subject_score_submission_map(school_id, teacher_id, term, academic_year)
+    for cls, submitted_at in legacy_map.items():
+        if cls not in out:
+            out[cls] = {'__legacy__': submitted_at or ''}
+    return out
+
+def get_subject_submission_teacher_ids_for_class(school_id, classname, term, academic_year, subject_name=''):
+    """Return teacher IDs that have submitted scores for one class or one class-subject."""
+    class_key = canonicalize_classname(classname)
+    subject_key = normalize_subject_name(subject_name or '').lower()
+    submitted = set()
+    teachers_with_subject_items = set()
+    teachers_with_any_items = set()
+
+    if ensure_subject_score_submission_item_schema():
+        with db_connection() as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """SELECT DISTINCT teacher_id
+                   FROM subject_score_submission_items
+                   WHERE school_id = ?
+                     AND REGEXP_REPLACE(UPPER(COALESCE(classname, '')), '[^A-Z0-9]+', '', 'g') = ?
+                     AND LOWER(TRIM(COALESCE(term, ''))) = LOWER(TRIM(?))
+                     AND academic_year = ?""",
+                (school_id, class_key, term, academic_year),
+            )
+            teachers_with_any_items = {
+                (row[0] or '').strip()
+                for row in (c.fetchall() or [])
+                if row and (row[0] or '').strip()
+            }
+            if subject_key:
+                db_execute(
+                    c,
+                    """SELECT DISTINCT teacher_id
+                       FROM subject_score_submission_items
+                       WHERE school_id = ?
+                         AND REGEXP_REPLACE(UPPER(COALESCE(classname, '')), '[^A-Z0-9]+', '', 'g') = ?
+                         AND LOWER(TRIM(COALESCE(term, ''))) = LOWER(TRIM(?))
+                         AND academic_year = ?
+                         AND LOWER(TRIM(COALESCE(subject, ''))) = LOWER(TRIM(?))""",
+                    (school_id, class_key, term, academic_year, normalize_subject_name(subject_name or '')),
+                )
+            else:
+                db_execute(
+                    c,
+                    """SELECT DISTINCT teacher_id
+                       FROM subject_score_submission_items
+                       WHERE school_id = ?
+                         AND REGEXP_REPLACE(UPPER(COALESCE(classname, '')), '[^A-Z0-9]+', '', 'g') = ?
+                         AND LOWER(TRIM(COALESCE(term, ''))) = LOWER(TRIM(?))
+                         AND academic_year = ?""",
+                    (school_id, class_key, term, academic_year),
+                )
+            teachers_with_subject_items = {
+                (row[0] or '').strip()
+                for row in (c.fetchall() or [])
+                if row and (row[0] or '').strip()
+            }
+            submitted.update(teachers_with_subject_items)
+
+    if ensure_subject_score_submission_schema():
+        with db_connection() as conn:
+            c = conn.cursor()
+            db_execute(
+                c,
+                """SELECT DISTINCT teacher_id
+                   FROM subject_score_submissions
+                   WHERE school_id = ?
+                     AND REGEXP_REPLACE(UPPER(COALESCE(classname, '')), '[^A-Z0-9]+', '', 'g') = ?
+                     AND LOWER(TRIM(COALESCE(term, ''))) = LOWER(TRIM(?))
+                     AND academic_year = ?""",
+                (school_id, class_key, term, academic_year),
+            )
+            legacy_rows = c.fetchall() or []
+        legacy_ids = {
+            (row[0] or '').strip()
+            for row in legacy_rows
+            if row and (row[0] or '').strip()
+        }
+        # Once a teacher starts using subject-level submissions, ignore the older
+        # class-wide marker for that same class/term so subject tracking stays precise.
+        submitted.update(legacy_ids - teachers_with_any_items)
+
+    return submitted
+
+
+def _clear_legacy_subject_score_submission(c, school_id, teacher_id, classname, term, academic_year):
+    class_key = canonicalize_classname(classname)
+    db_execute(
+        c,
+        """DELETE FROM subject_score_submissions
+           WHERE school_id = ? AND teacher_id = ?
+             AND REGEXP_REPLACE(UPPER(COALESCE(classname, '')), '[^A-Z0-9]+', '', 'g') = ?
+             AND LOWER(TRIM(COALESCE(term, ''))) = LOWER(TRIM(?))
+             AND academic_year = ?""",
+        (school_id, teacher_id, class_key, term, academic_year or ''),
+    )
+
+
+def mark_subject_score_submitted(school_id, teacher_id, classname, term, academic_year, subjects):
+    """Mark one or more subject rows as submitted by a subject teacher."""
+    if not ensure_subject_score_submission_item_schema():
+        return False
+    normalized_subjects = _dedupe_keep_order([
+        normalize_subject_name(subject)
+        for subject in (subjects or [])
+        if str(subject).strip()
+    ])
+    if not normalized_subjects:
         return False
     with db_connection(commit=True) as conn:
         c = conn.cursor()
-        db_execute(
-            c,
-            """INSERT INTO subject_score_submissions
-               (school_id, teacher_id, classname, term, academic_year, submitted_at)
-               VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-               ON CONFLICT(school_id, teacher_id, classname, term, academic_year)
-               DO UPDATE SET submitted_at = CURRENT_TIMESTAMP""",
-            (school_id, teacher_id, canonicalize_classname(classname), term, academic_year or ''),
-        )
+        _clear_legacy_subject_score_submission(c, school_id, teacher_id, classname, term, academic_year)
+        for subject in normalized_subjects:
+            db_execute(
+                c,
+                """INSERT INTO subject_score_submission_items
+                   (school_id, teacher_id, classname, subject, term, academic_year, submitted_at)
+                   VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                   ON CONFLICT(school_id, teacher_id, classname, subject, term, academic_year)
+                   DO UPDATE SET submitted_at = CURRENT_TIMESTAMP""",
+                (school_id, teacher_id, canonicalize_classname(classname), subject, term, academic_year or ''),
+            )
     return True
 
-def clear_subject_score_submission(school_id, teacher_id, classname, term, academic_year):
+
+def clear_subject_score_submission(school_id, teacher_id, classname, term, academic_year, subjects=None):
     """Clear submission state when subject score changes after submit."""
-    if not ensure_subject_score_submission_schema():
-        return
     with db_connection(commit=True) as conn:
         c = conn.cursor()
-        class_key = canonicalize_classname(classname)
-        db_execute(
-            c,
-            """DELETE FROM subject_score_submissions
-               WHERE school_id = ? AND teacher_id = ?
-                 AND REGEXP_REPLACE(UPPER(COALESCE(classname, '')), '[^A-Z0-9]+', '', 'g') = ?
-                 AND LOWER(TRIM(COALESCE(term, ''))) = LOWER(TRIM(?))
-                 AND academic_year = ?""",
-            (school_id, teacher_id, class_key, term, academic_year or ''),
-        )
+        if ensure_subject_score_submission_item_schema():
+            class_key = canonicalize_classname(classname)
+            normalized_subjects = _dedupe_keep_order([
+                normalize_subject_name(subject)
+                for subject in (subjects or [])
+                if str(subject).strip()
+            ])
+            if normalized_subjects:
+                for subject in normalized_subjects:
+                    db_execute(
+                        c,
+                        """DELETE FROM subject_score_submission_items
+                           WHERE school_id = ? AND teacher_id = ?
+                             AND REGEXP_REPLACE(UPPER(COALESCE(classname, '')), '[^A-Z0-9]+', '', 'g') = ?
+                             AND LOWER(TRIM(COALESCE(term, ''))) = LOWER(TRIM(?))
+                             AND academic_year = ?
+                             AND LOWER(TRIM(COALESCE(subject, ''))) = LOWER(TRIM(?))""",
+                        (school_id, teacher_id, class_key, term, academic_year or '', subject),
+                    )
+            else:
+                db_execute(
+                    c,
+                    """DELETE FROM subject_score_submission_items
+                       WHERE school_id = ? AND teacher_id = ?
+                         AND REGEXP_REPLACE(UPPER(COALESCE(classname, '')), '[^A-Z0-9]+', '', 'g') = ?
+                         AND LOWER(TRIM(COALESCE(term, ''))) = LOWER(TRIM(?))
+                         AND academic_year = ?""",
+                    (school_id, teacher_id, class_key, term, academic_year or ''),
+                )
+        _clear_legacy_subject_score_submission(c, school_id, teacher_id, classname, term, academic_year)
 
 def get_result_signoff_details(school_id, classname, term, academic_year=''):
     """Resolve signature images and signer names for published result authorization."""
@@ -26333,6 +26733,10 @@ def enforce_school_operations_toggle():
     school_admin_blocked_endpoints = {
         'school_admin_class_subjects',
         'school_admin_settings',
+        'school_admin_settings_profile',
+        'school_admin_settings_academic',
+        'school_admin_settings_results',
+        'school_admin_settings_branding',
         'school_admin_add_teacher',
         'school_admin_promote',
         'school_admin_add_students_by_class',
@@ -29293,7 +29697,10 @@ def school_admin_update_score_entry_mode():
 
     school_id = _normalize_school_id_text(session.get('school_id'))
     if not school_id:
-        flash('School session is missing. Please log in again.', 'error')
+        message = 'School session is missing. Please log in again.'
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({'ok': False, 'message': message, 'redirect': url_for('login')}), 401
+        flash(message, 'error')
         return redirect(url_for('login'))
 
     mode = normalize_school_score_entry_mode(
@@ -29301,7 +29708,10 @@ def school_admin_update_score_entry_mode():
         default='teacher_subject',
     )
     if mode not in SCHOOL_SCORE_ENTRY_MODES:
-        flash('Invalid score entry mode selected.', 'error')
+        message = 'Invalid score entry mode selected.'
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({'ok': False, 'message': message}), 400
+        flash(message, 'error')
         return redirect(url_for('school_admin_dashboard'))
 
     current_school = get_school(school_id) or {}
@@ -29310,16 +29720,28 @@ def school_admin_update_score_entry_mode():
         with db_connection(commit=True) as conn:
             c = conn.cursor()
             update_school_settings_with_cursor(c, school_id, current_school)
+        invalidate_school_cache(school_id)
         record_admin_action_audit(
             school_id,
             'update_score_entry_mode',
             target_scope='school_settings',
             payload={'score_entry_mode': mode},
         )
-        flash('Score entry mode updated successfully.', 'success')
+        success_message = 'Score entry mode updated successfully. The app now uses the new mode immediately.'
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({
+                'ok': True,
+                'message': success_message,
+                'score_entry_mode': mode,
+                'score_entry_mode_label': get_school_score_entry_mode_label(mode),
+            })
+        flash(success_message, 'success')
     except Exception as exc:
         logging.exception("Failed to update score entry mode.")
-        flash(f'Could not update score entry mode: {exc}', 'error')
+        message = f'Could not update score entry mode: {exc}'
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({'ok': False, 'message': message}), 500
+        flash(message, 'error')
     return redirect(url_for('school_admin_dashboard'))
 
 
@@ -30262,6 +30684,7 @@ def school_admin_publish_results():
         selected_year,
         assignments=assignments,
     )
+    dean_led_mode = school_uses_dean_led_score_entry(school)
     approval_workflow_enabled = result_publication_has_approval_columns()
     try:
         student_message_rows = get_school_student_messages(school_id, limit=12)
@@ -30287,6 +30710,7 @@ def school_admin_publish_results():
         prev_year=prev_year,
         can_load_previous=can_load_previous,
         publication_statuses=publication_statuses,
+        dean_led_mode=dean_led_mode,
         approval_workflow_enabled=approval_workflow_enabled,
         school_message_total=school_message_total,
     )
@@ -31979,11 +32403,68 @@ def school_admin_cbt_set_status(test_id):
         flash(str(exc), 'error')
     return redirect(url_for('school_admin_cbt_questions', test_id=test_id))
 
+def _normalize_school_settings_section(section):
+    section_value = (section or '').strip().lower()
+    if section_value in {'profile', 'academic', 'results', 'branding'}:
+        return section_value
+    return 'profile'
+
+
+def _school_settings_section_title(section):
+    titles = {
+        'profile': 'School Profile',
+        'academic': 'Academic Settings',
+        'results': 'Result Settings',
+        'branding': 'Branding',
+    }
+    return titles.get(_normalize_school_settings_section(section), 'School Settings')
+
+
+def _build_school_settings_form_state(school):
+    school = school or {}
+    return {
+        'school_name': (school.get('school_name') or '').strip(),
+        'location': (school.get('location') or '').strip(),
+        'academic_year': (school.get('academic_year') or '').strip(),
+        'current_term': (school.get('current_term') or 'First Term').strip() or 'First Term',
+        'leadership_title': normalize_school_leadership_title(
+            school.get('leadership_title', 'principal'),
+            default='principal',
+        ),
+        'theme_primary_color': normalize_hex_color(school.get('theme_primary_color', ''), '#1E3C72'),
+        'theme_secondary_color': normalize_hex_color(school.get('theme_secondary_color', ''), '#2A5298'),
+        'theme_accent_color': normalize_hex_color(school.get('theme_accent_color', ''), '#1F7A8C'),
+        'test_enabled': 1 if int(school.get('test_enabled', 1) or 0) else 0,
+        'exam_enabled': 1 if int(school.get('exam_enabled', 1) or 0) else 0,
+        'max_tests': _normalize_non_negative_int(school.get('max_tests', 3), 3, 10) or 3,
+        'test_score_max': _normalize_non_negative_int(school.get('test_score_max', 30), 30, 100),
+        'exam_objective_max': _normalize_non_negative_int(school.get('exam_objective_max', 30), 30, 100),
+        'exam_theory_max': _normalize_non_negative_int(school.get('exam_theory_max', 40), 40, 100),
+        'grade_a_min': _normalize_non_negative_int(school.get('grade_a_min', 70), 70, 100),
+        'grade_b_min': _normalize_non_negative_int(school.get('grade_b_min', 60), 60, 100),
+        'grade_c_min': _normalize_non_negative_int(school.get('grade_c_min', 50), 50, 100),
+        'grade_d_min': _normalize_non_negative_int(school.get('grade_d_min', 40), 40, 100),
+        'pass_mark': _normalize_non_negative_int(school.get('pass_mark', 50), 50, 100),
+        'show_positions': 1 if int(school.get('show_positions', 1) or 0) else 0,
+        'ss_ranking_mode': (school.get('ss_ranking_mode') or 'together').strip().lower(),
+        'class_arm_ranking_mode': (school.get('class_arm_ranking_mode') or 'separate').strip().lower(),
+        'combine_third_term_results': 1 if int(school.get('combine_third_term_results', 0) or 0) else 0,
+        'ss1_stream_mode': (school.get('ss1_stream_mode') or 'separate').strip().lower(),
+        'ss_arm_mode': (school.get('ss_arm_mode') or 'preserve').strip().lower(),
+        'parent_timetable_show_teacher': 1 if int(school.get('parent_timetable_show_teacher', 1) or 0) else 0,
+    }
+
+
 @app.route('/school-admin/settings', methods=['GET', 'POST'])
 def school_admin_settings():
     if session.get('role') != 'school_admin':
         return redirect(url_for('login'))
     
+    settings_section = _normalize_school_settings_section(
+        request.form.get('settings_section')
+        or request.args.get('section')
+        or 'profile'
+    )
     school_id = _normalize_school_id_text(session.get('school_id'))
     current_school = get_school(school_id) or {}
     def _to_int(value, default):
@@ -31991,6 +32472,12 @@ def school_admin_settings():
             return int(value)
         except (TypeError, ValueError):
             return int(default)
+
+    def _settings_redirect(**kwargs):
+        redirect_kwargs = dict(kwargs)
+        if settings_section != 'profile':
+            redirect_kwargs['section'] = settings_section
+        return redirect(url_for('school_admin_settings', **redirect_kwargs))
     
     if request.method == 'POST':
         previous_term = get_current_term(current_school)
@@ -32030,32 +32517,34 @@ def school_admin_settings():
             score_entry_mode = 'teacher_subject'
         if not (0 <= grade_d_min <= grade_c_min <= grade_b_min <= grade_a_min <= 100):
             flash('Invalid grade configuration. Use A >= B >= C >= D within 0-100.', 'error')
-            return redirect(url_for('school_admin_settings'))
+            return _settings_redirect()
         if not (0 <= pass_mark <= 100):
             flash('Pass mark must be between 0 and 100.', 'error')
-            return redirect(url_for('school_admin_settings'))
+            return _settings_redirect()
         if not (1 <= max_tests <= 10):
             flash('Maximum Number of Tests must be between 1 and 10.', 'error')
-            return redirect(url_for('school_admin_settings'))
+            return _settings_redirect()
         if not (0 <= test_score_max <= 100):
             flash('Max Total Test Score must be between 0 and 100.', 'error')
-            return redirect(url_for('school_admin_settings'))
+            return _settings_redirect()
         new_term = (request.form.get('current_term', '') or '').strip()
+        if not new_term:
+            new_term = (current_school.get('current_term', '') or '').strip()
         if new_term not in {'First Term', 'Second Term', 'Third Term'}:
             flash('Current term must be First Term, Second Term, or Third Term.', 'error')
-            return redirect(url_for('school_admin_settings'))
+            return _settings_redirect()
         new_year = (request.form.get('academic_year', '') or '').strip()
         if not new_year:
             new_year = (current_school.get('academic_year', '') or '').strip()
         if new_year and not re.fullmatch(r'^\d{4}-\d{4}$', new_year):
             flash('Academic year must be in YYYY-YYYY format (e.g., 2026-2027).', 'error')
-            return redirect(url_for('school_admin_settings'))
+            return _settings_redirect()
         if new_year:
             start_year = int(new_year[:4])
             end_year = int(new_year[5:])
             if end_year != start_year + 1:
                 flash('Academic year must be consecutive (e.g., 2026-2027).', 'error')
-                return redirect(url_for('school_admin_settings'))
+                return _settings_redirect()
 
         calendar_target_term = (request.form.get('calendar_term', '') or '').strip() or new_term
         calendar_target_year = (request.form.get('calendar_academic_year', '') or '').strip() or new_year
@@ -32074,10 +32563,10 @@ def school_admin_settings():
             calendar_target_year = new_year
         if calendar_target_term not in {'First Term', 'Second Term', 'Third Term'}:
             flash('Calendar term must be First Term, Second Term, or Third Term.', 'error')
-            return redirect(url_for('school_admin_settings'))
+            return _settings_redirect()
         if calendar_target_year and not re.fullmatch(r'^\d{4}-\d{4}$', calendar_target_year):
             flash('Calendar academic year must be in YYYY-YYYY format.', 'error')
-            return redirect(url_for('school_admin_settings'))
+            return _settings_redirect()
         existing_calendar = get_school_term_calendar(school_id, calendar_target_year, calendar_target_term) or {}
         submitted_settings_version = (request.form.get('settings_version', '') or '').strip()
         current_calendar_for_version = get_school_term_calendar(school_id, calendar_target_year, calendar_target_term)
@@ -32085,7 +32574,7 @@ def school_admin_settings():
         live_settings_version = build_school_settings_version_token(live_school_now, current_calendar_for_version)
         if submitted_settings_version and submitted_settings_version != live_settings_version:
             flash('Settings were changed by another admin. Reload page and apply your changes again.', 'error')
-            return redirect(url_for('school_admin_settings', calendar_term=calendar_target_term, calendar_year=calendar_target_year))
+            return _settings_redirect(calendar_term=calendar_target_term, calendar_year=calendar_target_year)
 
         # Make sure the optional tables/columns used by this screen exist before saving.
         ensure_school_access_schema()
@@ -32110,23 +32599,23 @@ def school_admin_settings():
 
         if bool(open_date) != bool(close_date):
             flash('Term open and close dates must both be set.', 'error')
-            return redirect(url_for('school_admin_settings'))
+            return _settings_redirect()
 
         open_dt = _parse_iso_date(open_date)
         close_dt = _parse_iso_date(close_date)
         if open_date and not open_dt:
             flash('Term open date must be in YYYY-MM-DD format.', 'error')
-            return redirect(url_for('school_admin_settings'))
+            return _settings_redirect()
         if close_date and not close_dt:
             flash('Term close date must be in YYYY-MM-DD format.', 'error')
-            return redirect(url_for('school_admin_settings'))
+            return _settings_redirect()
         if open_dt and close_dt and close_dt < open_dt:
             flash('Term close date cannot be earlier than term open date.', 'error')
-            return redirect(url_for('school_admin_settings'))
+            return _settings_redirect()
         next_term_begin_dt = _parse_iso_date(next_term_begin_date)
         if next_term_begin_date and not next_term_begin_dt:
             flash('Next term begin date must be in YYYY-MM-DD format.', 'error')
-            return redirect(url_for('school_admin_settings'))
+            return _settings_redirect()
 
         # Mid-term break is now sourced from School Programs for the same year/term.
         program_for_calendar = get_school_term_program(school_id, calendar_target_year, calendar_target_term)
@@ -32177,7 +32666,7 @@ def school_admin_settings():
                 f'{calendar_target_term} ({calendar_target_year}) has ended (closed on {effective_close_dt.isoformat()}) and calendar settings are locked.',
                 'error',
             )
-            return redirect(url_for('school_admin_settings', calendar_term=calendar_target_term, calendar_year=calendar_target_year))
+            return _settings_redirect(calendar_term=calendar_target_term, calendar_year=calendar_target_year)
 
         raw_school_logo = (request.form.get('school_logo') or '').strip()
         normalized_school_logo = normalize_school_logo_url(raw_school_logo)
@@ -32186,7 +32675,7 @@ def school_admin_settings():
             uploaded_logo_data, logo_err = parse_uploaded_profile_image(uploaded_logo)
             if logo_err:
                 flash(logo_err.replace('Profile image', 'School logo'), 'error')
-                return redirect(url_for('school_admin_settings'))
+                return _settings_redirect()
             normalized_school_logo = uploaded_logo_data
             flash('School logo image uploaded successfully.', 'success')
         elif not raw_school_logo:
@@ -32195,6 +32684,8 @@ def school_admin_settings():
         elif raw_school_logo and normalized_school_logo != raw_school_logo:
             flash('School logo URL was converted to a direct image link automatically.', 'info')
 
+        test_enabled_values = {str(value).strip() for value in request.form.getlist('test_enabled')}
+        exam_enabled_values = {str(value).strip() for value in request.form.getlist('exam_enabled')}
         settings = {
             'school_name': (request.form.get('school_name') or current_school.get('school_name', '') or '').strip(),
             # Preserve location when settings form does not include it.
@@ -32202,8 +32693,8 @@ def school_admin_settings():
             'school_logo': normalized_school_logo,
             'academic_year': new_year,
             'current_term': new_term,
-            'test_enabled': 1 if request.form.get('test_enabled') else 0,
-            'exam_enabled': 1 if request.form.get('exam_enabled') else 0,
+            'test_enabled': (1 if '1' in test_enabled_values else 0) if settings_section == 'academic' else int(current_school.get('test_enabled', 1) or 0),
+            'exam_enabled': (1 if '1' in exam_enabled_values else 0) if settings_section == 'academic' else int(current_school.get('exam_enabled', 1) or 0),
             'max_tests': max_tests,
             'test_score_max': test_score_max,
             'exam_objective_max': _to_int(request.form.get('exam_objective_max', 30), 30),
@@ -32236,22 +32727,22 @@ def school_admin_settings():
                 mode = 'separate'
             if objective_max < 0 or objective_max > 100 or theory_max < 0 or theory_max > 100:
                 flash(f'{level.upper()} objective/theory maxima must be between 0 and 100.', 'error')
-                return redirect(url_for('school_admin_settings'))
+                return _settings_redirect()
             if exam_score_max < 0 or exam_score_max > 100:
                 flash(f'{level.upper()} exam score maximum must be between 0 and 100.', 'error')
-                return redirect(url_for('school_admin_settings'))
+                return _settings_redirect()
             if mode == 'separate':
                 exam_score_max = objective_max + theory_max
                 if exam_score_max > 100:
                     flash(f'{level.upper()} objective + theory maxima must not exceed 100.', 'error')
-                    return redirect(url_for('school_admin_settings'))
+                    return _settings_redirect()
             if (test_score_max + exam_score_max) > 100:
                 flash(
                     f'{level.upper()} total test + exam maxima must not exceed 100 '
                     f'(current: test={test_score_max}, exam={exam_score_max}).',
                     'error',
                 )
-                return redirect(url_for('school_admin_settings'))
+                return _settings_redirect()
             assessment_updates.append({
                 'level': level,
                 'exam_mode': mode,
@@ -32267,7 +32758,7 @@ def school_admin_settings():
                     'Confirm term/year rollover before saving. This moves students to new term and resets working scores.',
                     'error'
                 )
-                return redirect(url_for('school_admin_settings'))
+                return _settings_redirect()
         rollover_affected_rows = 0
         save_warnings = []
         try:
@@ -32277,7 +32768,7 @@ def school_admin_settings():
         except Exception:
             logging.exception("Failed to update school settings.")
             flash('Failed to update school settings. Please retry.', 'error')
-            return redirect(url_for('school_admin_settings'))
+            return _settings_redirect()
 
         if changed_term_or_year:
             try:
@@ -32377,7 +32868,7 @@ def school_admin_settings():
             )
         else:
             flash('School settings updated successfully!', 'success')
-        return redirect(url_for('school_admin_settings', calendar_term=calendar_target_term, calendar_year=calendar_target_year))
+        return _settings_redirect(calendar_term=calendar_target_term, calendar_year=calendar_target_year)
     
     school = get_school(school_id)
     assessment_configs = get_all_assessment_configs(school_id)
@@ -32396,6 +32887,7 @@ def school_admin_settings():
     return render_template(
         'school/school_settings.html',
         school=school,
+        settings_form=_build_school_settings_form_state(school),
         school_logo_input_value=logo_input_value,
         assessment_configs=assessment_configs,
         calendar=calendar,
@@ -32405,7 +32897,57 @@ def school_admin_settings():
         calendar_edit_locked=calendar_edit_locked,
         today_iso=date.today().isoformat(),
         settings_version=build_school_settings_version_token(school, calendar),
+        settings_section=settings_section,
+        settings_section_title=_school_settings_section_title(settings_section),
     )
+
+
+@app.route('/school-admin/settings/profile')
+def school_admin_settings_profile():
+    redirect_kwargs = {'section': 'profile'}
+    calendar_term = (request.args.get('calendar_term', '') or '').strip()
+    calendar_year = (request.args.get('calendar_year', '') or '').strip()
+    if calendar_term:
+        redirect_kwargs['calendar_term'] = calendar_term
+    if calendar_year:
+        redirect_kwargs['calendar_year'] = calendar_year
+    return redirect(url_for('school_admin_settings', **redirect_kwargs))
+
+
+@app.route('/school-admin/settings/academic')
+def school_admin_settings_academic():
+    redirect_kwargs = {'section': 'academic'}
+    calendar_term = (request.args.get('calendar_term', '') or '').strip()
+    calendar_year = (request.args.get('calendar_year', '') or '').strip()
+    if calendar_term:
+        redirect_kwargs['calendar_term'] = calendar_term
+    if calendar_year:
+        redirect_kwargs['calendar_year'] = calendar_year
+    return redirect(url_for('school_admin_settings', **redirect_kwargs))
+
+
+@app.route('/school-admin/settings/results')
+def school_admin_settings_results():
+    redirect_kwargs = {'section': 'results'}
+    calendar_term = (request.args.get('calendar_term', '') or '').strip()
+    calendar_year = (request.args.get('calendar_year', '') or '').strip()
+    if calendar_term:
+        redirect_kwargs['calendar_term'] = calendar_term
+    if calendar_year:
+        redirect_kwargs['calendar_year'] = calendar_year
+    return redirect(url_for('school_admin_settings', **redirect_kwargs))
+
+
+@app.route('/school-admin/settings/branding')
+def school_admin_settings_branding():
+    redirect_kwargs = {'section': 'branding'}
+    calendar_term = (request.args.get('calendar_term', '') or '').strip()
+    calendar_year = (request.args.get('calendar_year', '') or '').strip()
+    if calendar_term:
+        redirect_kwargs['calendar_term'] = calendar_term
+    if calendar_year:
+        redirect_kwargs['calendar_year'] = calendar_year
+    return redirect(url_for('school_admin_settings', **redirect_kwargs))
 
 @app.route('/school-admin/new-term-wizard', methods=['GET', 'POST'])
 def school_admin_new_term_wizard():
@@ -37120,8 +37662,16 @@ def teacher_dashboard():
     for classname in classes:
         source_students = term_students_all if term_students_all is not None else class_students_data
         class_students = [s for s in source_students.values() if _class_match(s.get('classname', ''), classname) and s.get('term') == current_term]
-        total = len(class_students)
         class_student_ids = [sid for sid, s in source_students.items() if _class_match(s.get('classname', ''), classname) and s.get('term') == current_term]
+        attendance_gate = get_class_attendance_publish_readiness(
+            school_id=school_id,
+            classname=classname,
+            term=current_term,
+            academic_year=current_year,
+            class_students_data={sid: s for sid, s in source_students.items() if _class_match(s.get('classname', ''), classname) and s.get('term') == current_term},
+        )
+        manual_map = attendance_gate.get('manual_map', {}) if isinstance(attendance_gate, dict) else {}
+        total = len(class_students)
         completed = sum(1 for s in class_students if is_student_score_complete(s, school, current_term))
         behaviour_progress = class_behaviour_completion(school_id, classname, current_term, current_year, class_student_ids)
         subject_progress = compute_class_subject_completion(
@@ -37135,15 +37685,43 @@ def teacher_dashboard():
         class_views = class_view_status.get(classname, {})
         pub = publication_rows.get(classname, {})
         subject_pending_count = sum(1 for row in subject_progress.get('rows', []) if int(row.get('pending_students', 0)) > 0)
+        manual_dashboard_rows = []
+        for sid in class_student_ids:
+            student_row = source_students.get(sid, {}) or {}
+            manual_row = manual_map.get(str(sid or '').strip(), {})
+            days_open_value = manual_row.get('days_open', attendance_gate.get('days_open', 0))
+            days_present_value = manual_row.get('days_present', '')
+            try:
+                days_absent_value = max(0, int(days_open_value or 0) - int(days_present_value or 0))
+            except Exception:
+                days_absent_value = ''
+            manual_dashboard_rows.append({
+                'student_id': sid,
+                'student_name': (student_row.get('firstname') or sid or '').strip(),
+                'days_open': days_open_value,
+                'days_present': days_present_value,
+                'days_absent': days_absent_value,
+            })
         class_publish_status[classname] = {
             'total': total,
             'completed': completed,
-            'ready': total > 0 and completed == total and bool(subject_progress.get('ready', False)) and bool(behaviour_progress.get('ready', False)),
+            'ready': total > 0
+                     and completed == total
+                     and bool(subject_progress.get('ready', False))
+                     and bool(behaviour_progress.get('ready', False))
+                     and bool(attendance_gate.get('ready', False)),
             'subject_ready': bool(subject_progress.get('ready', False)),
             'subject_progress': subject_progress.get('rows', []),
             'subject_pending_count': subject_pending_count,
             'behaviour_ready': bool(behaviour_progress.get('ready', False)),
             'behaviour_missing_count': int(behaviour_progress.get('missing_count', 0) or 0),
+            'attendance_ready': bool(attendance_gate.get('ready', False)),
+            'attendance_mode': attendance_gate.get('mode', 'marked'),
+            'attendance_days_open': int(attendance_gate.get('days_open', 0) or 0),
+            'attendance_missing_count': len(attendance_gate.get('missing_rows', []) or []),
+            'attendance_message': attendance_gate.get('message', ''),
+            'attendance_manual_allowed': bool(attendance_gate.get('manual_allowed', False)),
+            'attendance_manual_rows': manual_dashboard_rows,
             'published': bool(pub.get('is_published', False)),
             'approval_status': pub.get('approval_status', 'not_submitted'),
             'submitted_at': pub.get('submitted_at', ''),
@@ -37231,7 +37809,7 @@ def teacher_dashboard():
         audience='teachers',
     )
     subject_submit_rows = []
-    submitted_map = get_subject_score_submission_map(school_id, teacher_id, current_term, current_year)
+    submitted_subject_map = get_subject_score_submission_subject_map(school_id, teacher_id, current_term, current_year)
     subject_submit_students = load_students_for_classes(
         school_id,
         subject_map_by_class.keys(),
@@ -37249,6 +37827,11 @@ def teacher_dashboard():
         allowed_subjects = subject_map_by_class.get(cls, set())
         if not allowed_subjects:
             continue
+        allowed_subject_keys = {
+            normalize_subject_name(subject).lower()
+            for subject in allowed_subjects
+            if str(subject).strip()
+        }
         class_students = students_by_class_for_submit.get(cls, {})
         pending_entries = 0
         eligible_entries = 0
@@ -37261,7 +37844,38 @@ def teacher_dashboard():
                 score_block = get_subject_score_block((st.get('scores') or {}), subj_key)
                 if not (is_score_complete_for_subject(score_block, school) and is_score_entry_confirmed(score_block, school)):
                     pending_entries += 1
-        submitted_at = submitted_map.get(cls, '')
+        submitted_meta = submitted_subject_map.get(cls, {})
+        legacy_submitted_at = (submitted_meta.get('__legacy__', '') or '').strip() if isinstance(submitted_meta, dict) else ''
+        submitted_keys = {
+            key for key in (submitted_meta or {}).keys()
+            if key and key != '__legacy__'
+        } if isinstance(submitted_meta, dict) else set()
+        is_submitted = bool(legacy_submitted_at) or (
+            bool(allowed_subject_keys) and allowed_subject_keys.issubset(submitted_keys)
+        )
+        submitted_times = []
+        if legacy_submitted_at:
+            submitted_times.append(legacy_submitted_at)
+        elif is_submitted and isinstance(submitted_meta, dict):
+            submitted_times.extend([
+                submitted_meta.get(key, '')
+                for key in allowed_subject_keys
+                if submitted_meta.get(key, '')
+            ])
+        submitted_at = max(submitted_times) if submitted_times else ''
+        submitted_subjects = sorted([
+            subject
+            for subject in allowed_subjects
+            if normalize_subject_name(subject).lower() in submitted_keys
+        ], key=lambda x: str(x).lower())
+        pending_submit_subjects = sorted([
+            subject
+            for subject in allowed_subjects
+            if normalize_subject_name(subject).lower() not in submitted_keys
+        ], key=lambda x: str(x).lower())
+        if legacy_submitted_at:
+            submitted_subjects = sorted(list(allowed_subjects), key=lambda x: str(x).lower())
+            pending_submit_subjects = []
         subject_submit_rows.append({
             'classname': cls,
             'subjects': sorted(list(allowed_subjects), key=lambda x: str(x).lower()),
@@ -37269,7 +37883,9 @@ def teacher_dashboard():
             'pending_entries': pending_entries,
             'ready': pending_entries == 0 and eligible_entries > 0,
             'submitted_at': format_timestamp(submitted_at) if submitted_at else '',
-            'is_submitted': bool(submitted_at),
+            'is_submitted': is_submitted,
+            'submitted_subjects': submitted_subjects,
+            'pending_submit_subjects': pending_submit_subjects,
         })
     locked_subjects_by_class = {}
     if not school_uses_dean_led_score_entry(school):
@@ -37282,18 +37898,19 @@ def teacher_dashboard():
             )
             if not cls_rows:
                 continue
-            submitted_teacher_ids = get_subject_submission_teacher_ids_for_class(
-                school_id,
-                cls,
-                current_term,
-                current_year,
-            )
             locked = set()
             for row in cls_rows:
                 assigned_teacher = (row.get('teacher_id') or '').strip()
                 subject_name = normalize_subject_name(row.get('subject', ''))
                 if not subject_name:
                     continue
+                submitted_teacher_ids = get_subject_submission_teacher_ids_for_class(
+                    school_id,
+                    cls,
+                    current_term,
+                    current_year,
+                    subject_name=subject_name,
+                )
                 if assigned_teacher and assigned_teacher != teacher_id and assigned_teacher not in submitted_teacher_ids:
                     locked.add(subject_name)
             if locked:
@@ -37416,6 +38033,9 @@ def teacher_subject_handover():
     school_id = session.get('school_id')
     teacher_id = session.get('user_id')
     school = get_school(school_id) or {}
+    if school_uses_dean_led_score_entry(school):
+        flash('Simple Mode uses the shared draft workflow, so subject handover is not needed here.', 'info')
+        return redirect(url_for('teacher_dashboard', tab='score'))
     current_term = get_current_term(school)
     current_year = (school or {}).get('academic_year', '')
     assignments = get_teacher_subject_assignments(
@@ -38355,6 +38975,9 @@ def teacher_behaviour_assessment():
         return redirect(url_for('login'))
     teacher_id = session.get('user_id')
     school = get_school(school_id) or {}
+    if school_uses_dean_led_score_entry(school):
+        flash('Simple Mode uses the shared score-entry page for behaviour traits and class comment. Open Score Entry instead.', 'info')
+        return redirect(url_for('teacher_dashboard', tab='score'))
     current_term = get_current_term(school)
     current_year = (school or {}).get('academic_year', '')
     classname = (request.values.get('classname', '') or '').strip()
@@ -38602,6 +39225,8 @@ def teacher_publish_results():
                 + ('...' if len(rows) > 6 else '')
             )
         flash(gate_msg, 'error')
+        if attendance_gate.get('manual_allowed'):
+            return redirect(url_for('teacher_dashboard', tab='submission'))
         return redirect(url_for('teacher_attendance', classname=classname))
 
     submit_result_approval_request(school_id, classname, current_term, current_year, teacher_id)
@@ -38613,6 +39238,109 @@ def teacher_publish_results():
     )
     flash(f'Results submitted for admin approval: {classname} ({current_term}).', 'success')
     return redirect(url_for('teacher_dashboard'))
+
+@app.route('/teacher/manual-attendance-summary', methods=['POST'])
+def teacher_manual_attendance_summary():
+    if session.get('role') != 'teacher':
+        return redirect(url_for('login'))
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    teacher_id = session.get('user_id')
+    if not school_id:
+        flash('School session is missing. Please log in again.', 'error')
+        return redirect(url_for('login'))
+    classname = canonicalize_classname((request.form.get('classname', '') or '').strip())
+    if not classname:
+        flash('Class is required.', 'error')
+        return redirect(url_for('teacher_dashboard', tab='submission'))
+    school = get_school(school_id) or {}
+    current_term = get_current_term(school)
+    current_year = (school.get('academic_year', '') or '').strip()
+    if not teacher_has_class_access(school_id, teacher_id, classname, term=current_term, academic_year=current_year):
+        flash('You are not assigned to this class for the current term/year.', 'error')
+        return redirect(url_for('teacher_dashboard', tab='submission'))
+    if class_has_attendance_marks(school_id, classname, current_term, current_year):
+        flash('Daily attendance already exists for this class. Use Attendance instead of manual summary.', 'error')
+        return redirect(url_for('teacher_dashboard', tab='submission'))
+    if not ensure_result_attendance_manual_schema():
+        flash('Manual attendance summary table is unavailable. Run the database migration and retry.', 'error')
+        return redirect(url_for('teacher_dashboard', tab='submission'))
+
+    class_students = load_students(school_id, class_filter=classname, term_filter=current_term)
+    if not class_students:
+        flash(f'No students found in {classname}.', 'error')
+        return redirect(url_for('teacher_dashboard', tab='submission'))
+
+    saved_count = 0
+    pending_count = 0
+    with db_connection(commit=True) as conn:
+        c = conn.cursor()
+        for sid, student in class_students.items():
+            student_name = (student.get('firstname') or sid or '').strip()
+            days_open_raw = (request.form.get(f'days_open_{sid}', '') or '').strip()
+            days_present_raw = (request.form.get(f'days_present_{sid}', '') or '').strip()
+            if not days_open_raw and not days_present_raw:
+                db_execute(
+                    c,
+                    """DELETE FROM result_attendance_manual
+                       WHERE school_id = ?
+                         AND student_id = ?
+                         AND term = ?
+                         AND COALESCE(academic_year, '') = COALESCE(?, '')""",
+                    (school_id, sid, current_term, current_year or ''),
+                )
+                pending_count += 1
+                continue
+            try:
+                days_open = int(days_open_raw)
+                days_present = int(days_present_raw)
+            except Exception:
+                flash(f'Enter valid whole numbers for {student_name}.', 'error')
+                return redirect(url_for('teacher_dashboard', tab='submission'))
+            if days_open <= 0:
+                flash(f'Days open must be greater than 0 for {student_name}.', 'error')
+                return redirect(url_for('teacher_dashboard', tab='submission'))
+            if days_present < 0:
+                flash(f'Days present cannot be negative for {student_name}.', 'error')
+                return redirect(url_for('teacher_dashboard', tab='submission'))
+            if days_present > days_open:
+                flash(f'Days present cannot be greater than days open for {student_name}.', 'error')
+                return redirect(url_for('teacher_dashboard', tab='submission'))
+            db_execute(
+                c,
+                """INSERT INTO result_attendance_manual
+                   (school_id, student_id, classname, term, academic_year, days_open, days_present, updated_by, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                   ON CONFLICT(school_id, student_id, term, academic_year) DO UPDATE SET
+                       classname = excluded.classname,
+                       days_open = excluded.days_open,
+                       days_present = excluded.days_present,
+                       updated_by = excluded.updated_by,
+                       updated_at = CURRENT_TIMESTAMP""",
+                (school_id, sid, classname, current_term, current_year or '', days_open, days_present, teacher_id),
+            )
+            saved_count += 1
+    record_admin_action_audit(
+        school_id,
+        'teacher_manual_attendance_summary_save',
+        target_scope=classname,
+        payload={
+            'term': current_term,
+            'academic_year': current_year,
+            'teacher_id': teacher_id,
+            'saved_count': saved_count,
+        },
+    )
+    if saved_count <= 0:
+        flash(f'No manual attendance values saved for {classname} yet.', 'warning')
+    elif pending_count > 0:
+        flash(
+            f'Manual attendance saved for {saved_count} student(s) in {classname}. '
+            f'{pending_count} student(s) still need values before submission.',
+            'warning',
+        )
+    else:
+        flash(f'Manual attendance summary saved for {classname}. Days absent will be calculated automatically.', 'success')
+    return redirect(url_for('teacher_dashboard', tab='submission'))
 
 @app.route('/teacher/submit-to-class-teacher', methods=['POST'])
 def teacher_submit_to_class_teacher():
@@ -38658,11 +39386,32 @@ def teacher_submit_to_class_teacher():
     if pending_entries > 0:
         flash(f'Cannot submit yet. {pending_entries} pending subject score entries remain in {classname}.', 'error')
         return redirect(url_for('teacher_dashboard'))
-    existing_map = get_subject_score_submission_map(school_id, teacher_id, current_term, current_year)
-    if existing_map.get(classname):
+    normalized_assigned_subjects = _dedupe_keep_order([
+        normalize_subject_name(subject)
+        for subject in assigned_subjects
+        if str(subject).strip()
+    ])
+    existing_map = get_subject_score_submission_subject_map(school_id, teacher_id, current_term, current_year)
+    existing_meta = existing_map.get(classname, {})
+    existing_keys = {
+        key for key in (existing_meta or {}).keys()
+        if key and key != '__legacy__'
+    } if isinstance(existing_meta, dict) else set()
+    already_submitted = bool((existing_meta.get('__legacy__', '') if isinstance(existing_meta, dict) else '').strip()) or (
+        bool(normalized_assigned_subjects)
+        and {subject.lower() for subject in normalized_assigned_subjects}.issubset(existing_keys)
+    )
+    if already_submitted:
         flash(f'{classname} is already submitted to class teacher. Edit scores first to submit again.', 'info')
         return redirect(url_for('teacher_dashboard'))
-    if not mark_subject_score_submitted(school_id, teacher_id, classname, current_term, current_year):
+    if not mark_subject_score_submitted(
+        school_id,
+        teacher_id,
+        classname,
+        current_term,
+        current_year,
+        normalized_assigned_subjects,
+    ):
         flash('Failed to save submission status. Ensure database schema is up to date.', 'error')
         return redirect(url_for('teacher_dashboard'))
     record_admin_action_audit(
@@ -38738,6 +39487,142 @@ def school_admin_approve_results():
             payload={'term': current_term, 'academic_year': current_year, 'review_note': review_note[:300]},
         )
     return redirect(url_for('school_admin_publish_results'))
+
+@app.route('/school-admin/publish-results/direct', methods=['POST'])
+@require_roles('school_admin')
+@require_rate_limit('school_admin_publish_results_direct', RATE_LIMIT_MUTATION_PER_MIN, 60, redirect_endpoint='school_admin_publish_results', methods=('POST',))
+def school_admin_publish_results_direct():
+    if session.get('role') != 'school_admin':
+        return redirect(url_for('login'))
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    admin_user_id = session.get('user_id')
+    classname = canonicalize_classname((request.form.get('classname', '') or '').strip())
+    term = (request.form.get('term', '') or '').strip()
+    academic_year = (request.form.get('academic_year', '') or '').strip()
+    if not classname:
+        flash('Class is required.', 'error')
+        return redirect(url_for('school_admin_publish_results'))
+
+    school = get_school(school_id) or {}
+    if not school_uses_dean_led_score_entry(school):
+        flash('Direct school-admin publishing is available only in Simple Mode.', 'error')
+        return redirect(url_for('school_admin_publish_results'))
+
+    current_term = term or get_current_term(school)
+    current_year = academic_year or (school.get('academic_year', '') or '').strip()
+    if is_result_published(school_id, classname, current_term, current_year):
+        flash(f'{classname} ({current_term}) is already published.', 'info')
+        return redirect(url_for('school_admin_publish_results', term=current_term, academic_year=current_year))
+
+    existing_pub = get_result_publication_row(school_id, classname, current_term, current_year) or {}
+    if (existing_pub.get('approval_status') or '').strip().lower() == 'pending':
+        flash(f'{classname} ({current_term}) is already pending review. Use approve or reject instead.', 'info')
+        return redirect(url_for('school_admin_publish_results', term=current_term, academic_year=current_year))
+
+    assignment_row = next(
+        (
+            row for row in (get_class_assignments(school_id) or [])
+            if canonicalize_classname(row.get('classname', '')) == classname
+            and (row.get('term', '') or '').strip() == current_term
+            and (row.get('academic_year', '') or '').strip() == (current_year or '')
+        ),
+        None,
+    )
+    teacher_id = (assignment_row or {}).get('teacher_id', '') or (existing_pub.get('teacher_id', '') or '')
+    if not teacher_id:
+        flash(f'Assign a class teacher to {classname} before direct publishing in Simple Mode.', 'error')
+        return redirect(url_for('school_admin_publish_results', term=current_term, academic_year=current_year))
+
+    teacher_profile = get_teachers(school_id).get(teacher_id, {})
+    if not (teacher_profile.get('signature_image') or '').strip():
+        flash('Upload the class teacher signature before direct publishing this result.', 'error')
+        return redirect(url_for('school_admin_publish_results', term=current_term, academic_year=current_year))
+    if not ((school or {}).get('principal_signature_image') or '').strip():
+        leadership_label = get_school_leadership_label((school or {}).get('leadership_title', 'principal'))
+        flash(f'{leadership_label} signature is required before publishing. Upload it from school admin.', 'error')
+        return redirect(url_for('school_admin_publish_results', term=current_term, academic_year=current_year))
+
+    class_students = load_students(school_id, class_filter=classname, term_filter=current_term)
+    student_list = list(class_students.values())
+    if not student_list:
+        flash(f'No students found in {classname} for {current_term}.', 'error')
+        return redirect(url_for('school_admin_publish_results', term=current_term, academic_year=current_year))
+
+    subject_progress = compute_class_subject_completion(
+        school_id=school_id,
+        classname=classname,
+        term=current_term,
+        academic_year=current_year,
+        school=school,
+        class_students_data=class_students,
+    )
+    if subject_progress.get('rows') and not subject_progress.get('ready', False):
+        pending_subjects = [
+            row.get('subject', '')
+            for row in (subject_progress.get('rows') or [])
+            if int(row.get('pending_students', 0) or 0) > 0
+        ]
+        flash(
+            f'Cannot publish yet. Pending subject scores in {classname}: {", ".join(pending_subjects[:6])}'
+            + ('...' if len(pending_subjects) > 6 else ''),
+            'error',
+        )
+        return redirect(url_for('school_admin_publish_results', term=current_term, academic_year=current_year))
+
+    incomplete = [s.get('firstname', '') for s in student_list if not is_student_score_complete(s, school, current_term)]
+    if incomplete:
+        flash(f'Cannot publish yet. Complete scores for all students in {classname} ({current_term}) first.', 'error')
+        return redirect(url_for('school_admin_publish_results', term=current_term, academic_year=current_year))
+
+    behaviour_check = class_behaviour_completion(
+        school_id=school_id,
+        classname=classname,
+        term=current_term,
+        academic_year=current_year,
+        student_ids=[sid for sid in class_students.keys()],
+    )
+    if not behaviour_check.get('ready', False):
+        flash(
+            f'Cannot publish yet. Complete Behaviour Assessment for all students in {classname}. '
+            f'Pending: {int(behaviour_check.get("missing_count", 0) or 0)}.',
+            'error',
+        )
+        return redirect(url_for('school_admin_publish_results', term=current_term, academic_year=current_year))
+
+    attendance_gate = get_class_attendance_publish_readiness(
+        school_id=school_id,
+        classname=classname,
+        term=current_term,
+        academic_year=current_year,
+        class_students_data=class_students,
+    )
+    if not attendance_gate.get('ready', False):
+        flash((attendance_gate.get('message') or f'Attendance is incomplete for {classname}.').strip(), 'error')
+        return redirect(url_for('school_admin_publish_results', term=current_term, academic_year=current_year))
+
+    try:
+        publish_results_for_class_atomic(
+            school_id=school_id,
+            classname=classname,
+            term=current_term,
+            teacher_id=teacher_id,
+            academic_year=current_year,
+            reviewed_by=admin_user_id or '',
+            review_note='Direct publish in Simple Mode',
+            attendance_gate=attendance_gate,
+        )
+    except Exception as exc:
+        flash(f'Could not publish {classname} ({current_term}): {exc}', 'error')
+        return redirect(url_for('school_admin_publish_results', term=current_term, academic_year=current_year))
+
+    record_admin_action_audit(
+        school_id,
+        'direct_publish_results_simple_mode',
+        target_scope=classname,
+        payload={'term': current_term, 'academic_year': current_year, 'teacher_id': teacher_id},
+    )
+    flash(f'Results published directly in Simple Mode: {classname} ({current_term}).', 'success')
+    return redirect(url_for('school_admin_publish_results', term=current_term, academic_year=current_year))
 
 @app.route('/school-admin/reject-results', methods=['POST'])
 @require_roles('school_admin')
@@ -39275,6 +40160,7 @@ def teacher_enter_scores():
     )
     assigned_subjects_set = {s.lower() for s in assigned_subjects}
     can_edit_teacher_comment = bool(class_access)
+    can_edit_behaviour = bool(class_access)
     locked_subjects_for_class = []
     if class_access and not dean_led_mode and role != 'school_admin':
         class_subject_assignments = get_teacher_subject_assignments(
@@ -39283,17 +40169,17 @@ def teacher_enter_scores():
             term=current_term,
             academic_year=current_year,
         )
-        submitted_teacher_ids = get_subject_submission_teacher_ids_for_class(
-            school_id,
-            class_name,
-            current_term,
-            current_year,
-        )
         class_students_for_handover = {}
         requires_handover_check = any(
             (row.get('teacher_id') or '').strip()
             and (row.get('teacher_id') or '').strip() != teacher_id
-            and (row.get('teacher_id') or '').strip() not in submitted_teacher_ids
+            and (row.get('teacher_id') or '').strip() not in get_subject_submission_teacher_ids_for_class(
+                school_id,
+                class_name,
+                current_term,
+                current_year,
+                subject_name=normalize_subject_name(row.get('subject', '')),
+            )
             and normalize_subject_name(row.get('subject', ''))
             for row in (class_subject_assignments or [])
         )
@@ -39309,6 +40195,13 @@ def teacher_enter_scores():
             subject_name = normalize_subject_name(row.get('subject', ''))
             if not subject_name:
                 continue
+            submitted_teacher_ids = get_subject_submission_teacher_ids_for_class(
+                school_id,
+                class_name,
+                current_term,
+                current_year,
+                subject_name=subject_name,
+            )
             if assigned_teacher and assigned_teacher != teacher_id and assigned_teacher not in submitted_teacher_ids:
                 # Handover-safe: if inherited subject scores are already complete,
                 # do not lock editing just because teacher assignment changed.
@@ -39388,6 +40281,16 @@ def teacher_enter_scores():
             teacher_comment = (request.form.get('teacher_comment', '') or '').strip()[:1500]
         else:
             teacher_comment = (student.get('teacher_comment', '') or '').strip()
+        if can_edit_behaviour:
+            behaviour_payload = {}
+            for trait in BEHAVIOUR_TRAITS:
+                behaviour_payload[trait] = (request.form.get(f'behaviour_{trait}', '') or '').strip().upper()
+            normalized_behaviour = normalize_behaviour_assessment(behaviour_payload)
+            if any((normalized_behaviour.get(trait, '') or '').strip() not in BEHAVIOUR_GRADE_SCALE for trait in BEHAVIOUR_TRAITS):
+                flash('Complete all behaviour traits before saving this shared draft.', 'error')
+                return redirect(url_for('teacher_enter_scores', **redirect_kwargs))
+        else:
+            normalized_behaviour = get_student_behaviour_assessment(school_id, student_id, current_term, current_year)
         max_tests = max(1, min(safe_int(school.get('max_tests', 3), 3), 10))
         test_total_max = max(0.0, safe_float(school.get('test_score_max', 30), 30))
         for subject in editable_subjects:
@@ -39402,11 +40305,8 @@ def teacher_enter_scores():
                 for i in range(1, max_tests + 1):
                     raw_val = request.form.get(f'test_{i}_{subj_key}', 0)
                     try:
-                        test_val = float(raw_val)
-                    except (TypeError, ValueError):
-                        flash(f'Invalid Test {i} score for {subject}.', 'error')
-                        return redirect(url_for('teacher_enter_scores', **redirect_kwargs))
-                    if not math.isfinite(test_val):
+                        test_val = parse_score_entry_number(raw_val, f'Test {i} score for {subject}')
+                    except ValueError:
                         flash(f'Invalid Test {i} score for {subject}.', 'error')
                         return redirect(url_for('teacher_enter_scores', **redirect_kwargs))
                     if test_val < 0 or test_val > test_total_max:
@@ -39425,11 +40325,8 @@ def teacher_enter_scores():
                 if exam_config.get('exam_mode') == 'combined':
                     exam_score_raw = request.form.get(f'exam_score_{subj_key}', 0)
                     try:
-                        exam_score = float(exam_score_raw)
-                    except (TypeError, ValueError):
-                        flash(f'Invalid exam score for {subject}.', 'error')
-                        return redirect(url_for('teacher_enter_scores', **redirect_kwargs))
-                    if not math.isfinite(exam_score):
+                        exam_score = parse_score_entry_number(exam_score_raw, f'Exam score for {subject}')
+                    except ValueError:
                         flash(f'Invalid exam score for {subject}.', 'error')
                         return redirect(url_for('teacher_enter_scores', **redirect_kwargs))
                     exam_max = max(0.0, safe_float(exam_config.get('exam_score_max', 70), 70))
@@ -39445,12 +40342,9 @@ def teacher_enter_scores():
                     objective_raw = request.form.get(f'objective_{subj_key}', 0)
                     theory_raw = request.form.get(f'theory_{subj_key}', 0)
                     try:
-                        objective = float(objective_raw)
-                        theory = float(theory_raw)
-                    except (TypeError, ValueError):
-                        flash(f'Invalid objective/theory score for {subject}.', 'error')
-                        return redirect(url_for('teacher_enter_scores', **redirect_kwargs))
-                    if not math.isfinite(objective) or not math.isfinite(theory):
+                        objective = parse_score_entry_number(objective_raw, f'Objective score for {subject}')
+                        theory = parse_score_entry_number(theory_raw, f'Theory score for {subject}')
+                    except ValueError:
                         flash(f'Invalid objective/theory score for {subject}.', 'error')
                         return redirect(url_for('teacher_enter_scores', **redirect_kwargs))
                     objective_max = max(0.0, safe_float(exam_config.get('objective_max', 30), 30))
@@ -39557,6 +40451,17 @@ def teacher_enter_scores():
                 merged_scores[subject] = scores.get(subject, {})
             student['scores'] = merged_scores
             save_student_with_cursor(c, school_id, student_id, student)
+            if can_edit_behaviour:
+                save_behaviour_assessment_with_cursor(
+                    c,
+                    school_id=school_id,
+                    student_id=student_id,
+                    classname=student.get('classname', ''),
+                    term=current_term,
+                    academic_year=current_year,
+                    behaviour_payload=normalized_behaviour,
+                    updated_by=teacher_id,
+                )
             audit_student_score_changes_with_cursor(
                 c=c,
                 school_id=school_id,
@@ -39579,11 +40484,12 @@ def teacher_enter_scores():
                 classname=student.get('classname', ''),
                 term=current_term,
                 academic_year=current_year,
+                subjects=editable_subjects,
             )
         # Any edit requires re-publish for this class/term.
         class_name = (student.get('classname', '') or '').strip()
         set_result_published(school_id, class_name, current_term, current_year, teacher_id, False)
-        flash('Scores saved successfully!', 'success')
+        flash('Shared draft saved successfully. Scores, class comment, and behaviour are now visible to other Simple Mode editors immediately.', 'success')
         if not class_access:
             assigned_subjects_for_class = get_teacher_subjects_for_class_term(
                 school_id,
@@ -39619,20 +40525,27 @@ def teacher_enter_scores():
                 )
         return redirect(url_for('teacher_enter_scores', **redirect_kwargs))
     
-    return render_template('teacher/teacher_enter_scores.html', 
-                         student=student, 
-                         subjects=subjects,
-                         editable_subjects=editable_subjects,
-                         subject_last_edits=subject_last_edits,
-                         teacher_name_map=teacher_name_map,
-                         school=school,
-                         current_term=current_term,
-                         is_locked=is_locked,
-                         can_edit_teacher_comment=can_edit_teacher_comment,
-                         locked_subjects_for_class=locked_subjects_for_class,
-                         subject_key_map=subject_key_map,
-                         exam_config=exam_config,
-                         grade_cfg=grade_cfg)
+    return render_template(
+        'teacher/teacher_enter_scores.html',
+        student=student,
+        subjects=subjects,
+        editable_subjects=editable_subjects,
+        subject_last_edits=subject_last_edits,
+        teacher_name_map=teacher_name_map,
+        school=school,
+        current_term=current_term,
+        is_locked=is_locked,
+        can_edit_teacher_comment=can_edit_teacher_comment,
+        locked_subjects_for_class=locked_subjects_for_class,
+        subject_key_map=subject_key_map,
+        exam_config=exam_config,
+        grade_cfg=grade_cfg,
+        behaviour_traits=BEHAVIOUR_TRAITS,
+        behaviour_grade_scale=BEHAVIOUR_GRADE_SCALE,
+        current_behaviour_assessment=get_student_behaviour_assessment(school_id, student_id, current_term, current_year),
+        can_edit_behaviour=can_edit_behaviour,
+        role=role,
+    )
 
 @app.route('/teacher/enter-subject-scores', methods=['GET', 'POST'])
 def teacher_enter_subject_scores():
@@ -39881,18 +40794,8 @@ def teacher_upload_csv():
                 if comment_col:
                     comment = (row.get(comment_col, '') or '').strip()
                     if comment:
-                        can_edit_class_comment = teacher_has_class_access(
-                            school_id,
-                            teacher_id,
-                            classname,
-                            term=current_term,
-                            academic_year=current_year,
-                        )
                         existing_comment = (student.get('teacher_comment', '') or '').strip()
-                        if can_edit_class_comment and not existing_comment:
-                            # CSV/automation may seed comment only when class teacher comment is empty.
-                            student['teacher_comment'] = comment
-                        elif existing_comment and existing_comment != comment:
+                        if existing_comment and existing_comment != comment:
                             skipped_teacher_comment_overwrites.add(student_id)
 
                 staged_students[student_id] = student
@@ -41034,6 +41937,7 @@ def student_view_result():
         'teacher_comment': snapshot.get('teacher_comment', ''),
         'principal_comment': snapshot.get('principal_comment', ''),
         'average_marks': snapshot.get('average_marks', 0),
+        'total_score': compute_total_score_from_scores(snapshot.get('scores', {})),
         'Grade': snapshot.get('Grade', 'F'),
         'Status': snapshot.get('Status', 'Fail'),
     }
@@ -42402,6 +43306,7 @@ def parent_view_result():
         'teacher_comment': snapshot.get('teacher_comment', ''),
         'principal_comment': snapshot.get('principal_comment', ''),
         'average_marks': snapshot.get('average_marks', 0),
+        'total_score': compute_total_score_from_scores(snapshot.get('scores', {})),
         'Grade': snapshot.get('Grade', 'F'),
         'Status': snapshot.get('Status', 'Fail'),
     }
@@ -42764,6 +43669,7 @@ def teacher_student_result():
         'teacher_comment': snapshot.get('teacher_comment', ''),
         'principal_comment': snapshot.get('principal_comment', ''),
         'average_marks': snapshot.get('average_marks', 0),
+        'total_score': compute_total_score_from_scores(snapshot.get('scores', {})),
         'Grade': snapshot.get('Grade', 'F'),
         'Status': snapshot.get('Status', 'Fail'),
     }
@@ -43088,6 +43994,7 @@ def school_admin_student_result():
             'teacher_comment': student.get('teacher_comment', ''),
             'principal_comment': student.get('principal_comment', ''),
             'average_marks': average_marks,
+            'total_score': compute_total_score_from_scores(preview_scores),
             'Grade': grade_from_score(average_marks, grade_cfg),
             'Status': status_from_score(average_marks, grade_cfg),
         }
@@ -43163,6 +44070,7 @@ def school_admin_student_result():
             'teacher_comment': snapshot.get('teacher_comment', ''),
             'principal_comment': snapshot.get('principal_comment', ''),
             'average_marks': snapshot.get('average_marks', 0),
+            'total_score': compute_total_score_from_scores(snapshot.get('scores', {})),
             'Grade': snapshot.get('Grade', 'F'),
             'Status': snapshot.get('Status', 'Fail'),
         }
@@ -43721,6 +44629,7 @@ def check_result():
         'teacher_comment': snapshot.get('teacher_comment', ''),
         'principal_comment': snapshot.get('principal_comment', ''),
         'average_marks': snapshot.get('average_marks', 0),
+        'total_score': compute_total_score_from_scores(snapshot.get('scores', {})),
         'Grade': snapshot.get('Grade', 'F'),
         'Status': snapshot.get('Status', 'Fail')
     }
@@ -43981,6 +44890,94 @@ def view_students():
         total_pages=total_pages,
         per_page=per_page,
         view_students_endpoint=view_students_endpoint
+    )
+
+
+@app.route('/school-admin/score-entry')
+@require_roles('school_admin')
+def school_admin_score_entry():
+    if session.get('role') != 'school_admin':
+        return redirect(url_for('login'))
+    school_id = _normalize_school_id_text(session.get('school_id'))
+    if not school_id:
+        return redirect(url_for('login'))
+    school = get_school(school_id) or {}
+    if not school_uses_dean_led_score_entry(school):
+        flash('School admin score entry is available only when Simple Mode is enabled.', 'info')
+        return redirect(url_for('school_admin_dashboard'))
+
+    current_term = get_current_term(school)
+    selected_class = canonicalize_classname((request.args.get('class', '') or '').strip())
+    selected_term = (request.args.get('term', '') or '').strip() or current_term
+
+    available_classes, available_terms = get_student_filter_options(school_id)
+    if selected_class and selected_class not in set(available_classes):
+        selected_class = ''
+    if selected_term and selected_term not in set(available_terms):
+        selected_term = current_term
+
+    students_data = load_students(school_id, class_filter=selected_class, term_filter=selected_term)
+    if selected_class and selected_term and not students_data:
+        class_only_students = load_students(school_id, class_filter=selected_class, term_filter='')
+        if class_only_students:
+            students_data = class_only_students
+            selected_term = ''
+
+    class_counts = {}
+    for student in (load_students(school_id, class_filter='', term_filter=selected_term) or {}).values():
+        classname = canonicalize_classname((student.get('classname') or '').strip())
+        if not classname:
+            continue
+        class_counts[classname] = class_counts.get(classname, 0) + 1
+
+    student_rows = []
+    for student_id, student in (students_data or {}).items():
+        classname = canonicalize_classname((student.get('classname') or '').strip())
+        if selected_class and classname != selected_class:
+            continue
+        student_rows.append({
+            'student_id': student_id,
+            'firstname': (student.get('firstname') or '').strip(),
+            'lastname': (student.get('lastname') or '').strip(),
+            'othername': (student.get('othername') or '').strip(),
+            'fullname': ' '.join([
+                (student.get('firstname') or '').strip(),
+                (student.get('lastname') or '').strip(),
+                (student.get('othername') or '').strip(),
+            ]).strip() or student_id,
+            'classname': classname,
+            'stream': (student.get('stream') or '').strip(),
+            'term': (student.get('term') or '').strip(),
+            'subjects_count': len(get_student_offered_subjects_for_class(student, school_id, school=school)),
+        })
+    student_rows.sort(
+        key=lambda row: (
+            (row.get('classname') or '').lower(),
+            (row.get('fullname') or '').lower(),
+            (row.get('student_id') or '').lower(),
+        )
+    )
+
+    class_cards = [
+        {
+            'classname': classname,
+            'count': class_counts.get(classname, 0),
+            'is_selected': classname == selected_class,
+        }
+        for classname in available_classes
+    ]
+
+    return render_template(
+        'school/school_admin_score_entry_landing.html',
+        school=school,
+        current_term=current_term,
+        available_classes=available_classes,
+        available_terms=available_terms,
+        selected_class=selected_class,
+        selected_term=selected_term,
+        student_rows=student_rows,
+        class_cards=class_cards,
+        total_students=len(student_rows),
     )
 
 @app.route('/assistant/guide', methods=['POST'])
@@ -44962,7 +45959,12 @@ if __name__ == '__main__':
     )
     debug = str(debug_flag).strip().lower() in ('1', 'true', 'yes')
     build_stamp = get_runtime_build_stamp()
-    startup_msg = f"[startup] Student Score build: {build_stamp} | debug={debug} | port={port}"
+    is_windows = os.name == 'nt'
+    use_reloader = bool(debug and not is_windows)
+    startup_msg = (
+        f"[startup] Student Score build: {build_stamp} | debug={debug} | "
+        f"port={port} | reloader={use_reloader}"
+    )
     print(startup_msg)
     logging.info(startup_msg)
-    app.run(host='0.0.0.0', port=port, debug=debug)
+    app.run(host='0.0.0.0', port=port, debug=debug, use_reloader=use_reloader)

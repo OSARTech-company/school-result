@@ -213,4 +213,4 @@ powershell -ExecutionPolicy Bypass -File tools\run_pg_backup.ps1 -BackupDir .\ba
 
 ## License
 
-Use and modify as needed for your school/project. Add your preferred license file if you plan to distribute publicly.
+Use and modify as needed for your school. Add your preferred license file if you plan to distribute publicly.

@@ -9,14 +9,125 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard-pro.css', v='20260307f') }}">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
-        .container { width: min(1080px, 100%); margin: 0 auto; padding: 24px; }
+        .container { width: min(1120px, 100%); margin: 0 auto; padding: 24px; }
         .header { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
         .header h1 { margin: 0; font-size: 1.85rem; }
         .header .back { color: white; text-decoration: none; font-weight: 700; }
-        .info-strip { display: flex; gap: 10px; flex-wrap: wrap; margin: 10px 0 16px; }
-        .info-chip { border-radius: 999px; padding: 5px 12px; border: 1px solid #cfe0f8; background: #eef5ff; color: #1f3b5c; font-size: 0.86rem; }
+        .cbt-shell { display: grid; gap: 18px; }
+        .page-hero {
+            position: relative;
+            overflow: hidden;
+            border-radius: 22px;
+            padding: 26px;
+            background:
+                radial-gradient(circle at top right, rgba(255,255,255,0.18), transparent 32%),
+                linear-gradient(135deg, var(--brand) 0%, var(--brand-2) 58%, var(--accent) 100%);
+            color: #fff;
+            box-shadow: 0 20px 40px rgba(15, 76, 129, 0.22);
+        }
+        .page-hero::after {
+            content: "";
+            position: absolute;
+            inset: auto -60px -80px auto;
+            width: 220px;
+            height: 220px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.08);
+        }
+        .hero-grid {
+            position: relative;
+            z-index: 1;
+            display: grid;
+            grid-template-columns: minmax(0, 1.55fr) minmax(220px, 0.8fr);
+            gap: 18px;
+            align-items: end;
+        }
+        .hero-topline {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.14);
+            font-size: 0.82rem;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            font-weight: 700;
+        }
+        .hero-title { margin: 14px 0 0; font-size: clamp(1.8rem, 3.8vw, 2.6rem); line-height: 1.08; }
+        .hero-text { margin: 12px 0 0; color: rgba(255,255,255,0.88); line-height: 1.6; max-width: 680px; }
+        .info-strip { display: flex; gap: 10px; flex-wrap: wrap; margin: 16px 0 0; }
+        .info-chip,
+        .hero-chip { border-radius: 999px; padding: 8px 12px; background: rgba(255,255,255,0.14); color: #fff; font-size: 0.86rem; font-weight: 600; display:inline-flex; align-items:center; gap:8px; }
+        .summary-card {
+            border-radius: 18px;
+            padding: 16px;
+            background: rgba(255,255,255,0.13);
+            border: 1px solid rgba(255,255,255,0.16);
+            backdrop-filter: blur(6px);
+        }
+        .summary-card .label {
+            display: block;
+            font-size: 0.75rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: rgba(255,255,255,0.72);
+            margin-bottom: 6px;
+        }
+        .summary-card .value { font-size: 1.8rem; font-weight: 800; line-height: 1.1; }
+        .summary-card .meta { margin-top: 6px; color: rgba(255,255,255,0.84); }
+        .stat-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 14px;
+        }
+        .stat-card {
+            border: 1px solid #dce7f5;
+            border-radius: 18px;
+            background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+            padding: 18px;
+            box-shadow: 0 10px 22px rgba(15, 23, 42, 0.05);
+        }
+        .stat-card .label {
+            display: block;
+            font-size: 0.76rem;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            color: #64748b;
+            margin-bottom: 8px;
+        }
+        .stat-card .value {
+            font-size: 1.7rem;
+            line-height: 1.1;
+            font-weight: 800;
+            color: #14365e;
+        }
+        .stat-card .meta {
+            margin-top: 6px;
+            color: #5d6b7d;
+            font-size: 0.92rem;
+        }
+        .section-card {
+            border: 1px solid #dce7f5;
+            border-radius: 20px;
+            background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+            padding: 20px;
+            box-shadow: 0 10px 22px rgba(15, 23, 42, 0.05);
+        }
+        .section-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-bottom: 14px;
+        }
+        .section-head h3 {
+            margin: 0;
+            color: #14365e;
+        }
         .test-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 14px; }
-        .test-card { border: 1px solid #dce7f5; border-radius: 12px; background: #f9fbff; padding: 14px; }
+        .test-card { border: 1px solid #dce7f5; border-radius: 18px; background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%); padding: 18px; box-shadow: 0 10px 22px rgba(15, 23, 42, 0.05); }
         .test-title { font-size: 1.05rem; font-weight: 700; color: #14365e; margin-bottom: 6px; }
         .test-meta { color: #58667a; font-size: 0.9rem; margin-bottom: 8px; }
         .status-pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 0.78rem; text-transform: capitalize; }
@@ -25,6 +136,15 @@
         .status-pill.submitted { background: #dbeafe; color: #1d4ed8; }
         .status-pill.started { background: #fef3c7; color: #92400e; }
         .muted { color: #64748b; font-size: 0.9rem; }
+        @media (max-width: 900px) {
+            .hero-grid { grid-template-columns: 1fr; }
+            .stat-grid { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 640px) {
+            .container { padding: 16px; }
+            .page-hero { padding: 22px 18px; border-radius: 18px; }
+            .info-chip, .hero-chip { width: 100%; justify-content: center; }
+        }
     </style>
 </head>
 <body style="--brand: {{ school.theme_primary_color if school and school.theme_primary_color else '#0F4C81' }}; --brand-2: {{ school.theme_secondary_color if school and school.theme_secondary_color else '#1F7A8C' }}; --accent: {{ school.theme_accent_color if school and school.theme_accent_color else '#1F7A8C' }};">
@@ -114,13 +234,51 @@
                 {% endif %}
             {% endwith %}
 
-            <div class="info-strip">
-                <span class="info-chip">Class: {{ student.classname }}</span>
-                <span class="info-chip">Term: {{ selected_term }}</span>
-                <span class="info-chip">Year: {{ selected_year }}</span>
-            </div>
+            <div class="cbt-shell">
+            <section class="page-hero">
+                <div class="hero-grid">
+                    <div>
+                        <span class="hero-topline"><i class="fas fa-laptop-code"></i> Student CBT</span>
+                        <h2 class="hero-title">Prepare well, track active tests, and enter each CBT with confidence.</h2>
+                        <p class="hero-text">This page brings together available computer-based tests for your class and term, including drafts in progress and completed submissions.</p>
+                        <div class="info-strip">
+                            <span class="hero-chip"><i class="fas fa-users"></i> {{ student.classname }}</span>
+                            <span class="hero-chip"><i class="fas fa-calendar-alt"></i> {{ selected_term }}</span>
+                            <span class="hero-chip"><i class="fas fa-clock"></i> {{ selected_year }}</span>
+                        </div>
+                    </div>
+                    <div class="summary-card">
+                        <span class="label">Available Tests</span>
+                        <div class="value">{{ tests|length if tests else 0 }}</div>
+                        <div class="meta">Visible CBT records for this term and year</div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="stat-grid">
+                <div class="stat-card">
+                    <span class="label">Published Tests</span>
+                    <div class="value">{{ tests|selectattr('status', 'equalto', 'Published')|list|length if tests else 0 }}</div>
+                    <div class="meta">CBT items ready to start right now</div>
+                </div>
+                <div class="stat-card">
+                    <span class="label">Drafts in Progress</span>
+                    <div class="value">{{ tests|selectattr('action_mode', 'equalto', 'continue')|list|length if tests else 0 }}</div>
+                    <div class="meta">Tests you can continue from a saved attempt</div>
+                </div>
+                <div class="stat-card">
+                    <span class="label">Submitted Tests</span>
+                    <div class="value">{{ tests|selectattr('attempt_status', 'equalto', 'submitted')|list|length if tests else 0 }}</div>
+                    <div class="meta">Completed CBT records for this term</div>
+                </div>
+            </section>
 
             {% if tests %}
+            <section class="section-card">
+                <div class="section-head">
+                    <h3><i class="fas fa-list-check"></i> Available CBT Sessions</h3>
+                    <span class="muted">{{ tests|length }} test{{ '' if tests|length == 1 else 's' }} found</span>
+                </div>
             <div class="test-grid">
                 {% for test in tests %}
                 <div class="test-card">
@@ -167,11 +325,13 @@
                 </div>
                 {% endfor %}
             </div>
+            </section>
             {% else %}
-            <div class="card">
+            <div class="section-card">
                 <p class="muted">No subject entered yet for CBT in {{ selected_term }} {{ selected_year }}, or all CBT for your class/subjects has already been retrieved by teachers.</p>
             </div>
             {% endif %}
+            </div>
         </div>
     </div>
 </div>

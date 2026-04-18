@@ -10,11 +10,98 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         body { min-height: 100vh; }
-        .container { width: min(980px, 100%); margin: 0 auto; padding: 24px; }
+        .container { width: min(1080px, 100%); margin: 0 auto; padding: 24px; }
         .header { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
         .header h1 { margin: 0; font-size: 1.85rem; }
         .header .back { color: white; text-decoration: none; font-weight: 700; }
+        .profile-shell { display: grid; gap: 18px; }
+        .page-hero {
+            position: relative;
+            overflow: hidden;
+            border-radius: 22px;
+            padding: 26px;
+            background:
+                radial-gradient(circle at top right, rgba(255,255,255,0.18), transparent 32%),
+                linear-gradient(135deg, var(--brand) 0%, var(--brand-2) 58%, var(--accent) 100%);
+            color: #fff;
+            box-shadow: 0 20px 40px rgba(15, 76, 129, 0.22);
+        }
+        .page-hero::after {
+            content: "";
+            position: absolute;
+            inset: auto -60px -80px auto;
+            width: 220px;
+            height: 220px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.08);
+        }
+        .hero-grid {
+            position: relative;
+            z-index: 1;
+            display: grid;
+            grid-template-columns: minmax(0, 1.5fr) minmax(220px, 0.8fr);
+            gap: 18px;
+            align-items: end;
+        }
+        .hero-topline {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.14);
+            font-size: 0.82rem;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            font-weight: 700;
+        }
+        .hero-title { margin: 14px 0 0; font-size: clamp(1.8rem, 3.8vw, 2.6rem); line-height: 1.08; }
+        .hero-text { margin: 12px 0 0; color: rgba(255,255,255,0.88); line-height: 1.6; max-width: 680px; }
+        .hero-meta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+        .hero-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.14);
+            color: #fff;
+            font-weight: 600;
+        }
+        .summary-card {
+            border-radius: 18px;
+            padding: 16px;
+            background: rgba(255,255,255,0.13);
+            border: 1px solid rgba(255,255,255,0.16);
+            backdrop-filter: blur(6px);
+        }
+        .summary-card .label {
+            display: block;
+            font-size: 0.75rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: rgba(255,255,255,0.72);
+            margin-bottom: 6px;
+        }
+        .summary-card .value { font-size: 1.8rem; font-weight: 800; line-height: 1.1; }
+        .summary-card .meta { margin-top: 6px; color: rgba(255,255,255,0.84); }
         .profile-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+        .profile-card {
+            border: 1px solid #dbe7f3;
+            border-radius: 20px;
+            padding: 22px;
+            background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+            box-shadow: 0 10px 22px rgba(15, 23, 42, 0.05);
+        }
+        .profile-card h2 { margin-top: 0; color: #12314d; }
+        @media (max-width: 900px) {
+            .hero-grid { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 640px) {
+            .container { padding: 16px; }
+            .page-hero { padding: 22px 18px; border-radius: 18px; }
+            .hero-chip { width: 100%; justify-content: center; }
+        }
     </style>
 </head>
 <body style="--brand: {{ school.theme_primary_color if school and school.theme_primary_color else '#0F4C81' }}; --brand-2: {{ school.theme_secondary_color if school and school.theme_secondary_color else '#1F7A8C' }}; --accent: {{ school.theme_accent_color if school and school.theme_accent_color else '#1F7A8C' }};">
@@ -92,7 +179,28 @@
                     {% endif %}
                 {% endwith %}
 
-                <div class="card">
+                <div class="profile-shell">
+                <section class="page-hero">
+                    <div class="hero-grid">
+                        <div>
+                            <span class="hero-topline"><i class="fas fa-user"></i> Student Profile</span>
+                            <h2 class="hero-title">Keep your contact details current and your account secure.</h2>
+                            <p class="hero-text">This space lets you update personal contact details and request support if you need a password reset from the school admin.</p>
+                            <div class="hero-meta">
+                                <span class="hero-chip"><i class="fas fa-id-card"></i> {{ student.student_id }}</span>
+                                <span class="hero-chip"><i class="fas fa-envelope"></i> {{ student.email or 'No email yet' }}</span>
+                                <span class="hero-chip"><i class="fas fa-phone"></i> {{ student.student_phone or 'No phone yet' }}</span>
+                            </div>
+                        </div>
+                        <div class="summary-card">
+                            <span class="label">Profile Status</span>
+                            <div class="value">{{ 'Ready' if (student.email or student.student_phone) else 'Needs Update' }}</div>
+                            <div class="meta">Add at least one contact method so the school can reach you more easily.</div>
+                        </div>
+                    </div>
+                </section>
+
+                <div class="profile-card">
                     <h2>Update Contact</h2>
                     <form method="post">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -119,7 +227,7 @@
                     </form>
                 </div>
 
-                <div class="card">
+                <div class="profile-card">
                     <h2>Request Password Reset</h2>
                     <p class="note">Use this if you cannot access your account. The school admin will reset your password to the default.</p>
                     <form method="post">
@@ -131,6 +239,7 @@
                         </div>
                         <button class="btn btn-secondary" type="submit">Send Reset Request</button>
                     </form>
+                </div>
                 </div>
             </div>
         </div>

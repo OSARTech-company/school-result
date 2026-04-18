@@ -239,7 +239,7 @@
               <a href="{{ url_for('school_admin_add_students_by_class') }}" class="quick-link"><i class="fas fa-user-plus"></i> Add Students</a>
               <a href="{{ url_for('school_admin_class_subjects') }}" class="quick-link"><i class="fas fa-book-open"></i> Class Subjects</a>
               <a href="{{ url_for('school_admin_term_programs') }}" class="quick-link"><i class="fas fa-calendar-alt"></i> Term Programs</a>
-              <a href="{{ url_for('school_admin_settings') }}" class="quick-link"><i class="fas fa-cogs"></i> School Settings</a>
+              <a href="{{ url_for('school_admin_settings_profile') }}" class="quick-link"><i class="fas fa-cogs"></i> School Settings</a>
               <a href="{{ url_for('school_admin_analytics') }}" class="quick-link"><i class="fas fa-chart-line"></i> Analytics</a>
               <a href="{{ url_for('school_admin_security') }}" class="quick-link"><i class="fas fa-shield-alt"></i> Security Logs</a>
             </div>
@@ -250,18 +250,19 @@
               <h2><i class="fas fa-pen-to-square"></i> Score Entry Mode</h2>
               <p>Choose the school-wide score workflow.</p>
             </div>
-            <form method="POST" action="{{ url_for('school_admin_update_score_entry_mode') }}" class="form-group" style="max-width: 520px;">
+            <form id="scoreEntryModeForm" method="POST" action="{{ url_for('school_admin_update_score_entry_mode') }}" class="form-group" style="max-width: 520px;">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}" />
               <label for="dashboard_score_entry_mode">Current Mode</label>
               <select id="dashboard_score_entry_mode" name="score_entry_mode">
                 <option value="teacher_subject" {% if not school or school.score_entry_mode != 'dean_led' %}selected{% endif %}>Advanced Mode</option>
                 <option value="dean_led" {% if school and school.score_entry_mode == 'dean_led' %}selected{% endif %}>Simple Mode</option>
               </select>
-              <p class="note mt-10">
+              <p id="scoreEntryModeHelp" class="note mt-10">
                 Advanced Mode keeps strict subject ownership.
                 Simple Mode lets class-assigned staff enter all subjects for a student/class.
               </p>
-              <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Save Mode</button>
+              <p id="scoreEntryModeStatus" class="note mt-10" hidden aria-live="polite"></p>
+              <button type="submit" id="scoreEntryModeSubmit" class="btn btn-primary"><i class="fas fa-save"></i> Save Mode</button>
             </form>
           </div>
 
@@ -409,6 +410,88 @@
         if (window.innerWidth > 600) {
           body.classList.add('rail-expanded');
         }
+      })();
+    </script>
+    <script>
+      (function () {
+        var form = document.getElementById('scoreEntryModeForm');
+        var select = document.getElementById('dashboard_score_entry_mode');
+        var submitBtn = document.getElementById('scoreEntryModeSubmit');
+        var helpEl = document.getElementById('scoreEntryModeHelp');
+        var statusEl = document.getElementById('scoreEntryModeStatus');
+        if (!form || !select || !submitBtn || !helpEl || !statusEl) return;
+
+        var defaultButtonHtml = submitBtn.innerHTML;
+        var helpByMode = {
+          teacher_subject: 'Advanced Mode keeps strict subject ownership. Simple Mode lets class-assigned staff enter all subjects for a student/class.',
+          dean_led: 'Simple Mode lets class-assigned staff enter all subjects for a student/class. Advanced Mode keeps strict subject ownership.'
+        };
+
+        function setModeUi(mode) {
+          helpEl.textContent = helpByMode[mode] || helpByMode.teacher_subject;
+          document.querySelectorAll('[data-score-entry-visible]').forEach(function (el) {
+            var visibleFor = (el.getAttribute('data-score-entry-visible') || '').trim();
+            el.hidden = !visibleFor || visibleFor !== (mode === 'dean_led' ? 'simple' : 'advanced');
+          });
+        }
+
+        function setBusy(isBusy) {
+          select.disabled = isBusy;
+          submitBtn.disabled = isBusy;
+          submitBtn.innerHTML = isBusy ? '<i class="fas fa-spinner fa-spin"></i> Saving...' : defaultButtonHtml;
+        }
+
+        function showStatus(message, isError) {
+          statusEl.hidden = false;
+          statusEl.textContent = message || '';
+          statusEl.style.color = isError ? '#b42318' : '#166534';
+        }
+
+        async function saveMode() {
+          setBusy(true);
+          statusEl.hidden = true;
+          var formData = new FormData(form);
+          try {
+            var response = await fetch(form.action, {
+              method: 'POST',
+              body: formData,
+              headers: {
+                'X-Requested-With': 'XMLHttpRequest'
+              },
+              credentials: 'same-origin'
+            });
+            var data = {};
+            try {
+              data = await response.json();
+            } catch (err) {
+              data = {};
+            }
+            if (!response.ok || !data.ok) {
+              if (data.redirect) {
+                window.location.href = data.redirect;
+                return;
+              }
+              throw new Error(data.message || 'Could not update score entry mode.');
+            }
+            setModeUi(data.score_entry_mode || select.value);
+            showStatus(data.message || 'Score entry mode updated successfully.', false);
+          } catch (error) {
+            showStatus(error.message || 'Could not update score entry mode.', true);
+          } finally {
+            setBusy(false);
+          }
+        }
+
+        form.addEventListener('submit', function (event) {
+          event.preventDefault();
+          saveMode();
+        });
+
+        select.addEventListener('change', function () {
+          saveMode();
+        });
+
+        setModeUi(select.value);
       })();
     </script>
     <script id="dashboardTermEventsPayload" type="application/json">{{ dashboard_term_events_payload|tojson }}</script>
